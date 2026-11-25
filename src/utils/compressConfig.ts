@@ -239,6 +239,25 @@ export const SOCIAL_TEMPLATES: ReadonlyArray<SocialTemplateDef> = [
   },
 ]
 
+export function getCompressOutputTag(options: CompressOptions): string {
+  switch (options.socialTemplate) {
+    case 'tiktok-reels':
+      return 'tiktok-hd'
+    case 'whatsapp':
+      return 'wa-hd'
+    case 'youtube':
+      return 'youtube-hd'
+    case 'instagram':
+      return 'ig-reels'
+    case 'discord':
+      return 'discord-hd'
+    case 'email':
+      return 'email-ringan'
+    default:
+      return 'kompres'
+  }
+}
+
 export const VIDEO_CODEC_OPTIONS: ReadonlyArray<{
   value: CompressVideoCodec
   label: string
@@ -256,7 +275,7 @@ export const VIDEO_CODEC_OPTIONS: ReadonlyArray<{
   },
   {
     value: 'libx265',
-    label: 'H.265 (CPU / libx265 — Lebih kecil, lebih lambat)',
+    label: 'H.265 (CPU / libx265, lebih kecil & lebih lambat)',
     hint: 'Kompresi lebih hemat ukuran (~20-30% lebih kecil), namun waktu render lebih lambat.',
   },
   {

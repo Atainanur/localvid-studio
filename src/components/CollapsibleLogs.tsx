@@ -10,6 +10,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import type { PinnedLogSummary } from '../hooks/useFFmpeg'
+import { buildBrandedFilename } from '../utils/videoProcessing'
 
 interface CollapsibleLogsProps {
   logs: string[]
@@ -90,7 +91,7 @@ export function CollapsibleLogs({
   // [BUG-06] Unduh seluruh log + 4 field Ringkasan Tersemat secara konsisten ke berkas .txt
   const handleDownloadLogs = () => {
     const sections: string[] = [
-      '=== LocalVid Studio — Log Teknis FFmpeg ===',
+      '=== LocalVid Studio - Log Teknis FFmpeg ===',
       `Waktu Ekspor: ${new Date().toISOString()}`,
       '',
       '--- RINGKASAN TERSEMAT ---',
@@ -107,7 +108,7 @@ export function CollapsibleLogs({
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `localvid-studio-log-${Date.now()}.txt`
+    anchor.download = buildBrandedFilename(`log_${Date.now()}`, 'txt')
     document.body.appendChild(anchor)
     anchor.click()
     document.body.removeChild(anchor)

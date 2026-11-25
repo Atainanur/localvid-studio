@@ -121,6 +121,8 @@ export interface UseFFmpegReturn {
   terminate: () => void
   /** Menghapus daftar log di memori UI. */
   clearLogs: () => void
+  /** Membaca snapshot array log terbaru secara sinkron untuk inspeksi error (mis. stream audio kosong). */
+  getLatestLogs: () => string[]
   /** Mereset nilai progres (0%) dan pesan error terakhir tanpa menghentikan worker FFmpeg. */
   resetProcessState: () => void
   /** Menambahkan baris log sistem ke panel log FFmpeg. */
@@ -257,15 +259,18 @@ export function useFFmpeg(): UseFFmpegReturn {
   const trackedBlobUrlsRef = useRef<Set<string>>(new Set())
   // Blob URL internal engine (core/wasm/worker) - hanya dicabut saat terminate/unmount
   const engineBlobUrlsRef = useRef<string[]>([])
+  // Snapshot log sinkron agar caller dapat memeriksa error stderr tepat setelah exec() selesai
+  const logsRef = useRef<string[]>([])
 
   const appendLog = useCallback((message: string) => {
     const trimmed = message.trim()
     if (!trimmed || !isMountedRef.current) return
 
-    setLogs((prev) => {
-      const next = [...prev, trimmed]
-      return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next
-    })
+    const nextLogs = [...logsRef.current, trimmed]
+    logsRef.current =
+      nextLogs.length > MAX_LOG_LINES ? nextLogs.slice(nextLogs.length - MAX_LOG_LINES) : nextLogs
+
+    setLogs(logsRef.current)
   }, [])
 
   const updateProgressMonotonic = useCallback((nextPercent: number) => {
@@ -278,9 +283,12 @@ export function useFFmpeg(): UseFFmpegReturn {
   }, [])
 
   const clearLogs = useCallback(() => {
+    logsRef.current = []
     setLogs([])
     setPinnedLogSummary(EMPTY_PINNED_SUMMARY)
   }, [])
+
+  const getLatestLogs = useCallback(() => logsRef.current, [])
 
   const setExpectedDuration = useCallback((durationSeconds: number | null) => {
     const valid =
@@ -862,6 +870,7 @@ export function useFFmpeg(): UseFFmpegReturn {
     cancel,
     terminate,
     clearLogs,
+    getLatestLogs,
     resetProcessState,
     addLog: appendLog,
     getFFmpegInstance,

@@ -1,14 +1,19 @@
 import { useRef, useState, type ChangeEvent, type DragEvent } from 'react'
 import {
   AlertTriangle,
+  Check,
+  ChevronRight,
   Clock,
   FileVideo,
   HardDrive,
+  Layers,
   Maximize2,
   Replace,
+  RotateCcw,
   Sparkles,
   Trash2,
   UploadCloud,
+  X,
   Zap,
 } from 'lucide-react'
 import {
@@ -18,26 +23,36 @@ import {
   formatFileSizeMB,
   getRamWarningInfo,
   isSupportedVideoFile,
+  type EditPipelineStep,
+  type FeatureTabId,
   type SelectedVideo,
 } from '../utils/videoProcessing'
 
 interface UploadZoneProps {
   selectedVideo: SelectedVideo | null
+  pipelineSteps: readonly EditPipelineStep[]
   isMobile: boolean
   disabled: boolean
   isReadingMetadata: boolean
   onSelectFile: (file: File) => void
   onClearFile: () => void
+  onSelectStepTab: (tabId: FeatureTabId) => void
+  onRemoveStep: (stepId: string) => void
+  onRevertToOriginal: () => void
   onSuggestFastRemux: () => void
 }
 
 export function UploadZone({
   selectedVideo,
+  pipelineSteps,
   isMobile,
   disabled,
   isReadingMetadata,
   onSelectFile,
   onClearFile,
+  onSelectStepTab,
+  onRemoveStep,
+  onRevertToOriginal,
   onSuggestFastRemux,
 }: UploadZoneProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -143,7 +158,7 @@ export function UploadZone({
             </h2>
             <p className="mt-1.5 max-w-md text-sm leading-relaxed text-slate-600">
               {isMobile
-                ? 'Langsung diolah 100% lokal di perangkat Anda — cepat, ringan, dan bebas unggah ke server.'
+                ? 'Langsung diolah 100% lokal di perangkat Anda, cepat, ringan, dan bebas unggah ke server.'
                 : 'Atau tekan tombol di bawah untuk memilih file dari komputer. 100% diproses lokal di browser Anda.'}
             </p>
 
@@ -188,10 +203,17 @@ export function UploadZone({
 
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200">
-                    <Sparkles aria-hidden="true" className="h-3 w-3" />
-                    Siap Diolah
-                  </span>
+                  {pipelineSteps.length > 0 ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200">
+                      <Layers aria-hidden="true" className="h-3 w-3" />
+                      {pipelineSteps.length} Efek Terpasang
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200">
+                      <Sparkles aria-hidden="true" className="h-3 w-3" />
+                      Siap Diolah
+                    </span>
+                  )}
                   <span className="shrink-0 whitespace-nowrap rounded-full bg-blue-50 px-2.5 py-0.5 font-mono text-[11px] font-semibold uppercase text-blue-700 ring-1 ring-blue-200">
                     .{selectedVideo.extension || 'video'}
                   </span>
@@ -255,6 +277,67 @@ export function UploadZone({
               </button>
             </div>
           </div>
+
+          {/* Bar Alur Edit Ringkas (klik chip pindah ke tab, klik X hapus efek) */}
+          {pipelineSteps.length > 0 && (
+            <div className="animate-lv-fade-up mt-3.5 flex flex-col gap-2.5 border-t border-slate-200/80 pt-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
+                <span className="font-bold text-slate-700">Alur Edit:</span>
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-700 ring-1 ring-slate-200/80">
+                  Video Asli
+                </span>
+                {pipelineSteps.map((step, idx) => {
+                  const isLatest = idx === pipelineSteps.length - 1
+                  return (
+                    <span key={step.id} className="inline-flex items-center gap-1">
+                      <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" />
+                      <span
+                        className={`inline-flex items-center rounded-full ring-1 transition-colors ${
+                          isLatest
+                            ? 'bg-emerald-50 text-emerald-900 ring-emerald-300'
+                            : 'bg-slate-50 text-slate-700 ring-slate-200'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => onSelectStepTab(step.tabId)}
+                          title={`Buka tab ${step.tabLabel} (Tahap ke-${idx + 1}: ${step.summary})`}
+                          className="inline-flex cursor-pointer touch-manipulation items-center gap-1 rounded-l-full py-1 pl-2.5 pr-1.5 font-semibold transition-colors hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <Check
+                            aria-hidden="true"
+                            className="h-3 w-3 shrink-0 stroke-[2.75] text-emerald-600"
+                          />
+                          <span>{step.tabLabel}</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => onRemoveStep(step.id)}
+                          aria-label={`Hapus efek ${step.tabLabel}`}
+                          title={`Hapus efek ${step.tabLabel}`}
+                          className="inline-flex h-6 w-6 cursor-pointer touch-manipulation items-center justify-center rounded-r-full pr-1 text-slate-400 transition-colors hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <X aria-hidden="true" className="h-3 w-3" />
+                        </button>
+                      </span>
+                    </span>
+                  )
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={onRevertToOriginal}
+                disabled={disabled}
+                className="inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 self-start rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 transition-colors hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
+              >
+                <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
+                <span>Reset ke Video Asli</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 

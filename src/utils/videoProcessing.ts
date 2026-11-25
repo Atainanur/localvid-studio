@@ -1,4 +1,11 @@
-export type FeatureTabId = 'convert' | 'compress' | 'enhance' | 'stabilize' | 'ai-upscale'
+export type FeatureTabId =
+  | 'convert'
+  | 'compress'
+  | 'enhance'
+  | 'stabilize'
+  | 'ai-upscale'
+  | 'audio-denoise'
+  | 'auto-chroma'
 
 export type OutputFormat = 'mp4' | 'mov' | 'webm' | 'mkv'
 
@@ -87,6 +94,24 @@ export type ResultContextualDetails =
       targetFps: number
       fallbackNotice?: string
     }
+  | {
+      kind: 'audio-denoise'
+      presetLabel: string
+      denoiseSummary: string
+      vocalOptions: string[]
+      processMode: string
+      outputMode: 'video-copy' | 'audio-mp3'
+      fallbackCodecLabel?: string
+    }
+  | {
+      kind: 'auto-chroma'
+      templateOrModeLabel: string
+      bgModeLabel: string
+      resolutionLabel: string
+      totalFrames: number
+      targetFps: number
+      delegateLabel: string
+    }
 
 export interface ProcessedVideoResult {
   url: string
@@ -102,6 +127,69 @@ export interface ProcessedVideoResult {
   summaryNote: string
   elapsedMs: number
   details: ResultContextualDetails
+}
+
+export interface EditPipelineStep {
+  id: string
+  tabId: FeatureTabId
+  tabLabel: string
+  summary: string
+  /** Snapshot file sebelum tahap ini dijalankan (untuk undo / replace bersih) */
+  inputFile: File
+  /** Metadata file input saat tahap dijalankan agar estimator akurat saat ubah setelan */
+  inputMetadata: VideoMetadata
+  /** File hasil setelah tahap ini selesai */
+  outputFile: File
+  /** Metadata hasil tanpa Blob URL sementara (URL dibuat & dicabut aman saat ditampilkan) */
+  resultMeta: Omit<ProcessedVideoResult, 'url'>
+  /** Salinan pengaturan tab saat diproses untuk dipulihkan otomatis saat ubah setelan */
+  optionsSnapshot: unknown
+  timestamp: number
+}
+
+export const FEATURE_TAB_LABELS: Record<FeatureTabId, string> = {
+  convert: 'Ubah Ekstensi',
+  compress: 'Kompres Video',
+  enhance: 'Jernihkan & HD',
+  stabilize: 'Stabilizer',
+  'ai-upscale': 'AI HD Upscaler',
+  'audio-denoise': 'Bersihkan Audio',
+  'auto-chroma': 'Auto Green Screen',
+}
+
+export const NATIVE_DECODER_EXTENSIONS = new Set(['mp4', 'webm', 'mov'])
+
+export function isAudioOnlyResultFile(
+  result: Pick<ProcessedVideoResult, 'details' | 'mimeType' | 'blob' | 'fileName'>,
+): boolean {
+  if (result.details.kind === 'audio-denoise' && result.details.outputMode === 'audio-mp3') {
+    return true
+  }
+  const mime = (result.mimeType || result.blob.type || '').toLowerCase()
+  return mime.startsWith('audio/') || result.fileName.toLowerCase().endsWith('.mp3')
+}
+
+export function getChainStepSummary(result: Pick<ProcessedVideoResult, 'details'>): string {
+  const { details } = result
+  switch (details.kind) {
+    case 'convert':
+      return details.targetFormat
+    case 'compress':
+      return details.modeOrTemplate
+    case 'enhance':
+      if (details.colorFilterName && details.colorFilterName !== 'Tanpa Filter') {
+        return details.colorFilterName
+      }
+      return details.activeEnhancements[0] ?? 'Penjernihan'
+    case 'stabilize':
+      return details.levelLabel
+    case 'ai-upscale':
+      return details.targetResolution
+    case 'audio-denoise':
+      return details.presetLabel
+    case 'auto-chroma':
+      return details.templateOrModeLabel.split(' • ')[0] || details.bgModeLabel
+  }
 }
 
 export interface RamWarningInfo {
@@ -480,17 +568,39 @@ export function getMimeTypeForFormat(format: OutputFormat): string {
   return found?.mimeType ?? 'video/mp4'
 }
 
+export const BRAND_FILENAME_PREFIX = 'Github - Atainanur'
+
+/**
+ * Membangun nama file unduhan terpusat dengan branding "Github - Atainanur_<tag>.<ext>".
+ * - Menghapus karakter ilegal sistem file Windows/Android/iOS (: / \ * ? " < > |).
+ * - Menormalisasi ekstensi agar tidak pernah menghasilkan titik ganda (..mp4).
+ * - Anti penumpukan prefix untuk pipeline edit berantai (tidak pernah menempelkan nama file lama).
+ */
+export function buildBrandedFilename(tag: string, ext: string): string {
+  const safeTag = tag
+    .replace(/[\x00-\x1f<>:"/\\|?*]+/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/_{2,}/g, '_')
+    .replace(/^[\s._-]+|[\s._-]+$/g, '')
+    .toLowerCase()
+
+  const safeExt = ext
+    .replace(/^\.+/, '')
+    .replace(/[\x00-\x1f<>:"/\\|?*.\s]+/g, '')
+    .toLowerCase()
+
+  const finalTag = safeTag || 'video'
+  const finalExt = safeExt || 'mp4'
+  return `${BRAND_FILENAME_PREFIX}_${finalTag}.${finalExt}`
+}
+
 export function buildOutputFileName(
-  originalName: string,
+  _originalName: string,
   suffix: string,
-  format: OutputFormat,
+  format: OutputFormat | 'mp3',
 ): string {
-  const dotIdx = originalName.lastIndexOf('.')
-  const baseName = (dotIdx > 0 ? originalName.slice(0, dotIdx) : originalName)
-    .replace(/[^\w\-. ]+/g, '_')
-    .trim()
-  const safeBase = baseName || 'localvid_video'
-  return `${safeBase}_${suffix}.${format}`
+  return buildBrandedFilename(suffix, format)
 }
 
 export function buildFastRemuxArgs(

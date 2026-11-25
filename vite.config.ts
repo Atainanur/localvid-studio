@@ -9,7 +9,14 @@ export default defineConfig({
     conditions: ['onnxruntime-web-use-extern-wasm', ...defaultClientConditions],
   },
   optimizeDeps: {
-    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util', 'onnxruntime-web', 'onnxruntime-web/webgpu'],
+    exclude: [
+      '@ffmpeg/ffmpeg',
+      '@ffmpeg/util',
+      'onnxruntime-web',
+      'onnxruntime-web/webgpu',
+      '@mediapipe/tasks-vision',
+      '@huggingface/transformers',
+    ],
   },
   server: {
     headers: {

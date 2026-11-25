@@ -3,7 +3,9 @@ import {
   AlertTriangle,
   ArrowLeftRight,
   ArrowRight,
+  AudioLines,
   Check,
+  CheckCircle2,
   Clock,
   Cpu,
   Eye,
@@ -16,9 +18,12 @@ import {
   SlidersHorizontal,
   Sparkles,
   SunMedium,
+  Trash2,
   Tv,
+  UserSquare2,
   Video,
   Wand2,
+  X,
   Zap,
 } from 'lucide-react'
 import {
@@ -32,6 +37,8 @@ import {
   type AiModelPresetId,
   type AiUpscaleSettings,
 } from '../utils/aiUpscalerConfig'
+import type { AudioDenoiseOptions } from '../utils/audioDenoiseConfig'
+import type { ChromaKeyOptions } from '../utils/chromaKeyConfig'
 import type { CompressOptions } from '../utils/compressConfig'
 import type { DeviceType, WebGPUState } from '../utils/environment'
 import {
@@ -48,12 +55,15 @@ import {
   SCALE_ALGORITHM_OPTIONS,
   STABILIZER_OPTIONS,
   type ColorFilterPresetId,
+  type EditPipelineStep,
   type EnhanceOptions,
   type FeatureTabId,
   type OutputFormat,
   type ScaleAlgorithm,
   type StabilizerLevel,
 } from '../utils/videoProcessing'
+import { AudioDenoiseTabPanel } from './AudioDenoiseTabPanel'
+import { ChromaKeyTabPanel } from './ChromaKeyTabPanel'
 import { CompressTabPanel } from './CompressTabPanel'
 
 interface FeatureTabsProps {
@@ -93,6 +103,21 @@ interface FeatureTabsProps {
   // Tab 5: AI HD Upscaler (Beta)
   aiSettings: AiUpscaleSettings
   onAiSettingsChange: (settings: AiUpscaleSettings) => void
+
+  // Tab 6: Bersihkan Audio (Audio Noise Reduction)
+  audioDenoiseOptions: AudioDenoiseOptions
+  onAudioDenoiseOptionsChange: (options: AudioDenoiseOptions) => void
+
+  // Tab 7: Auto Green Screen (Penghapus & Pengganti Background)
+  chromaKeyOptions: ChromaKeyOptions
+  onChromaKeyOptionsChange: (options: ChromaKeyOptions) => void
+  onLog?: (message: string) => void
+
+  // Pipeline efek terpasang (non-destructive snapshot stack)
+  pipelineSteps: readonly EditPipelineStep[]
+  nativeFormatWarning: boolean
+  onViewStepResult: (stepId: string) => void
+  onRemoveStep: (stepId: string) => void
 
   // Clean Result View: bila hasil ekspor tersedia, ganti form pengaturan dengan tampilan hasil bersih
   resultView?: ReactNode
@@ -142,6 +167,20 @@ const TABS: ReadonlyArray<{
     iconBg: 'bg-violet-100 text-violet-700',
     Icon: Cpu,
   },
+  {
+    id: 'audio-denoise',
+    label: 'Bersihkan Audio',
+    activeAccent: 'text-fuchsia-700 ring-fuchsia-200',
+    iconBg: 'bg-fuchsia-100 text-fuchsia-700',
+    Icon: AudioLines,
+  },
+  {
+    id: 'auto-chroma',
+    label: 'Auto Green Screen',
+    activeAccent: 'text-green-700 ring-green-200',
+    iconBg: 'bg-green-100 text-green-700',
+    Icon: UserSquare2,
+  },
 ]
 
 export function FeatureTabs({
@@ -171,6 +210,15 @@ export function FeatureTabs({
   onStabilizerLevelChange,
   aiSettings,
   onAiSettingsChange,
+  audioDenoiseOptions,
+  onAudioDenoiseOptionsChange,
+  chromaKeyOptions,
+  onChromaKeyOptionsChange,
+  onLog,
+  pipelineSteps,
+  nativeFormatWarning,
+  onViewStepResult,
+  onRemoveStep,
   resultView,
 }: FeatureTabsProps) {
   const [compareOriginal, setCompareOriginal] = useState(false)
@@ -275,54 +323,93 @@ export function FeatureTabs({
       aria-label="Pengaturan fitur video"
       className="bento-card overflow-hidden rounded-3xl bg-white"
     >
-      {/* Baris Navigasi 5 Tab Sejajar — Smooth Horizontal Scroll di HP, Sejajar Penuh di Desktop */}
+      {/* Baris Navigasi 7 Tab - Horizontal Scroll halus di Mobile, Flex Wrap rapi di Desktop */}
       <div className="border-b border-slate-200/80 bg-slate-50/90 p-2 sm:p-2.5">
         <div
           role="tablist"
           aria-label="Fitur pengolah video"
-          className="flex flex-nowrap gap-2 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:grid lg:grid-cols-5 lg:overflow-visible lg:pb-0"
+          className="flex flex-nowrap gap-2 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex-wrap lg:justify-center lg:gap-1.5 lg:overflow-visible lg:pb-0"
         >
           {TABS.map(({ id, label, badge, activeAccent, iconBg, Icon }) => {
             const isActive = activeTab === id
+            const stepIndex = pipelineSteps.findIndex((s) => s.tabId === id)
+            const installedStep = stepIndex >= 0 ? pipelineSteps[stepIndex] : null
+            const activeTextClass = activeAccent.split(' ')[0]
+
             return (
-              <button
+              <div
                 key={id}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                disabled={disabled}
-                title={
-                  disabled
-                    ? 'Proses sedang berjalan — tunggu selesai atau klik Batalkan untuk pindah tab'
-                    : undefined
-                }
-                onClick={() => onTabChange(id)}
-                className={`flex min-h-11 shrink-0 snap-start cursor-pointer touch-manipulation items-center justify-center gap-1.5 whitespace-nowrap rounded-2xl px-3.5 py-2 text-xs font-bold transition-[background-color,color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 lg:min-w-0 lg:px-2.5 ${
+                className={`inline-flex min-h-11 shrink-0 snap-start items-center rounded-2xl transition-[background-color,color,box-shadow,border-color] duration-150 ${
                   isActive
-                    ? `bg-white shadow-sm ring-1 ${activeAccent}`
-                    : 'text-slate-600 hover:bg-white/75 hover:text-slate-900'
+                    ? `bg-white shadow-sm ring-1 ${installedStep ? 'ring-emerald-400' : activeAccent}`
+                    : installedStep
+                      ? 'bg-emerald-50/80 ring-1 ring-emerald-300/80 hover:bg-emerald-50'
+                      : 'hover:bg-white/75'
                 }`}
               >
-                <span
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors ${
-                    isActive ? iconBg : 'bg-slate-200/70 text-slate-500'
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  disabled={disabled}
+                  title={
+                    disabled
+                      ? 'Proses sedang berjalan, tunggu selesai atau klik Batalkan untuk pindah tab'
+                      : installedStep
+                        ? `${label} sudah terpasang (Tahap ke-${stepIndex + 1}: ${installedStep.summary}). Klik untuk ubah setelan.`
+                        : undefined
+                  }
+                  onClick={() => onTabChange(id)}
+                  className={`flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 whitespace-nowrap rounded-2xl py-2 pl-3 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
+                    installedStep ? 'pr-1.5' : 'pr-3 lg:px-3.5'
+                  } ${
+                    isActive
+                      ? activeTextClass
+                      : installedStep
+                        ? 'text-emerald-900'
+                        : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <Icon aria-hidden="true" className="h-4 w-4" />
-                </span>
-                <span>{label}</span>
-                {badge && (
                   <span
-                    className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                      isActive
-                        ? 'bg-violet-600 text-white'
-                        : 'bg-violet-100 text-violet-700'
+                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                      isActive || installedStep ? iconBg : 'bg-slate-200/70 text-slate-500'
                     }`}
                   >
-                    {badge}
+                    <Icon aria-hidden="true" className="h-4 w-4" />
                   </span>
+                  <span>{label}</span>
+                  {badge && !installedStep && (
+                    <span
+                      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                        isActive ? 'bg-violet-600 text-white' : 'bg-violet-100 text-violet-700'
+                      }`}
+                    >
+                      {badge}
+                    </span>
+                  )}
+                  {installedStep && (
+                    <span
+                      aria-label="Efek terpasang"
+                      className="inline-flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
+                    >
+                      <Check aria-hidden="true" className="h-3 w-3 stroke-[2.75]" />
+                    </span>
+                  )}
+                </button>
+
+                {installedStep && (
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onRemoveStep(installedStep.id)}
+                    aria-label={`Hapus efek ${label}`}
+                    title={`Hapus efek ${label}`}
+                    className="mr-1.5 inline-flex h-6 w-6 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full text-emerald-700/80 transition-colors hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <X aria-hidden="true" className="h-3.5 w-3.5" />
+                  </button>
                 )}
-              </button>
+              </div>
             )
           })}
         </div>
@@ -334,6 +421,94 @@ export function FeatureTabs({
           resultView
         ) : (
           <>
+            {/* Bar Kontrol Efek Aktif saat Tab yang Sudah Terpasang dibuka di mode ubah setelan */}
+            {(() => {
+              const activeStepIdx = pipelineSteps.findIndex((s) => s.tabId === activeTab)
+              if (activeStepIdx < 0) return null
+              const activeStep = pipelineSteps[activeStepIdx]
+              return (
+                <div
+                  role="status"
+                  className="animate-lv-fade-up mb-5 flex flex-col gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white">
+                      <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5" />
+                      <span>Efek Terpasang (Tahap ke-{activeStepIdx + 1})</span>
+                    </span>
+                    <span className="font-semibold text-emerald-950">{activeStep.summary}</span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onViewStepResult(activeStep.id)}
+                      className="inline-flex min-h-9 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3 py-1.5 text-xs font-bold text-emerald-900 shadow-2xs transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Eye aria-hidden="true" className="h-3.5 w-3.5" />
+                      <span>Lihat Hasil</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onRemoveStep(activeStep.id)}
+                      className="inline-flex min-h-9 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+                      <span>Hapus Efek</span>
+                    </button>
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* Pengaman Kontainer Native untuk Tab 5 (AI HD Upscaler) dan Tab 7 (Auto Green Screen) */}
+            {nativeFormatWarning && (
+              <div
+                role="alert"
+                className="animate-lv-fade-up mb-5 flex flex-col gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3.5 text-xs leading-relaxed text-amber-950 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle
+                    aria-hidden="true"
+                    className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
+                  />
+                  <span>
+                    Tab ini membutuhkan format <strong className="font-bold">MP4, MOV, atau WebM</strong>.
+                    Hapus tahap Ubah Ekstensi atau ubah ke MP4 terlebih dahulu.
+                  </span>
+                </div>
+                {(() => {
+                  const convertStep = pipelineSteps.find((s) => s.tabId === 'convert')
+                  if (convertStep) {
+                    return (
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => onRemoveStep(convertStep.id)}
+                        className="inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold text-amber-950 shadow-2xs transition-colors hover:bg-amber-100 disabled:opacity-50"
+                      >
+                        <Trash2 aria-hidden="true" className="h-3.5 w-3.5 text-rose-600" />
+                        <span>Hapus Tahap Ubah Ekstensi</span>
+                      </button>
+                    )
+                  }
+                  return (
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onTabChange('convert')}
+                      className="inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold text-amber-950 shadow-2xs transition-colors hover:bg-amber-100 disabled:opacity-50"
+                    >
+                      <ArrowLeftRight aria-hidden="true" className="h-3.5 w-3.5 text-blue-600" />
+                      <span>Buka Tab Ubah Ekstensi</span>
+                    </button>
+                  )
+                })()}
+              </div>
+            )}
+
         {/* TAB 1: UBAH EKSTENSI */}
         {activeTab === 'convert' && (
           <div className="animate-lv-fade-up flex flex-col gap-5">
@@ -610,7 +785,7 @@ export function FeatureTabs({
                     2. Filter &amp; Color Grading
                   </h3>
                   <p className="mt-0.5 text-xs leading-relaxed text-slate-600 sm:text-sm">
-                    Pratinjau warna langsung pada video sebelum render — 100% kompatibel
+                    Pratinjau warna langsung pada video sebelum render, 100% kompatibel
                     FFmpeg.wasm tanpa file LUT eksternal.
                   </p>
                 </div>
@@ -946,7 +1121,7 @@ export function FeatureTabs({
           </div>
         )}
 
-        {/* TAB 5: AI HD UPSCALER (BETA) — WebGPU ONNX + WebGPU Shader + Fallback Penuh WebGL2 */}
+        {/* TAB 5: AI HD UPSCALER (BETA) - WebGPU ONNX + WebGPU Shader + Fallback Penuh WebGL2 */}
         {activeTab === 'ai-upscale' && (
           <div className="animate-lv-fade-up flex flex-col gap-4">
             {!aiAnyGpuAvailable ? (
@@ -1456,6 +1631,34 @@ export function FeatureTabs({
               </>
             )}
           </div>
+        )}
+
+        {/* TAB 6: BERSIHKAN AUDIO (AUDIO NOISE REDUCTION) */}
+        {activeTab === 'audio-denoise' && (
+          <AudioDenoiseTabPanel
+            options={audioDenoiseOptions}
+            onChange={onAudioDenoiseOptionsChange}
+            disabled={disabled}
+            originalSizeBytes={selectedVideoSizeBytes}
+            sourceDurationSec={selectedVideoDuration}
+            sourceExtension={selectedVideoExtension}
+          />
+        )}
+
+        {/* TAB 7: AUTO GREEN SCREEN (PENGHAPUS & PENGGANTI BACKGROUND) */}
+        {activeTab === 'auto-chroma' && (
+          <ChromaKeyTabPanel
+            options={chromaKeyOptions}
+            onChange={onChromaKeyOptionsChange}
+            isMobile={isMobile}
+            disabled={disabled}
+            originalSizeBytes={selectedVideoSizeBytes}
+            sourceDurationSec={selectedVideoDuration}
+            sourceDimensions={selectedVideoDimensions}
+            sourcePreviewUrl={sourcePreviewUrl}
+            onSwitchToCompress={() => onTabChange('compress')}
+            onLog={onLog}
+          />
         )}
           </>
         )}

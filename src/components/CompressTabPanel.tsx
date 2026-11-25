@@ -218,7 +218,7 @@ export function CompressTabPanel({
       // [NEW-08] Tampilkan notice ramah bila input kosong atau tidak valid (".", ",") agar tidak reset diam-diam
       const displayBad = rawValue.trim() ? `"${rawValue.trim()}"` : 'kosong'
       setTargetOutOfRangeNotice(
-        `Nilai ${displayBad} tidak valid — dikembalikan ke ${clampedTargetMB.toFixed(1)} MB.`,
+        `Nilai ${displayBad} tidak valid, dikembalikan ke ${clampedTargetMB.toFixed(1)} MB.`,
       )
       setTargetSizeText(clampedTargetMB.toFixed(1))
       return
@@ -226,13 +226,13 @@ export function CompressTabPanel({
 
     if (parsed < bounds.minMB) {
       setTargetOutOfRangeNotice(
-        `Nilai ${parsed} MB terlalu kecil untuk durasi video ini — otomatis disesuaikan ke batas aman minimal ${bounds.minMB.toFixed(1)} MB.`,
+        `Nilai ${parsed} MB terlalu kecil untuk durasi video ini, otomatis disesuaikan ke batas aman minimal ${bounds.minMB.toFixed(1)} MB.`,
       )
       setTargetSizeText(bounds.minMB.toFixed(1))
       update({ targetSizeMB: bounds.minMB })
     } else if (parsed > bounds.maxMB) {
       setTargetOutOfRangeNotice(
-        `Nilai ${parsed} MB melebihi batas maksimal (95% ukuran asli) — otomatis disesuaikan ke ${bounds.maxMB.toFixed(1)} MB.`,
+        `Nilai ${parsed} MB melebihi batas maksimal (95% ukuran asli), otomatis disesuaikan ke ${bounds.maxMB.toFixed(1)} MB.`,
       )
       setTargetSizeText(bounds.maxMB.toFixed(1))
       update({ targetSizeMB: bounds.maxMB })
