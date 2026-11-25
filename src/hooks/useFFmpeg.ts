@@ -83,6 +83,8 @@ export interface UseFFmpegReturn {
   setExpectedDuration: (durationSeconds: number | null) => void
   /** [BUG-06] Menyematkan deskripsi perintah aktif pada ringkasan log tersemat. */
   setPinnedCommand: (command: string | null) => void
+  /** [BUG-06] Menyematkan info durasi pada ringkasan log tersemat (termasuk untuk Tab 5 AI/GPU). */
+  setPinnedDurationLine: (durationLine: string | null) => void
   /** [BUG-06] Menyematkan ringkasan akhir proses pada ringkasan log tersemat. */
   setPinnedFinalSummary: (summary: string | null) => void
   /**
@@ -296,7 +298,17 @@ export function useFFmpeg(): UseFFmpegReturn {
 
   const setPinnedCommand = useCallback((command: string | null) => {
     if (!isMountedRef.current) return
-    setPinnedLogSummary((prev) => ({ ...prev, command }))
+    setPinnedLogSummary((prev) => ({
+      ...prev,
+      command,
+      firstError: null,
+      finalSummary: null,
+    }))
+  }, [])
+
+  const setPinnedDurationLine = useCallback((durationLine: string | null) => {
+    if (!isMountedRef.current) return
+    setPinnedLogSummary((prev) => ({ ...prev, durationLine }))
   }, [])
 
   const setPinnedFinalSummary = useCallback((finalSummary: string | null) => {
@@ -461,11 +473,6 @@ export function useFFmpeg(): UseFFmpegReturn {
 
         if (!isExecutingRef.current) return
 
-        // Catat timestamp aktivitas terbaru untuk watchdog liveness (BUG-07)
-        if (isMountedRef.current) {
-          setLastActivityAt(Date.now())
-        }
-
         // Tangkap baris Duration: untuk perhitungan progres & ringkasan log tersemat (BUG-04 & BUG-06)
         const durationMatch = DURATION_REGEX.exec(message)
         if (durationMatch) {
@@ -483,7 +490,9 @@ export function useFFmpeg(): UseFFmpegReturn {
           if (isMountedRef.current) {
             const cleanDurationLine = message.trim()
             setPinnedLogSummary((prev) =>
-              prev.durationLine ? prev : { ...prev, durationLine: cleanDurationLine },
+              prev.durationLine && !prev.durationLine.startsWith('Durasi sumber:')
+                ? prev
+                : { ...prev, durationLine: cleanDurationLine },
             )
           }
         }
@@ -498,12 +507,13 @@ export function useFFmpeg(): UseFFmpegReturn {
           setPinnedLogSummary((prev) => (prev.firstError ? prev : { ...prev, firstError: cleanErr }))
         }
 
-        // Tangkap nomor frame aktif (BUG-04 & BUG-07)
+        // Tangkap nomor frame aktif & perbarui lastActivityAt hanya saat kemajuan nyata (BUG-04 & NEW-07)
         const frameMatch = FRAME_REGEX.exec(message)
         if (frameMatch && isMountedRef.current) {
           const parsedFrame = Number.parseInt(frameMatch[1], 10)
           if (Number.isFinite(parsedFrame) && parsedFrame > 0) {
             setCurrentFrame(parsedFrame)
+            setLastActivityAt(Date.now())
           }
         }
 
@@ -514,6 +524,7 @@ export function useFFmpeg(): UseFFmpegReturn {
           if (currentSec >= 0) {
             if (isMountedRef.current) {
               setCurrentTimeLabel(`${timeMatch[1]}:${timeMatch[2]}:${timeMatch[3]}`)
+              setLastActivityAt(Date.now())
             }
             if (expectedDurationRef.current && expectedDurationRef.current > 0) {
               const pct = (currentSec / expectedDurationRef.current) * 100
@@ -751,9 +762,11 @@ export function useFFmpeg(): UseFFmpegReturn {
         setCurrentFrame(null)
         setCurrentTimeLabel(null)
         setLastActivityAt(Date.now())
+        const fallbackDurationText =
+          resolvedDuration !== null ? `Durasi sumber: ${resolvedDuration.toFixed(1)} detik` : null
         setPinnedLogSummary({
           command: `ffmpeg ${args.join(' ')}`,
-          durationLine: null,
+          durationLine: fallbackDurationText,
           firstError: null,
           finalSummary: null,
         })
@@ -838,6 +851,7 @@ export function useFFmpeg(): UseFFmpegReturn {
     loadEngine,
     setExpectedDuration,
     setPinnedCommand,
+    setPinnedDurationLine,
     setPinnedFinalSummary,
     exec,
     writeInputFile,

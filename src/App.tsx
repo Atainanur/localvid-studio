@@ -30,6 +30,7 @@ import {
   isAiWebGpuSupported,
   isDurationWithinAiLimit,
   isValidModelUrl,
+  MAX_AI_DURATION_SECONDS,
   type AiFrameProgress,
   type AiUpscaleSettings,
 } from './utils/aiUpscalerConfig'
@@ -61,6 +62,7 @@ import {
   buildStabilizerArgs,
   buildStabilizerFilterChain,
   computeTarget1080pResolution,
+  formatDuration,
   getColorFilterPreset,
   getFileExtension,
   getMimeTypeForFormat,
@@ -86,7 +88,6 @@ export default function App() {
     hasExpectedDuration,
     currentFrame: ffmpegCurrentFrame,
     currentTimeLabel: ffmpegCurrentTimeLabel,
-    lastActivityAt: ffmpegLastActivityAt,
     logs,
     pinnedLogSummary,
     engineMode,
@@ -99,6 +100,7 @@ export default function App() {
     loadEngine,
     setExpectedDuration,
     setPinnedCommand,
+    setPinnedDurationLine,
     setPinnedFinalSummary,
     exec,
     writeInputFile,
@@ -207,19 +209,19 @@ export default function App() {
   const aiDurationOk = isDurationWithinAiLimit(selectedVideo?.metadata.duration ?? null)
   const isBusy = isLoadingEngine || isPreparing || isProcessing || isAiRunning
 
-  // [BUG-07] Watchdog liveness: catat setiap aktivitas log/frame dan hitung durasi diam
+  // [BUG-07 & NEW-07] Watchdog liveness: reset idleSeconds HANYA saat terjadi kemajuan nyata
+  // (bukan setiap baris log mentah) agar proses macet yang mencetak log berulang tetap terdeteksi
   useEffect(() => {
     if (!isBusy) return
     lastWatchdogActivityRef.current = Date.now()
     setIdleSeconds(0)
   }, [
     isBusy,
-    ffmpegLastActivityAt,
     progress,
+    ffmpegCurrentFrame,
+    ffmpegCurrentTimeLabel,
     aiFrameProgress?.currentFrame,
     aiFrameProgress?.percent,
-    statusStage,
-    logs.length,
   ])
 
   useEffect(() => {
@@ -499,7 +501,16 @@ export default function App() {
         setPinnedCommand(
           `AI/GPU Upscaler (${effectiveAiSettings.enginePreference}, ${effectiveAiSettings.targetFps} fps, 1080p=${String(
             effectiveAiSettings.normalizeTo1080p,
-          )})`,
+          )}, smartCap=${String(effectiveAiSettings.smartSizeCap)})`,
+        )
+        const aiEffectiveDur =
+          durationSec !== null && Number.isFinite(durationSec) && durationSec > 0
+            ? Math.min(durationSec, MAX_AI_DURATION_SECONDS)
+            : null
+        setPinnedDurationLine(
+          aiEffectiveDur !== null
+            ? `Durasi video sumber: ${formatDuration(aiEffectiveDur)} (${aiEffectiveDur.toFixed(1)} detik)`
+            : 'Tidak terdeteksi',
         )
 
         registerTempFile(inputName)
@@ -563,6 +574,7 @@ export default function App() {
           mimeType,
           outputSizeBytes: blob.size,
           originalSizeBytes: selectedVideo.sizeBytes,
+          durationSeconds: aiEffectiveDur,
           feature: 'ai-upscale',
           usedFallbackEncode: false,
           summaryNote: `${aiOutcome.backendName} • ${aiOutcome.totalFrames} frame (${aiOutcome.targetWidth}×${aiOutcome.targetHeight})`,
@@ -592,6 +604,7 @@ export default function App() {
       let usedFallbackEncode = false
       let suffix = 'processed'
       let summaryNote = 'Diproses dengan LocalVid Studio'
+      let resultDurationSec: number | null = durationSec
       let resultDetails: ResultContextualDetails = {
         kind: 'convert',
         sourceFormat: `.${inputExt.toUpperCase()}`,
@@ -731,6 +744,7 @@ export default function App() {
           )}`,
         )
         exitCode = await exec(built.args, undefined, built.effectiveDurationSec)
+        resultDurationSec = built.effectiveDurationSec
         summaryNote =
           activeTpl && activeTpl.id !== 'custom'
             ? `Template ${activeTpl.name} (.${targetFormat.toUpperCase()} • ${modeDesc})`
@@ -916,6 +930,7 @@ export default function App() {
         mimeType,
         outputSizeBytes: blob.size,
         originalSizeBytes: selectedVideo.sizeBytes,
+        durationSeconds: resultDurationSec,
         feature: activeTab,
         usedFallbackEncode,
         summaryNote,
@@ -928,6 +943,7 @@ export default function App() {
         const message =
           err instanceof Error ? err.message : 'Terjadi kesalahan saat memproses video.'
         setProcessError(message)
+        setPinnedFinalSummary(`Gagal: ${message}`)
         await cleanupMemory()
       }
     } finally {
@@ -942,7 +958,15 @@ export default function App() {
   const DeviceIcon = deviceType === 'Desktop' ? Monitor : Smartphone
   const displayError = processError ?? engineError
 
-  const displayedPercent = aiFrameProgress ? aiFrameProgress.percent : progress
+  // [BUG-04] Satu sumber kebenaran persentase & mode indeterminate untuk teks dan batang visual
+  const displayedPercent = Math.min(
+    100,
+    Math.max(0, Math.round(aiFrameProgress ? aiFrameProgress.percent : progress)),
+  )
+  const isIndeterminateProgress =
+    isLoadingEngine ||
+    isPreparing ||
+    (isProcessing && !hasExpectedDuration && displayedPercent === 0)
   const showProgressCard = isBusy || progress > 0 || aiFrameProgress !== null
 
   const step1Done = Boolean(selectedVideo)
@@ -1306,24 +1330,32 @@ export default function App() {
                       )}
                     </div>
                     <span className="shrink-0 font-mono font-bold text-blue-700 tabular-nums">
-                      {isLoadingEngine || isPreparing
-                        ? 'Menyiapkan...'
-                        : isProcessing && !hasExpectedDuration
-                          ? ffmpegCurrentFrame !== null
+                      {isIndeterminateProgress
+                        ? isLoadingEngine || isPreparing
+                          ? 'Menyiapkan...'
+                          : ffmpegCurrentFrame !== null
                             ? `Frame #${ffmpegCurrentFrame}`
                             : 'Memproses...'
-                          : `${displayedPercent}%`}
+                        : `${displayedPercent}%`}
                     </span>
                   </div>
-                  <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-200/80">
-                    {isLoadingEngine ||
-                    isPreparing ||
-                    (isProcessing && !hasExpectedDuration && displayedPercent === 0) ? (
+                  <div
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={isIndeterminateProgress ? undefined : displayedPercent}
+                    aria-label="Progres pemrosesan video"
+                    className="mt-3 h-3 w-full overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-200/80"
+                  >
+                    {isIndeterminateProgress ? (
                       <div className="animate-lv-indeterminate h-full w-2/5 rounded-full bg-gradient-to-r from-blue-500 via-sky-400 to-indigo-500" />
                     ) : (
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-blue-600 via-sky-500 to-emerald-500 transition-[width] duration-200"
-                        style={{ width: `${displayedPercent}%` }}
+                        style={{
+                          width: `${displayedPercent}%`,
+                          minWidth: displayedPercent > 0 ? '6px' : undefined,
+                        }}
                       />
                     )}
                   </div>
@@ -1362,17 +1394,28 @@ export default function App() {
                   {isBusy && !isLoadingEngine && displayedPercent < 100 && idleSeconds >= 30 && (
                     <div
                       role="alert"
-                      className="mt-3 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-xs font-medium text-amber-950"
+                      className="mt-3 flex flex-col gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-xs font-medium text-amber-950 sm:flex-row sm:items-center sm:justify-between"
                     >
-                      <AlertTriangle
-                        aria-hidden="true"
-                        className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
-                      />
-                      <span>
-                        Tidak ada kemajuan selama <strong className="font-mono">{idleSeconds}</strong>{' '}
-                        detik, periksa <strong className="font-bold">Log Teknis FFmpeg</strong> di
-                        bawah atau tekan <strong className="font-bold">Batalkan</strong>.
-                      </span>
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle
+                          aria-hidden="true"
+                          className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
+                        />
+                        <span>
+                          Tidak ada kemajuan selama{' '}
+                          <strong className="font-mono">{idleSeconds}</strong> detik, periksa{' '}
+                          <strong className="font-bold">Log Teknis FFmpeg</strong> di bawah atau
+                          batalkan proses.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCancel}
+                        className="inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-lg border border-rose-300 bg-rose-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1"
+                      >
+                        <Square aria-hidden="true" className="h-3 w-3 fill-current" />
+                        <span>Batalkan Proses</span>
+                      </button>
                     </div>
                   )}
                 </div>

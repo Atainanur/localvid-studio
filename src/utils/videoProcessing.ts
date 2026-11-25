@@ -95,6 +95,8 @@ export interface ProcessedVideoResult {
   mimeType: string
   outputSizeBytes: number
   originalSizeBytes: number
+  /** [NEW-10] Durasi video (detik) untuk ditampilkan dengan formatDuration (1 angka desimal) */
+  durationSeconds?: number | null
   feature: FeatureTabId
   usedFallbackEncode: boolean
   summaryNote: string
@@ -878,7 +880,9 @@ export function computeStabilizerMaxRateKbps(
 }
 
 /**
- * [BUG-11] Estimasi ukuran hasil sebelum render untuk Tab 4 (Stabilizer).
+ * [BUG-11 & NEW-04] Estimasi ukuran hasil sebelum render untuk Tab 4 (Stabilizer).
+ * Dikalibrasi memperhitungkan residu gerak deshake pada CRF 22, puncak 1-pass VBV (~1.08x maxrate),
+ * serta overhead kontainer MP4 (~4-5%) agar rentang estimasi realistis mencakup hasil aktual.
  */
 export function estimateStabilizerOutputSize(
   level: StabilizerLevel,
@@ -889,7 +893,7 @@ export function estimateStabilizerOutputSize(
   const originalMB = sizeBytes / (1024 * 1024)
   const sourceTotalKbps = computeSourceKbps(sizeBytes, durationSec)
   const maxRateKbps = computeStabilizerMaxRateKbps(sizeBytes, durationSec)
-  const levelFactor = level === 'strong' ? 1.14 : level === 'medium' ? 1.06 : 1.02
+  const levelFactor = level === 'strong' ? 1.32 : level === 'medium' ? 1.24 : 1.12
 
   if (sourceTotalKbps && durationSec && durationSec > 0) {
     const estAudioKbps = sourceTotalKbps <= 600 ? 96 : 128
@@ -898,11 +902,13 @@ export function estimateStabilizerOutputSize(
     const cappedVideo = maxRateKbps ? Math.min(maxRateKbps, rawProjected) : rawProjected
 
     const minEst = Number(
-      Math.max(0.1, (((cappedVideo * 0.85 + 128) * durationSec) / 8192) * 1.03).toFixed(2),
+      Math.max(0.1, (((cappedVideo * 0.9 + 128) * durationSec) / 8192) * 1.04).toFixed(2),
     )
-    const maxVideo = maxRateKbps ? Math.min(maxRateKbps * 1.05, cappedVideo * 1.15) : cappedVideo * 1.18
+    const maxVideo = maxRateKbps
+      ? Math.min(Math.round(maxRateKbps * 1.08), Math.max(cappedVideo * 1.18, maxRateKbps))
+      : cappedVideo * 1.28
     const maxEst = Number(
-      Math.max(minEst, (((maxVideo + 128) * durationSec) / 8192) * 1.03).toFixed(2),
+      Math.max(minEst, (((maxVideo + 128) * durationSec) / 8192) * 1.05).toFixed(2),
     )
     return {
       originalMB,
@@ -913,9 +919,9 @@ export function estimateStabilizerOutputSize(
     }
   }
 
-  const midMB = Math.max(0.1, originalMB * levelFactor)
-  const minEst = Number(Math.max(0.1, midMB * 0.88).toFixed(2))
-  const maxEst = Number(Math.max(minEst, midMB * 1.2).toFixed(2))
+  const midMB = Math.max(0.1, originalMB * levelFactor * 1.05)
+  const minEst = Number(Math.max(0.1, midMB * 0.9).toFixed(2))
+  const maxEst = Number(Math.max(minEst, midMB * 1.25).toFixed(2))
   return {
     originalMB,
     minEstimatedMB: minEst,

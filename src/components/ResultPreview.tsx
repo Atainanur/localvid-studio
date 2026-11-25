@@ -3,6 +3,7 @@ import {
   ArrowLeftRight,
   ArrowRight,
   CheckCircle2,
+  Clock,
   Cpu,
   Download,
   Film,
@@ -21,6 +22,7 @@ import {
 } from 'lucide-react'
 import {
   canShareVideoFile,
+  formatDuration,
   formatFileSizeMB,
   type FeatureTabId,
   type ProcessedVideoResult,
@@ -126,9 +128,17 @@ export function ResultPreview({
     }
   }
 
+  // [NEW-01] Label penghematan konsisten positif ("Hemat XX.X%") seperti di CompressTabPanel
   const sizeDeltaLabel = isSmaller
-    ? `Hemat -${Math.abs(savingsPercent).toFixed(1)}%`
+    ? `Hemat ${Math.abs(savingsPercent).toFixed(1)}%`
     : `Ukuran ${savingsPercent === 0 ? '0%' : `+${Math.abs(savingsPercent).toFixed(1)}%`}`
+
+  const formattedDuration =
+    result.durationSeconds !== undefined &&
+    result.durationSeconds !== null &&
+    result.durationSeconds > 0
+      ? formatDuration(result.durationSeconds)
+      : null
 
   return (
     <div
@@ -154,6 +164,12 @@ export function ResultPreview({
                 <Sparkles aria-hidden="true" className="h-3 w-3" />
                 Selesai dalam {elapsedSec} detik
               </span>
+              {formattedDuration && (
+                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-white/90 px-2.5 py-0.5 font-mono text-[11px] font-bold text-slate-700 ring-1 ring-slate-200 tabular-nums">
+                  <Clock aria-hidden="true" className="h-3 w-3 text-orange-600" />
+                  Durasi {formattedDuration}
+                </span>
+              )}
             </div>
             <p className="mt-1 text-xs leading-relaxed text-slate-600">{result.summaryNote}</p>
           </div>

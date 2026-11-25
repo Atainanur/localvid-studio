@@ -24,6 +24,7 @@ import {
 import {
   AI_FPS_OPTIONS,
   AI_MODEL_PRESETS,
+  estimateAiOutputSize,
   isDurationWithinAiLimit,
   isValidModelUrl,
   MAX_AI_DURATION_SECONDS,
@@ -195,6 +196,12 @@ export function FeatureTabs({
     stabilizerLevel,
     selectedVideoSizeBytes,
     selectedVideoDuration,
+  )
+  const aiSizeEstimate = estimateAiOutputSize(
+    aiSettings,
+    selectedVideoSizeBytes,
+    selectedVideoDuration,
+    selectedVideoDimensions,
   )
 
   const aiCanRunFallbackWebGl2 = !aiWebGpuAvailable && webgl2Supported
@@ -1087,15 +1094,19 @@ export function FeatureTabs({
                       {
                         id: 'auto-onnx' as const,
                         title: 'ONNX AI + Auto Fallback',
-                        badge: aiWebGpuAvailable ? 'ONNX WebGPU' : 'Butuh WebGPU',
-                        desc: 'Coba unduh model .onnx (timeout 12 dtk). Jika terblokir CORS/COEP, otomatis beralih ke Shader lokal.',
+                        badge: aiWebGpuAvailable ? 'ONNX WebGPU' : 'Butuh WebGPU (Nonaktif)',
+                        desc: aiWebGpuAvailable
+                          ? 'Coba unduh model .onnx (timeout 12 dtk). Jika terblokir CORS/COEP, otomatis beralih ke Shader lokal.'
+                          : 'Membutuhkan WebGPU (navigator.gpu) pada browser Desktop modern. Tidak tersedia di browser ini.',
                         unavailable: !aiWebGpuAvailable,
                       },
                       {
                         id: 'webgpu-shader' as const,
                         title: 'WebGPU Fast Enhance',
-                        badge: aiWebGpuAvailable ? '100% Lokal & Cepat' : 'Butuh WebGPU',
-                        desc: 'Langsung proses Bicubic 16-tap + Unsharp Mask + Contrast di WebGPU tanpa unduh model luar.',
+                        badge: aiWebGpuAvailable ? '100% Lokal & Cepat' : 'Butuh WebGPU (Nonaktif)',
+                        desc: aiWebGpuAvailable
+                          ? 'Langsung proses Bicubic 16-tap + Unsharp Mask + Contrast di WebGPU tanpa unduh model luar.'
+                          : 'Membutuhkan WebGPU (navigator.gpu) pada browser Desktop modern. Tidak tersedia di browser ini.',
                         unavailable: !aiWebGpuAvailable,
                       },
                       {
@@ -1118,11 +1129,19 @@ export function FeatureTabs({
                           key={mode.id}
                           type="button"
                           disabled={isLocked}
+                          aria-disabled={isLocked}
+                          title={
+                            mode.unavailable
+                              ? 'Opsi ini membutuhkan WebGPU (navigator.gpu) yang tidak tersedia di browser ini'
+                              : undefined
+                          }
                           onClick={() => handleAiEnginePreference(mode.id)}
-                          className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl border p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-55 ${
-                            active
-                              ? 'border-violet-500 bg-violet-50/80 shadow-sm ring-1 ring-violet-500/30'
-                              : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                          className={`flex touch-manipulation flex-col justify-between gap-2 rounded-2xl border p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-2 ${
+                            mode.unavailable
+                              ? 'cursor-not-allowed border-slate-200/80 bg-slate-100/80 opacity-45 grayscale-[35%]'
+                              : active
+                                ? 'cursor-pointer border-violet-500 bg-violet-50/80 shadow-sm ring-1 ring-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60'
+                                : 'cursor-pointer border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60'
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
@@ -1338,6 +1357,101 @@ export function FeatureTabs({
                       />
                     </button>
                   </div>
+                </div>
+
+                {/* [NEW-02] Toggle Smart Cap + Estimasi Ukuran Hasil Tab 5 (AI / GPU Upscaler) */}
+                <div className="flex flex-col gap-3 border-t border-slate-200/80 pt-4">
+                  <div className="flex items-center justify-between gap-4 rounded-2xl border border-violet-200/80 bg-violet-50/45 p-4">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-bold text-slate-900 sm:text-sm">
+                          Batasi Ukuran Hasil (Smart Cap)
+                        </span>
+                        <span className="rounded-full bg-violet-100 px-2 py-0.5 font-mono text-[10px] font-bold text-violet-800">
+                          {aiSettings.smartSizeCap ? 'CRF 22 • fast + Cap' : 'CRF 19 • Tanpa Cap'}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                        Membatasi bitrate perakitan MP4 (-maxrate) secara proporsional agar hasil
+                        upscale HD tetap jernih tanpa membengkak 6–7× ukuran asli.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={aiSettings.smartSizeCap}
+                      aria-label="Aktifkan Batasi Ukuran Hasil Smart Cap AI Upscaler"
+                      disabled={disabled}
+                      onClick={() =>
+                        onAiSettingsChange({
+                          ...aiSettings,
+                          smartSizeCap: !aiSettings.smartSizeCap,
+                        })
+                      }
+                      className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-2 disabled:opacity-50 ${
+                        aiSettings.smartSizeCap ? 'bg-violet-600' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                          aiSettings.smartSizeCap ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {aiSizeEstimate && selectedVideoSizeBytes !== null && (
+                    <div className="grid grid-cols-1 gap-3 rounded-2xl border border-violet-200/80 bg-gradient-to-r from-violet-50/80 via-indigo-50/50 to-white p-4 sm:grid-cols-2 sm:items-center">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-violet-600 ring-1 ring-violet-200">
+                          <HardDrive aria-hidden="true" className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                            Ukuran Asli
+                          </p>
+                          <p className="font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                            {formatFileSizeMB(selectedVideoSizeBytes)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="rounded-xl bg-white/95 p-3 ring-1 ring-violet-200/80 sm:text-right">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-violet-700">
+                          Estimasi Ukuran Hasil
+                        </p>
+                        <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                          ~{aiSizeEstimate.minEstimatedMB.toFixed(1)} MB –{' '}
+                          {aiSizeEstimate.maxEstimatedMB.toFixed(1)} MB
+                        </p>
+                        <p className="mt-0.5 font-mono text-[11px] text-slate-500">
+                          CRF {aiSettings.smartSizeCap ? '22' : '19'} • {aiSettings.targetFps} fps
+                          {aiSizeEstimate.maxRateKbps
+                            ? ` • Cap ≤ ${aiSizeEstimate.maxRateKbps}k`
+                            : ' • Tanpa Cap'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {aiSizeEstimate?.isOver3x && (
+                    <div
+                      role="status"
+                      className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-950"
+                    >
+                      <AlertTriangle
+                        aria-hidden="true"
+                        className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
+                      />
+                      <span>
+                        Estimasi ukuran hasil melebihi{' '}
+                        <strong className="font-bold">3× ukuran asli</strong> karena proses
+                        upscale HD meningkatkan detail piksel secara drastis.{' '}
+                        {!aiSettings.smartSizeCap
+                          ? 'Aktifkan toggle "Batasi Ukuran Hasil (Smart Cap)" di atas agar ukuran tetap terkendali.'
+                          : 'Anda tetap dapat melanjutkan, lalu kompres hasilnya di Tab Kompres Video bila ingin lebih ringkas.'}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </>
             )}

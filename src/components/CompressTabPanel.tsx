@@ -215,6 +215,11 @@ export function CompressTabPanel({
     const normalized = rawValue.trim().replace(',', '.')
     const parsed = Number.parseFloat(normalized)
     if (!normalized || !Number.isFinite(parsed)) {
+      // [NEW-08] Tampilkan notice ramah bila input kosong atau tidak valid (".", ",") agar tidak reset diam-diam
+      const displayBad = rawValue.trim() ? `"${rawValue.trim()}"` : 'kosong'
+      setTargetOutOfRangeNotice(
+        `Nilai ${displayBad} tidak valid — dikembalikan ke ${clampedTargetMB.toFixed(1)} MB.`,
+      )
       setTargetSizeText(clampedTargetMB.toFixed(1))
       return
     }

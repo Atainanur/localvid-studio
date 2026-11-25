@@ -2,6 +2,7 @@ import type { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile } from '@ffmpeg/util'
 import type { InferenceSession, Tensor } from 'onnxruntime-web/webgpu'
 import {
+  computeAiSmartMaxRateKbps,
   MAX_AI_DURATION_SECONDS,
   type AiFrameProgress,
   type AiUpscaleSettings,
@@ -1618,6 +1619,17 @@ export async function runAiUpscalePipeline({
     onLog('[LocalVid AI] Menyalin trek audio asli & merakit MP4 HD...')
     await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile))
 
+    // [NEW-02] Terapkan CRF 22 + -maxrate/-bufsize proporsional bila Smart Cap aktif agar tidak membengkak 6-7x
+    const smartMaxRateKbps = computeAiSmartMaxRateKbps(settings, videoFile.size, rawDuration)
+    const assembleCrf = settings.smartSizeCap ? '22' : '19'
+    const assemblePreset = settings.smartSizeCap ? 'fast' : 'veryfast'
+
+    if (smartMaxRateKbps !== undefined) {
+      onLog(
+        `[LocalVid AI] Smart Cap aktif: libx264 preset ${assemblePreset}, CRF ${assembleCrf}, -maxrate ${smartMaxRateKbps}k -bufsize ${smartMaxRateKbps * 2}k.`,
+      )
+    }
+
     const baseAssembleArgs = [
       '-framerate',
       String(settings.targetFps),
@@ -1636,16 +1648,18 @@ export async function runAiUpscalePipeline({
       '-c:v',
       'libx264',
       '-preset',
-      'veryfast',
+      assemblePreset,
       '-tune',
       'fastdecode',
       '-crf',
-      '19',
-      '-pix_fmt',
-      'yuv420p',
-      '-threads',
-      safeThreads,
+      assembleCrf,
     ]
+
+    if (smartMaxRateKbps !== undefined) {
+      baseAssembleArgs.push('-maxrate', `${smartMaxRateKbps}k`, '-bufsize', `${smartMaxRateKbps * 2}k`)
+    }
+
+    baseAssembleArgs.push('-pix_fmt', 'yuv420p', '-threads', safeThreads)
 
     let assembleExit = await ffmpeg.exec(
       [...baseAssembleArgs, '-c:a', 'copy', '-shortest', '-movflags', '+faststart', outputFileName],
