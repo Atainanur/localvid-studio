@@ -77,6 +77,8 @@ export interface CompressOptions {
 
   // 2. Template Media Sosial
   socialTemplate: SocialTemplateId
+  /** Menandai asal template jika pengguna memodifikasi setelan secara manual (BUG-15) */
+  derivedFromTemplate: Exclude<SocialTemplateId, 'custom'> | null
 
   // 3. Mode Kompresi & Kualitas / Target Size
   compressionMode: CompressionMode
@@ -352,6 +354,7 @@ export const FLIP_OPTIONS: ReadonlyArray<{ value: FlipOption; label: string }> =
 export const DEFAULT_COMPRESS_OPTIONS: CompressOptions = {
   outputFormat: 'mp4',
   socialTemplate: 'custom',
+  derivedFromTemplate: null,
   compressionMode: 'crf',
   crfPreset: 'balanced',
   customCrf: null,
@@ -1051,19 +1054,33 @@ export function estimateCompressedSize(
   }
 
   // Hitung estimasi video bitrate aktual berbasis bitrate asli + Smart Bitrate Cap
+  // [BUG-03] Kalibrasi realistis: video sumber yang sudah padat (< 1800 kbps) pada CRF 18-21
+  // cenderung mendekati batas VBV (-maxrate) + ~4% overhead wadah MP4/MKV.
   const crf = getEffectiveCrf(options)
-  const crfBitrateScale =
-    crf <= 18
-      ? 0.86
+  const isAlreadyTightSource = Boolean(sourceProfile && sourceProfile.sourceTotalKbps < 1800)
+  const crfBitrateScale = isAlreadyTightSource
+    ? crf <= 18
+      ? 0.94
       : crf <= 20
-        ? 0.78
+        ? 0.88
         : crf <= 21
-          ? 0.72
+          ? 0.84
           : crf <= 23
-            ? 0.62
+            ? 0.74
             : crf <= 26
-              ? 0.48
-              : 0.38
+              ? 0.6
+              : 0.48
+    : crf <= 18
+      ? 0.88
+      : crf <= 20
+        ? 0.82
+        : crf <= 21
+          ? 0.76
+          : crf <= 23
+            ? 0.65
+            : crf <= 26
+              ? 0.52
+              : 0.42
 
   const crop = validateCropSettings(options, sourceDims.width, sourceDims.height)
   const workW = crop.isActive && crop.isValid && crop.width ? crop.width : sourceDims.width
@@ -1094,7 +1111,8 @@ export function estimateCompressedSize(
     videoCodec === 'libx265' ? 0.78 : videoCodec === 'libvpx-vp9' ? 0.8 : 1
 
   if (sourceProfile) {
-    // Karena Smart Bitrate Cap (-maxrate) aktif, video bitrate dibatasi ketat <= maxVideoKbps!
+    // Karena Smart Bitrate Cap (-maxrate) aktif, video bitrate dikontrol ketat.
+    // Rentang atas memperhitungkan puncak 1-pass VBV (~1.04x maxrate) + overhead kontainer (~3%).
     const minFloorKbps = Math.min(64, sourceProfile.maxVideoKbps)
     const rawProjectedVideoKbps =
       sourceProfile.sourceVideoKbps * crfBitrateScale * pixelFactor * fpsFactor * codecFactor
@@ -1103,24 +1121,28 @@ export function estimateCompressedSize(
       Math.max(minFloorKbps, rawProjectedVideoKbps),
     )
 
-    // Estimasi konservatif pada video yang sudah terkompresi ketat: rentang [0.78x .. 1.0x cap]
+    const vbvUpperCapKbps = Math.round(sourceProfile.maxVideoKbps * 1.04)
     const lowVideoKbps = Math.min(
       sourceProfile.maxVideoKbps,
-      Math.max(minFloorKbps, cappedMidVideoKbps * 0.78),
+      Math.max(minFloorKbps, cappedMidVideoKbps * 0.84),
     )
     const highVideoKbps = Math.min(
-      sourceProfile.maxVideoKbps,
-      Math.max(lowVideoKbps, cappedMidVideoKbps * 1.08),
+      vbvUpperCapKbps,
+      Math.max(lowVideoKbps, Math.max(cappedMidVideoKbps * 1.12, isAlreadyTightSource ? sourceProfile.maxVideoKbps : 0)),
     )
 
     const audioKbps = options.removeAudio ? 0 : sourceProfile.effectiveAudioKbps
+    const containerOverhead = 1.03
     const minEst = Number(
-      Math.max(0.1, ((lowVideoKbps + audioKbps) * trim.effectiveDurationSec) / 8192).toFixed(2),
+      Math.max(
+        0.1,
+        (((lowVideoKbps + audioKbps) * trim.effectiveDurationSec) / 8192) * containerOverhead,
+      ).toFixed(2),
     )
     const maxEst = Number(
       Math.max(
         minEst,
-        ((highVideoKbps + audioKbps) * trim.effectiveDurationSec) / 8192,
+        (((highVideoKbps + audioKbps) * trim.effectiveDurationSec) / 8192) * containerOverhead,
       ).toFixed(2),
     )
 
@@ -1155,6 +1177,60 @@ export function estimateCompressedSize(
   }
 }
 
+/**
+ * [BUG-15] Daftar label pengaturan lanjutan non-konflik (Trim, Crop, Volume, Fade, Rotate, Flip, Hapus Audio)
+ * yang dipertahankan saat pengguna memilih Template Media Sosial.
+ */
+export function getPreservedAdvancedLabels(
+  options: CompressOptions,
+  sourceDurationSec: number | null,
+  sourceDims: { width: number | null; height: number | null },
+): string[] {
+  const labels: string[] = []
+  const trim = validateTrimSettings(options.trimStart, options.trimEnd, sourceDurationSec)
+  const crop = validateCropSettings(options, sourceDims.width, sourceDims.height)
+
+  if (trim.isActive && trim.isValid) {
+    labels.push(`Trim (${trim.effectiveDurationSec.toFixed(1)} dtk)`)
+  }
+  if (crop.isActive && crop.isValid && crop.width && crop.height) {
+    labels.push(`Crop ${crop.width}×${crop.height}`)
+  }
+  if (options.rotate !== 'none') {
+    labels.push(`Rotate ${options.rotate}°`)
+  }
+  if (options.flip !== 'no-change') {
+    labels.push(options.flip === 'horizontal' ? 'Flip Horizontal' : 'Flip Vertikal')
+  }
+  if (options.removeAudio) {
+    labels.push('Tanpa Audio (-an)')
+  } else {
+    if (options.volumePercent !== 100) labels.push(`Volume ${options.volumePercent}%`)
+    if (options.fadeInAudio) labels.push('Fade In Audio')
+    if (options.fadeOutAudio) labels.push('Fade Out Audio')
+  }
+
+  return labels
+}
+
+export function resetPreservedAdvancedOptions(options: CompressOptions): CompressOptions {
+  return {
+    ...options,
+    rotate: 'none',
+    flip: 'no-change',
+    volumePercent: 100,
+    fadeInAudio: false,
+    fadeOutAudio: false,
+    removeAudio: false,
+    trimStart: '00:00:00.00',
+    trimEnd: '00:00:00.00',
+    cropWidth: '',
+    cropHeight: '',
+    cropX: '',
+    cropY: '',
+  }
+}
+
 export function applySocialTemplate(
   templateId: SocialTemplateId,
   current: CompressOptions,
@@ -1165,21 +1241,44 @@ export function applySocialTemplate(
     return {
       ...current,
       socialTemplate: 'custom',
+      derivedFromTemplate:
+        current.socialTemplate !== 'custom'
+          ? current.socialTemplate
+          : current.derivedFromTemplate,
       customCrf: null,
       maxResolutionOnly: false,
     }
   }
 
+  // [BUG-15] Pertahankan opsi lanjutan non-konflik (Trim, Crop, Volume, Fade, Rotate, Flip, Hapus Audio)
+  const preservedNonConflicting = {
+    rotate: current.rotate,
+    flip: current.flip,
+    volumePercent: current.volumePercent,
+    fadeInAudio: current.fadeInAudio,
+    fadeOutAudio: current.fadeOutAudio,
+    removeAudio: current.removeAudio,
+    trimStart: current.trimStart,
+    trimEnd: current.trimEnd,
+    cropWidth: current.cropWidth,
+    cropHeight: current.cropHeight,
+    cropX: current.cropX,
+    cropY: current.cropY,
+  }
+
+  const trim = validateTrimSettings(current.trimStart, current.trimEnd, sourceDurationSec)
   const bounds = computeTargetSizeBounds(
     originalSizeBytes,
-    sourceDurationSec !== null && sourceDurationSec > 0 ? sourceDurationSec : 10,
-    false,
+    trim.isValid ? trim.effectiveDurationSec : sourceDurationSec !== null && sourceDurationSec > 0 ? sourceDurationSec : 10,
+    current.removeAudio,
     sourceDurationSec !== null && sourceDurationSec > 0,
   )
 
   const commonBase: CompressOptions = {
     ...DEFAULT_COMPRESS_OPTIONS,
+    ...preservedNonConflicting,
     socialTemplate: templateId,
+    derivedFromTemplate: null,
     outputFormat: 'mp4',
     videoCodec: 'libx264',
     audioCodec: 'aac',

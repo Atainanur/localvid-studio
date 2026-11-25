@@ -168,7 +168,7 @@ export function ResultPreview({
         </span>
       </div>
 
-      {/* Info opsional: Fallback Fast Remux atau Fallback GPU AI Upscaler */}
+      {/* [BUG-12] Info jelas jika Mode Kilat (-c copy) gagal & otomatis fallback ke re-encode */}
       {result.usedFallbackEncode && (
         <div
           role="status"
@@ -176,8 +176,22 @@ export function ResultPreview({
         >
           <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
           <span>
-            Codec asli tidak cocok untuk Fast Remux pada wadah target, sehingga otomatis dialihkan
-            ke re-encode yang kompatibel.
+            <strong className="font-bold">Mode Kilat (-c copy) tidak kompatibel</strong> dengan
+            codec/wadah{' '}
+            {details.kind === 'convert' ? (
+              <code className="rounded bg-amber-100 px-1 py-0.5 font-mono font-bold">
+                {details.targetFormat}
+              </code>
+            ) : (
+              'target'
+            )}
+            , sehingga otomatis dialihkan ke re-encode{' '}
+            <strong className="font-bold">
+              {details.kind === 'convert' && details.fallbackCodecLabel
+                ? details.fallbackCodecLabel
+                : 'H.264/AAC'}
+            </strong>{' '}
+            agar hasil dapat diputar lancar.
           </span>
         </div>
       )}

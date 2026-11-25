@@ -8,6 +8,7 @@ import {
   Cpu,
   Eye,
   Globe,
+  HardDrive,
   Info,
   Minimize2,
   Palette,
@@ -37,7 +38,10 @@ import {
   buildStabilizerFilterChain,
   COLOR_FILTER_PRESETS,
   computeTarget1080pResolution,
+  estimateEnhanceOutputSize,
+  estimateStabilizerOutputSize,
   formatDuration,
+  formatFileSizeMB,
   getColorFilterPreset,
   OUTPUT_FORMAT_OPTIONS,
   SCALE_ALGORITHM_OPTIONS,
@@ -59,6 +63,7 @@ interface FeatureTabsProps {
   deviceType: DeviceType
   webgpuStatus: WebGPUState
   aiWebGpuAvailable: boolean
+  webgl2Supported: boolean
   selectedVideoSizeBytes: number | null
   selectedVideoDuration: number | null
   selectedVideoExtension: string | null
@@ -146,6 +151,7 @@ export function FeatureTabs({
   deviceType,
   webgpuStatus,
   aiWebGpuAvailable,
+  webgl2Supported,
   selectedVideoSizeBytes,
   selectedVideoDuration,
   selectedVideoExtension,
@@ -179,9 +185,25 @@ export function FeatureTabs({
   )
   const activeColorPreset = getColorFilterPreset(enhanceOptions.colorFilter)
 
+  const enhanceSizeEstimate = estimateEnhanceOutputSize(
+    enhanceOptions,
+    selectedVideoSizeBytes,
+    selectedVideoDuration,
+    selectedVideoDimensions,
+  )
+  const stabilizerSizeEstimate = estimateStabilizerOutputSize(
+    stabilizerLevel,
+    selectedVideoSizeBytes,
+    selectedVideoDuration,
+  )
+
+  const aiCanRunFallbackWebGl2 = !aiWebGpuAvailable && webgl2Supported
+  const aiAnyGpuAvailable = aiWebGpuAvailable || webgl2Supported
   const durationWithinAiLimit = isDurationWithinAiLimit(selectedVideoDuration)
   const modelUrlValid =
-    aiSettings.enginePreference === 'webgpu-shader' || isValidModelUrl(aiSettings.modelUrl)
+    !aiWebGpuAvailable ||
+    aiSettings.enginePreference !== 'auto-onnx' ||
+    isValidModelUrl(aiSettings.modelUrl)
 
   const estimatedFrames =
     selectedVideoDuration !== null && Number.isFinite(selectedVideoDuration)
@@ -543,7 +565,8 @@ export function FeatureTabs({
                       Algoritma Skala 1080p
                     </span>
                     <span className="font-mono text-[11px] font-semibold text-orange-800">
-                      preset {isMobile ? 'ultrafast' : 'veryfast'} • tune fastdecode
+                      CRF {enhanceOptions.upscale1080p ? '23' : '22'} • preset{' '}
+                      {isMobile ? 'veryfast' : 'fast'} • tune fastdecode
                     </span>
                   </div>
                   <div className="mt-2.5 grid grid-cols-3 gap-2">
@@ -621,6 +644,17 @@ export function FeatureTabs({
                     style={{ filter: livePreviewCssFilter }}
                     className="mx-auto max-h-64 w-full bg-black object-contain transition-[filter] duration-200"
                   />
+                  {/* [BUG-08] Penjelasan eksplisit cakupan pratinjau langsung */}
+                  <div className="flex items-start gap-2 border-t border-slate-800 bg-slate-900/95 px-3.5 py-2 text-[11px] leading-relaxed text-slate-300">
+                    <Info aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-400" />
+                    <span>
+                      Pratinjau warna saja. Efek{' '}
+                      <strong className="text-white">Kurangi Noise</strong>,{' '}
+                      <strong className="text-white">Pertajam Detail</strong>, dan{' '}
+                      <strong className="text-white">Upscale 1080p</strong> baru terlihat setelah
+                      proses render selesai.
+                    </span>
+                  </div>
                 </div>
               )}
 
@@ -671,6 +705,101 @@ export function FeatureTabs({
                   )
                 })}
               </div>
+            </div>
+
+            {/* [BUG-10] Toggle Smart Cap + Estimasi Ukuran Hasil Tab 3 */}
+            <div className="flex flex-col gap-3 border-t border-slate-200/80 pt-5">
+              <div className="flex items-center justify-between gap-4 rounded-2xl border border-orange-200/80 bg-orange-50/45 p-4">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-slate-900 sm:text-sm">
+                      Batasi Ukuran Hasil (Smart Cap)
+                    </span>
+                    <span className="rounded-full bg-orange-100 px-2 py-0.5 font-mono text-[10px] font-bold text-orange-800">
+                      CRF {enhanceOptions.upscale1080p ? '23' : '22'} • {isMobile ? 'veryfast' : 'fast'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                    Membatasi bitrate puncak (-maxrate) secara proporsional agar hasil upscale atau
+                    penjernihan tetap tajam tanpa membengkak berlebihan.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={enhanceOptions.smartSizeCap}
+                  aria-label="Aktifkan Batasi Ukuran Hasil Smart Cap"
+                  disabled={disabled}
+                  onClick={() =>
+                    onEnhanceOptionsChange({
+                      ...enhanceOptions,
+                      smartSizeCap: !enhanceOptions.smartSizeCap,
+                    })
+                  }
+                  className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-600 focus-visible:ring-offset-2 disabled:opacity-50 ${
+                    enhanceOptions.smartSizeCap ? 'bg-orange-500' : 'bg-slate-300'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                      enhanceOptions.smartSizeCap ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {enhanceSizeEstimate && selectedVideoSizeBytes !== null && (
+                <div className="grid grid-cols-1 gap-3 rounded-2xl border border-orange-200/80 bg-gradient-to-r from-orange-50/80 via-amber-50/60 to-white p-4 sm:grid-cols-2 sm:items-center">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-orange-600 ring-1 ring-orange-200">
+                      <HardDrive aria-hidden="true" className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Ukuran Asli
+                      </p>
+                      <p className="font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                        {formatFileSizeMB(selectedVideoSizeBytes)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-white/95 p-3 ring-1 ring-orange-200/80 sm:text-right">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-orange-700">
+                      Estimasi Ukuran Hasil
+                    </p>
+                    <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                      ~{enhanceSizeEstimate.minEstimatedMB.toFixed(1)} MB –{' '}
+                      {enhanceSizeEstimate.maxEstimatedMB.toFixed(1)} MB
+                    </p>
+                    <p className="mt-0.5 font-mono text-[11px] text-slate-500">
+                      CRF {enhanceOptions.upscale1080p ? '23' : '22'} • preset{' '}
+                      {isMobile ? 'veryfast' : 'fast'}
+                      {enhanceSizeEstimate.maxRateKbps
+                        ? ` • Cap ≤ ${enhanceSizeEstimate.maxRateKbps}k`
+                        : ' • Tanpa Cap'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {enhanceSizeEstimate?.isOver3x && (
+                <div
+                  role="status"
+                  className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-950"
+                >
+                  <AlertTriangle
+                    aria-hidden="true"
+                    className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
+                  />
+                  <span>
+                    Estimasi ukuran hasil melebihi <strong className="font-bold">3× ukuran asli</strong>{' '}
+                    karena kenaikan resolusi/ketajaman membutuhkan bitrate jauh lebih besar.{' '}
+                    {!enhanceOptions.smartSizeCap
+                      ? 'Aktifkan toggle "Batasi Ukuran Hasil (Smart Cap)" di atas agar ukuran tetap terkendali.'
+                      : 'Anda tetap dapat lanjut, lalu perkecil lagi hasilnya di Tab Kompres Video bila diperlukan.'}
+                  </span>
+                </div>
+              )}
             </div>
 
             {enhanceFilterChain.length > 0 ? (
@@ -757,6 +886,40 @@ export function FeatureTabs({
               </div>
             </div>
 
+            {/* [BUG-11] Estimasi Ukuran Hasil Stabilizer (CRF 22 + Smart Maxrate Proporsional) */}
+            {stabilizerSizeEstimate && selectedVideoSizeBytes !== null && (
+              <div className="grid grid-cols-1 gap-3 rounded-2xl border border-cyan-200/80 bg-gradient-to-r from-cyan-50/80 via-sky-50/60 to-white p-4 sm:grid-cols-2 sm:items-center">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-cyan-700 ring-1 ring-cyan-200">
+                    <HardDrive aria-hidden="true" className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      Ukuran Asli
+                    </p>
+                    <p className="font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                      {formatFileSizeMB(selectedVideoSizeBytes)}
+                    </p>
+                  </div>
+                </div>
+                <div className="rounded-xl bg-white/95 p-3 ring-1 ring-cyan-200/80 sm:text-right">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-cyan-800">
+                    Estimasi Ukuran Hasil
+                  </p>
+                  <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                    ~{stabilizerSizeEstimate.minEstimatedMB.toFixed(1)} MB –{' '}
+                    {stabilizerSizeEstimate.maxEstimatedMB.toFixed(1)} MB
+                  </p>
+                  <p className="mt-0.5 font-mono text-[11px] text-slate-500">
+                    CRF 22 • preset {isMobile ? 'veryfast' : 'fast'}
+                    {stabilizerSizeEstimate.maxRateKbps
+                      ? ` • Cap ≤ ${stabilizerSizeEstimate.maxRateKbps}k`
+                      : ''}
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-start gap-2.5 rounded-xl border border-cyan-200/80 bg-cyan-50/60 px-4 py-3 text-xs leading-relaxed text-cyan-950">
               <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700" />
               <span>
@@ -776,10 +939,10 @@ export function FeatureTabs({
           </div>
         )}
 
-        {/* TAB 5: AI HD UPSCALER (BETA) — WebGPU ONNX + WebGPU Fast Enhance Shader */}
+        {/* TAB 5: AI HD UPSCALER (BETA) — WebGPU ONNX + WebGPU Shader + Fallback Penuh WebGL2 */}
         {activeTab === 'ai-upscale' && (
           <div className="animate-lv-fade-up flex flex-col gap-4">
-            {!aiWebGpuAvailable ? (
+            {!aiAnyGpuAvailable ? (
               <div className="flex flex-col items-start gap-4 rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-orange-50/70 to-white p-5">
                 <div className="flex items-start gap-3.5">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-700 ring-1 ring-amber-200">
@@ -787,14 +950,12 @@ export function FeatureTabs({
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-slate-900">
-                      AI HD Upscaler (WebGPU) Khusus Browser Desktop Modern
+                      GPU Upscaler Membutuhkan WebGPU atau WebGL2
                     </h3>
                     <p className="mt-1.5 text-xs leading-relaxed text-slate-700 sm:text-sm">
-                      {isMobile
-                        ? `Anda sedang mengakses dari perangkat ${deviceType}. Untuk menjaga baterai, kestabilan RAM, dan mencegah browser crash, library AI ONNX tidak dimuat di perangkat mobile.`
-                        : webgpuStatus === 'checking'
-                          ? 'Sedang memeriksa dukungan WebGPU browser Anda...'
-                          : 'Browser Anda belum mendukung akselerasi WebGPU (navigator.gpu). Fitur AI HD Upscaler memerlukan browser Desktop modern seperti Windows Chrome atau Microsoft Edge terbaru.'}
+                      {webgpuStatus === 'checking'
+                        ? 'Sedang memeriksa dukungan akselerasi GPU browser Anda...'
+                        : `Browser di perangkat ${deviceType} Anda tidak mendukung WebGPU (navigator.gpu) maupun WebGL2, sehingga fitur GPU Upscaler tidak dapat dijalankan.`}
                     </p>
                     <p className="mt-2 text-xs leading-relaxed text-slate-600">
                       Gunakan{' '}
@@ -803,7 +964,7 @@ export function FeatureTabs({
                       </strong>{' '}
                       atau{' '}
                       <strong className="font-bold text-slate-900">Tab Stabilizer</strong> yang
-                      berjalan cepat dan mulus di HP maupun semua browser.
+                      berjalan lancar di semua browser via FFmpeg.wasm.
                     </p>
                   </div>
                 </div>
@@ -820,35 +981,69 @@ export function FeatureTabs({
               </div>
             ) : (
               <>
-                <div className="flex flex-col gap-2 rounded-2xl border border-violet-200 bg-gradient-to-r from-violet-50 via-indigo-50/70 to-sky-50/60 p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-start gap-3">
-                    <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm shadow-violet-600/25">
-                      <Cpu aria-hidden="true" className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-sm font-bold text-slate-900">
-                          GPU HD Upscaler • Validated Offscreen Readback
-                        </h3>
-                        <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2.5 py-0.5 font-mono text-[10px] font-bold text-emerald-800 ring-1 ring-emerald-200">
-                          WebGPU + WebGL2 Safe
-                        </span>
+                {/* [BUG-01] Banner informasi jujur saat berjalan pada Mode Fallback WebGL2 */}
+                {aiCanRunFallbackWebGl2 ? (
+                  <div className="flex flex-col gap-2.5 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 via-orange-50/60 to-white p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white shadow-sm shadow-amber-500/25">
+                        <Cpu aria-hidden="true" className="h-5 w-5" />
                       </div>
-                      <p className="mt-1 text-xs leading-relaxed text-slate-700">
-                        Ekstraksi frame native browser + render offscreen{' '}
-                        <code className="font-mono font-semibold text-violet-900">
-                          GPUTexture
-                        </code>{' '}
-                        tervalidasi dengan fallback otomatis WebGL2 (dijamin jernih, tidak hitam).
-                        Batas durasi maksimal{' '}
-                        <strong className="font-bold text-slate-900">
-                          {MAX_AI_DURATION_SECONDS} detik
-                        </strong>
-                        .
-                      </p>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-sm font-bold text-slate-900">
+                            Mode Fallback WebGL2 (Lebih lambat dari WebGPU)
+                          </h3>
+                          <span className="whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-0.5 font-mono text-[10px] font-bold text-amber-900 ring-1 ring-amber-300">
+                            WebGL2 Aktif • 0 Byte ONNX
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs leading-relaxed text-slate-700">
+                          {isMobile
+                            ? `Perangkat ${deviceType} tidak memuat model ONNX WebGPU demi menjaga RAM tetap aman. Anda tetap bisa memakai `
+                            : 'Browser ini belum mendukung WebGPU (navigator.gpu), namun Anda tetap dapat menjalankan '}
+                          <strong className="font-bold text-slate-900">
+                            WebGL2 Fast Enhance Shader (Bicubic 16-tap + Unsharp + Contrast)
+                          </strong>{' '}
+                          secara penuh di sini (batas durasi maks.{' '}
+                          <strong className="font-bold text-slate-900">
+                            {MAX_AI_DURATION_SECONDS} detik
+                          </strong>
+                          ).
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="flex flex-col gap-2 rounded-2xl border border-violet-200 bg-gradient-to-r from-violet-50 via-indigo-50/70 to-sky-50/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm shadow-violet-600/25">
+                        <Cpu aria-hidden="true" className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-sm font-bold text-slate-900">
+                            GPU HD Upscaler • Validated Offscreen Readback
+                          </h3>
+                          <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2.5 py-0.5 font-mono text-[10px] font-bold text-emerald-800 ring-1 ring-emerald-200">
+                            WebGPU + WebGL2 Safe
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs leading-relaxed text-slate-700">
+                          Ekstraksi frame native browser + render offscreen{' '}
+                          <code className="font-mono font-semibold text-violet-900">
+                            GPUTexture
+                          </code>{' '}
+                          tervalidasi dengan fallback otomatis WebGL2 (dijamin jernih, tidak hitam).
+                          Batas durasi maksimal{' '}
+                          <strong className="font-bold text-slate-900">
+                            {MAX_AI_DURATION_SECONDS} detik
+                          </strong>
+                          .
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {!durationWithinAiLimit && (
                   <div
@@ -869,8 +1064,8 @@ export function FeatureTabs({
                           <strong className="font-mono font-bold text-rose-950 tabular-nums">
                             {formatDuration(selectedVideoDuration)}
                           </strong>
-                          . Gunakan klip ≤ {MAX_AI_DURATION_SECONDS} detik untuk AI WebGPU agar GPU
-                          tidak hang, atau gunakan Tab Jernihkan &amp; HD untuk video panjang.
+                          . Gunakan klip ≤ {MAX_AI_DURATION_SECONDS} detik untuk GPU Upscaler agar
+                          GPU tidak hang, atau gunakan Tab Jernihkan &amp; HD untuk video panjang.
                         </p>
                       </div>
                     </div>
@@ -887,29 +1082,44 @@ export function FeatureTabs({
 
                 <div>
                   <span className="text-sm font-bold text-slate-900">Mode Mesin GPU</span>
-                  <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
                     {[
                       {
                         id: 'auto-onnx' as const,
-                        title: 'ONNX AI + Auto Fallback Shader',
-                        badge: 'ONNX + Fallback',
-                        desc: 'Coba unduh model .onnx (timeout 12 dtk). Jika terblokir CORS/COEP, otomatis beralih ke WebGPU Fast Enhance Shader.',
+                        title: 'ONNX AI + Auto Fallback',
+                        badge: aiWebGpuAvailable ? 'ONNX WebGPU' : 'Butuh WebGPU',
+                        desc: 'Coba unduh model .onnx (timeout 12 dtk). Jika terblokir CORS/COEP, otomatis beralih ke Shader lokal.',
+                        unavailable: !aiWebGpuAvailable,
                       },
                       {
                         id: 'webgpu-shader' as const,
-                        title: 'WebGPU Fast Enhance Shader',
-                        badge: '100% Lokal & Instan',
-                        desc: 'Langsung proses Bicubic 16-tap + Unsharp Mask + Contrast di GPU browser tanpa unduh model dari server luar.',
+                        title: 'WebGPU Fast Enhance',
+                        badge: aiWebGpuAvailable ? '100% Lokal & Cepat' : 'Butuh WebGPU',
+                        desc: 'Langsung proses Bicubic 16-tap + Unsharp Mask + Contrast di WebGPU tanpa unduh model luar.',
+                        unavailable: !aiWebGpuAvailable,
+                      },
+                      {
+                        id: 'webgl2-shader' as const,
+                        title: 'WebGL2 Fast Enhance',
+                        badge: aiCanRunFallbackWebGl2
+                          ? 'Aktif (Lebih lambat dari WebGPU)'
+                          : 'Fallback Kompatibel',
+                        desc: 'Shader Bicubic + Unsharp + Contrast di WebGL2 (0 byte ONNX). Lebih lambat dari WebGPU, tetapi kompatibel luas.',
+                        unavailable: !webgl2Supported,
                       },
                     ].map((mode) => {
-                      const active = aiSettings.enginePreference === mode.id
+                      const effectiveEngine: AiEnginePreference = aiWebGpuAvailable
+                        ? aiSettings.enginePreference
+                        : 'webgl2-shader'
+                      const active = effectiveEngine === mode.id
+                      const isLocked = disabled || mode.unavailable
                       return (
                         <button
                           key={mode.id}
                           type="button"
-                          disabled={disabled}
+                          disabled={isLocked}
                           onClick={() => handleAiEnginePreference(mode.id)}
-                          className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl border p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-2 disabled:opacity-60 ${
+                          className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl border p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-55 ${
                             active
                               ? 'border-violet-500 bg-violet-50/80 shadow-sm ring-1 ring-violet-500/30'
                               : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
@@ -919,9 +1129,11 @@ export function FeatureTabs({
                             <div>
                               <span
                                 className={`inline-block rounded-full px-2 py-0.5 font-mono text-[10px] font-bold ${
-                                  active
-                                    ? 'bg-violet-600 text-white'
-                                    : 'bg-slate-200 text-slate-700'
+                                  mode.unavailable
+                                    ? 'bg-slate-200 text-slate-500'
+                                    : active
+                                      ? 'bg-violet-600 text-white'
+                                      : 'bg-slate-200 text-slate-700'
                                 }`}
                               >
                                 {mode.badge}
@@ -947,7 +1159,7 @@ export function FeatureTabs({
                   </div>
                 </div>
 
-                {aiSettings.enginePreference === 'auto-onnx' && (
+                {aiWebGpuAvailable && aiSettings.enginePreference === 'auto-onnx' && (
                   <>
                     <div>
                       <span className="text-sm font-bold text-slate-900">

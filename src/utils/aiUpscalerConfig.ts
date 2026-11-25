@@ -4,7 +4,7 @@ export const MAX_AI_DURATION_SECONDS = 15
 
 export type AiModelPresetId = 'realesr-general-x4v3' | 'espcn-x3' | 'custom'
 
-export type AiEnginePreference = 'auto-onnx' | 'webgpu-shader'
+export type AiEnginePreference = 'auto-onnx' | 'webgpu-shader' | 'webgl2-shader'
 
 export type AiTargetFps = 20 | 24 | 30
 
@@ -85,13 +85,23 @@ export const DEFAULT_AI_UPSCALE_SETTINGS: AiUpscaleSettings = {
 
 /**
  * Aturan keamanan lintas platform:
- * AI WebGPU hanya diizinkan pada Desktop modern dengan dukungan WebGPU aktif.
- * Mobile (iOS/Android) atau browser tanpa navigator.gpu dilarang memuat ONNX.
+ * - ONNX WebGPU hanya diizinkan pada Desktop modern dengan dukungan WebGPU aktif.
+ *   Mobile (iOS/Android) atau browser tanpa navigator.gpu dilarang memuat ONNX (0 byte).
+ * - WebGL2 Fast Enhance Shader tetap bisa dipakai sebagai fallback penuh tanpa ONNX
+ *   ketika WebGPU tidak tersedia namun WebGL2 didukung browser.
  */
 export function isAiWebGpuSupported(isMobile: boolean, webgpuStatus: WebGPUState): boolean {
   if (isMobile) return false
   if (typeof navigator === 'undefined' || !('gpu' in navigator)) return false
   return webgpuStatus === 'supported'
+}
+
+export function isAiAnyGpuSupported(
+  isMobile: boolean,
+  webgpuStatus: WebGPUState,
+  webgl2Supported: boolean,
+): boolean {
+  return isAiWebGpuSupported(isMobile, webgpuStatus) || webgl2Supported
 }
 
 export function isDurationWithinAiLimit(durationSeconds: number | null): boolean {

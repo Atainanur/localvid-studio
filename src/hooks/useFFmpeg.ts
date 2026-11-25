@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
-import { detectDeviceInfo, type DeviceType } from '../utils/environment'
+import { detectCoiReloadPending, detectDeviceInfo, type DeviceType } from '../utils/environment'
 
 export type EngineMode = 'Multi-Thread' | 'Single-Thread Hemat RAM'
 
@@ -33,6 +33,13 @@ export interface CleanupMemoryResult {
   revokedBlobUrls: number
 }
 
+export interface PinnedLogSummary {
+  command: string | null
+  durationLine: string | null
+  firstError: string | null
+  finalSummary: string | null
+}
+
 export interface UseFFmpegReturn {
   /** Status apakah engine FFmpeg.wasm sudah siap digunakan. */
   isLoaded: boolean
@@ -40,10 +47,22 @@ export interface UseFFmpegReturn {
   isLoadingEngine: boolean
   /** Status apakah ada perintah FFmpeg yang sedang dieksekusi. */
   isProcessing: boolean
+  /** [BUG-17] True sesaat saat coi-serviceworker sedang menyiapkan isolasi Multi-Thread di GitHub Pages. */
+  isPreparingIsolation: boolean
   /** Progres pemrosesan saat ini dalam rentang 0–100. */
   progress: number
+  /** [BUG-04] True bila durasi referensi tersedia untuk menghitung persentase akurat. */
+  hasExpectedDuration: boolean
+  /** [BUG-04 & BUG-07] Nomor frame terakhir yang dilaporkan FFmpeg secara real-time. */
+  currentFrame: number | null
+  /** [BUG-07] Timestamp terakhir (HH:MM:SS.ms) yang sedang diproses FFmpeg. */
+  currentTimeLabel: string | null
+  /** [BUG-07] Timestamp epoch (ms) saat aktivitas frame/log terakhir diterima. */
+  lastActivityAt: number | null
   /** Log keluaran FFmpeg dan lifecycle engine (dibatasi agar hemat RAM). */
   logs: string[]
+  /** [BUG-06] Ringkasan tersemat yang tidak ikut terhapus oleh batas MAX_LOG_LINES=250. */
+  pinnedLogSummary: PinnedLogSummary
   /** Mode engine adaptif: 'Multi-Thread' atau 'Single-Thread Hemat RAM'. */
   engineMode: EngineMode
   /** Jumlah thread aman untuk flag -threads FFmpeg (1 di Single-Thread, 2 atau 4 di Multi-Thread). */
@@ -60,6 +79,12 @@ export interface UseFFmpegReturn {
   corePackage: CorePackageName
   /** Memuat engine FFmpeg.wasm secara adaptif melalui CDN + toBlobURL. */
   loadEngine: () => Promise<FFmpeg>
+  /** [BUG-04] Mengirim durasi video hasil readVideoMetadata langsung ke engine sebelum eksekusi. */
+  setExpectedDuration: (durationSeconds: number | null) => void
+  /** [BUG-06] Menyematkan deskripsi perintah aktif pada ringkasan log tersemat. */
+  setPinnedCommand: (command: string | null) => void
+  /** [BUG-06] Menyematkan ringkasan akhir proses pada ringkasan log tersemat. */
+  setPinnedFinalSummary: (summary: string | null) => void
   /**
    * Menjalankan perintah CLI FFmpeg.
    * Berikan `durationSeconds` agar parser log `time=HH:MM:SS.ms` menghitung progres 0-100% secara akurat.
@@ -107,6 +132,16 @@ const MAX_LOG_LINES = 250
 
 const DURATION_REGEX = /Duration:\s*(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/
 const TIME_REGEX = /time=(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/
+const FRAME_REGEX = /frame=\s*(\d+)/
+const FFMPEG_ERROR_LINE_REGEX =
+  /\b(Error\b|Invalid argument|Conversion failed|No such filter|Could not|Cannot open|Failed to|Unknown encoder|Unrecognized option)/i
+
+const EMPTY_PINNED_SUMMARY: PinnedLogSummary = {
+  command: null,
+  durationLine: null,
+  firstError: null,
+  finalSummary: null,
+}
 
 const CDN_PROVIDERS = [
   { name: 'jsDelivr', baseUrl: 'https://cdn.jsdelivr.net/npm' },
@@ -178,8 +213,16 @@ export function useFFmpeg(): UseFFmpegReturn {
   const [isLoaded, setIsLoaded] = useState(false)
   const [isLoadingEngine, setIsLoadingEngine] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [isPreparingIsolation, setIsPreparingIsolation] = useState<boolean>(
+    () => profile.isDesktop && !profile.crossOriginIsolated && detectCoiReloadPending(),
+  )
   const [progress, setProgress] = useState(0)
+  const [hasExpectedDuration, setHasExpectedDuration] = useState(false)
+  const [currentFrame, setCurrentFrame] = useState<number | null>(null)
+  const [currentTimeLabel, setCurrentTimeLabel] = useState<string | null>(null)
+  const [lastActivityAt, setLastActivityAt] = useState<number | null>(null)
   const [logs, setLogs] = useState<string[]>([])
+  const [pinnedLogSummary, setPinnedLogSummary] = useState<PinnedLogSummary>(EMPTY_PINNED_SUMMARY)
   const [error, setError] = useState<string | null>(null)
 
   const ffmpegRef = useRef<FFmpeg | null>(null)
@@ -188,10 +231,23 @@ export function useFFmpeg(): UseFFmpegReturn {
   const abortControllerRef = useRef<AbortController | null>(null)
   const isMountedRef = useRef(true)
 
-  // Pelacakan durasi & progres aktif untuk parser regex `time=HH:MM:SS.ms`
+  // Pelacakan durasi & progres aktif untuk parser regex `time=HH:MM:SS.ms` dan `frame=N`
+  const uploadedDurationRef = useRef<number | null>(null)
   const expectedDurationRef = useRef<number | null>(null)
   const currentExecProgressRef = useRef(0)
   const isExecutingRef = useRef(false)
+
+  // [BUG-17] Batasi status transisi "Menyiapkan mode Multi-Thread..." maks 2.5 detik
+  // bila coi-serviceworker batal/gagal reload agar badge tidak menggantung selamanya
+  useEffect(() => {
+    if (!isPreparingIsolation) return
+    const timer = window.setTimeout(() => {
+      if (isMountedRef.current) {
+        setIsPreparingIsolation(false)
+      }
+    }, 2500)
+    return () => window.clearTimeout(timer)
+  }, [isPreparingIsolation])
 
   // File sementara di virtual filesystem FFmpeg (bisa dihapus via cleanupMemory)
   const trackedFilesRef = useRef<Set<string>>(new Set())
@@ -221,14 +277,42 @@ export function useFFmpeg(): UseFFmpegReturn {
 
   const clearLogs = useCallback(() => {
     setLogs([])
+    setPinnedLogSummary(EMPTY_PINNED_SUMMARY)
+  }, [])
+
+  const setExpectedDuration = useCallback((durationSeconds: number | null) => {
+    const valid =
+      typeof durationSeconds === 'number' &&
+      Number.isFinite(durationSeconds) &&
+      durationSeconds > 0
+        ? durationSeconds
+        : null
+    uploadedDurationRef.current = valid
+    expectedDurationRef.current = valid
+    if (isMountedRef.current) {
+      setHasExpectedDuration(valid !== null)
+    }
+  }, [])
+
+  const setPinnedCommand = useCallback((command: string | null) => {
+    if (!isMountedRef.current) return
+    setPinnedLogSummary((prev) => ({ ...prev, command }))
+  }, [])
+
+  const setPinnedFinalSummary = useCallback((finalSummary: string | null) => {
+    if (!isMountedRef.current) return
+    setPinnedLogSummary((prev) => ({ ...prev, finalSummary }))
   }, [])
 
   const resetProcessState = useCallback(() => {
     if (isExecutingRef.current) return
-    expectedDurationRef.current = null
+    expectedDurationRef.current = uploadedDurationRef.current
     currentExecProgressRef.current = 0
     if (isMountedRef.current) {
       setProgress(0)
+      setCurrentFrame(null)
+      setCurrentTimeLabel(null)
+      setLastActivityAt(null)
       setError(null)
     }
   }, [])
@@ -333,6 +417,9 @@ export function useFFmpeg(): UseFFmpegReturn {
         setIsLoadingEngine(false)
         setIsProcessing(false)
         setProgress(0)
+        setCurrentFrame(null)
+        setCurrentTimeLabel(null)
+        setLastActivityAt(null)
         if (reasonMessage) {
           appendLog(reasonMessage)
         }
@@ -369,32 +456,69 @@ export function useFFmpeg(): UseFFmpegReturn {
 
       ffmpeg.on('log', ({ type, message }) => {
         if (loadSessionIdRef.current !== sessionId) return
-        appendLog(type ? `[${type}] ${message}` : message)
+        const formatted = type ? `[${type}] ${message}` : message
+        appendLog(formatted)
 
         if (!isExecutingRef.current) return
 
-        // Jika durasi video belum terdeteksi dari browser, tangkap dari output FFmpeg
-        if (!expectedDurationRef.current || expectedDurationRef.current <= 0) {
-          const durationMatch = DURATION_REGEX.exec(message)
-          if (durationMatch) {
-            const parsedDuration = parseTimestampToSeconds(
-              durationMatch[1],
-              durationMatch[2],
-              durationMatch[3],
-            )
-            if (parsedDuration > 0) {
-              expectedDurationRef.current = parsedDuration
+        // Catat timestamp aktivitas terbaru untuk watchdog liveness (BUG-07)
+        if (isMountedRef.current) {
+          setLastActivityAt(Date.now())
+        }
+
+        // Tangkap baris Duration: untuk perhitungan progres & ringkasan log tersemat (BUG-04 & BUG-06)
+        const durationMatch = DURATION_REGEX.exec(message)
+        if (durationMatch) {
+          const parsedDuration = parseTimestampToSeconds(
+            durationMatch[1],
+            durationMatch[2],
+            durationMatch[3],
+          )
+          if (parsedDuration > 0 && (!expectedDurationRef.current || expectedDurationRef.current <= 0)) {
+            expectedDurationRef.current = parsedDuration
+            if (isMountedRef.current) {
+              setHasExpectedDuration(true)
             }
+          }
+          if (isMountedRef.current) {
+            const cleanDurationLine = message.trim()
+            setPinnedLogSummary((prev) =>
+              prev.durationLine ? prev : { ...prev, durationLine: cleanDurationLine },
+            )
           }
         }
 
-        // Parser regex real-time `time=HH:MM:SS.ms` agar progress bar tidak macet di 0%
+        // Tangkap error pertama FFmpeg (abaikan "Aborted()" pasca-selesai Emscripten)
+        if (
+          isMountedRef.current &&
+          !/^Aborted\(\)$/i.test(message.trim()) &&
+          FFMPEG_ERROR_LINE_REGEX.test(message)
+        ) {
+          const cleanErr = message.trim()
+          setPinnedLogSummary((prev) => (prev.firstError ? prev : { ...prev, firstError: cleanErr }))
+        }
+
+        // Tangkap nomor frame aktif (BUG-04 & BUG-07)
+        const frameMatch = FRAME_REGEX.exec(message)
+        if (frameMatch && isMountedRef.current) {
+          const parsedFrame = Number.parseInt(frameMatch[1], 10)
+          if (Number.isFinite(parsedFrame) && parsedFrame > 0) {
+            setCurrentFrame(parsedFrame)
+          }
+        }
+
+        // Parser regex real-time `time=HH:MM:SS.ms` (abaikan timestamp negatif time=-577014:...)
         const timeMatch = TIME_REGEX.exec(message)
-        if (timeMatch && expectedDurationRef.current && expectedDurationRef.current > 0) {
+        if (timeMatch) {
           const currentSec = parseTimestampToSeconds(timeMatch[1], timeMatch[2], timeMatch[3])
           if (currentSec >= 0) {
-            const pct = (currentSec / expectedDurationRef.current) * 100
-            updateProgressMonotonic(pct)
+            if (isMountedRef.current) {
+              setCurrentTimeLabel(`${timeMatch[1]}:${timeMatch[2]}:${timeMatch[3]}`)
+            }
+            if (expectedDurationRef.current && expectedDurationRef.current > 0) {
+              const pct = (currentSec / expectedDurationRef.current) * 100
+              updateProgressMonotonic(pct)
+            }
           }
         }
       })
@@ -608,12 +732,14 @@ export function useFFmpeg(): UseFFmpegReturn {
       const controller = new AbortController()
       abortControllerRef.current = controller
 
-      expectedDurationRef.current =
+      const resolvedDuration =
         typeof durationSeconds === 'number' &&
         Number.isFinite(durationSeconds) &&
         durationSeconds > 0
           ? durationSeconds
-          : null
+          : uploadedDurationRef.current
+
+      expectedDurationRef.current = resolvedDuration
       currentExecProgressRef.current = 0
       isExecutingRef.current = true
 
@@ -621,6 +747,16 @@ export function useFFmpeg(): UseFFmpegReturn {
         setIsProcessing(true)
         setError(null)
         setProgress(0)
+        setHasExpectedDuration(resolvedDuration !== null)
+        setCurrentFrame(null)
+        setCurrentTimeLabel(null)
+        setLastActivityAt(Date.now())
+        setPinnedLogSummary({
+          command: `ffmpeg ${args.join(' ')}`,
+          durationLine: null,
+          firstError: null,
+          finalSummary: null,
+        })
       }
 
       try {
@@ -628,9 +764,18 @@ export function useFFmpeg(): UseFFmpegReturn {
           signal: controller.signal,
         })
 
-        if (isMountedRef.current && exitCode === 0) {
-          currentExecProgressRef.current = 100
-          setProgress(100)
+        if (isMountedRef.current) {
+          if (exitCode === 0) {
+            currentExecProgressRef.current = 100
+            setProgress(100)
+          }
+          setPinnedLogSummary((prev) => ({
+            ...prev,
+            finalSummary:
+              exitCode === 0
+                ? 'FFmpeg selesai sukses (kode keluar 0).'
+                : `FFmpeg berhenti dengan kode keluar ${exitCode}.`,
+          }))
         }
 
         return exitCode
@@ -638,6 +783,11 @@ export function useFFmpeg(): UseFFmpegReturn {
         const errMsg = err instanceof Error ? err.message : String(err)
         if (isMountedRef.current && !controller.signal.aborted) {
           setError(errMsg)
+          setPinnedLogSummary((prev) => ({
+            ...prev,
+            firstError: prev.firstError ?? errMsg,
+            finalSummary: `Gagal: ${errMsg}`,
+          }))
         }
         throw err
       } finally {
@@ -670,8 +820,14 @@ export function useFFmpeg(): UseFFmpegReturn {
     isLoaded,
     isLoadingEngine,
     isProcessing,
+    isPreparingIsolation,
     progress,
+    hasExpectedDuration,
+    currentFrame,
+    currentTimeLabel,
+    lastActivityAt,
     logs,
+    pinnedLogSummary,
     engineMode: profile.engineMode,
     recommendedThreads: profile.recommendedThreads,
     error,
@@ -680,6 +836,9 @@ export function useFFmpeg(): UseFFmpegReturn {
     crossOriginIsolated: profile.crossOriginIsolated,
     corePackage: profile.corePackage,
     loadEngine,
+    setExpectedDuration,
+    setPinnedCommand,
+    setPinnedFinalSummary,
     exec,
     writeInputFile,
     readOutputAsBlobURL,

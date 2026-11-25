@@ -21,6 +21,8 @@ export interface IsolationInfo {
   sharedArrayBufferAvailable: boolean
   serviceWorkerActive: boolean
   isSecureContext: boolean
+  /** True saat kunjungan pertama GitHub Pages ketika coi-serviceworker sedang mendaftar/reload untuk isolasi COOP/COEP */
+  isCoiReloadPending: boolean
 }
 
 interface GPUAdapterInfoLike {
@@ -78,6 +80,30 @@ export function detectDeviceInfo(): DeviceInfo {
   }
 }
 
+export function detectCoiReloadPending(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false
+  if (window.crossOriginIsolated === true) return false
+  if (window.isSecureContext !== true) return false
+  if (!('serviceWorker' in navigator)) return false
+  // Jika sudah ada controller tetapi tetap tidak crossOriginIsolated, berarti reload tidak membantu
+  if (navigator.serviceWorker.controller) return false
+
+  const hasCoiScript =
+    typeof document !== 'undefined' &&
+    Boolean(document.querySelector('script[src*="coi-serviceworker"]'))
+  if (!hasCoiScript) return false
+
+  try {
+    // coi-serviceworker menandai sessionStorage jika reload sudah gagal/dibatasi
+    const coiReloaded = window.sessionStorage.getItem('coiReloadedBySelf')
+    if (coiReloaded === 'coepdegrade') return false
+  } catch {
+    // Abaikan jika sessionStorage dibatasi browser
+  }
+
+  return true
+}
+
 export function detectIsolationInfo(): IsolationInfo {
   return {
     crossOriginIsolated: window.crossOriginIsolated === true,
@@ -85,6 +111,21 @@ export function detectIsolationInfo(): IsolationInfo {
     serviceWorkerActive:
       'serviceWorker' in navigator && Boolean(navigator.serviceWorker.controller),
     isSecureContext: window.isSecureContext === true,
+    isCoiReloadPending: detectCoiReloadPending(),
+  }
+}
+
+export function detectWebGL2Support(): boolean {
+  if (typeof document === 'undefined') return false
+  try {
+    const canvas = document.createElement('canvas')
+    const gl = canvas.getContext('webgl2')
+    if (!gl) return false
+    const loseExt = gl.getExtension('WEBGL_lose_context')
+    loseExt?.loseContext()
+    return true
+  } catch {
+    return false
   }
 }
 

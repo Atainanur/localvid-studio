@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
+  AlertTriangle,
   Check,
   ChevronDown,
   ChevronUp,
@@ -25,6 +26,7 @@ import { UploadZone } from './components/UploadZone'
 import { useFFmpeg } from './hooks/useFFmpeg'
 import {
   DEFAULT_AI_UPSCALE_SETTINGS,
+  isAiAnyGpuSupported,
   isAiWebGpuSupported,
   isDurationWithinAiLimit,
   isValidModelUrl,
@@ -46,6 +48,7 @@ import {
 import {
   detectDeviceInfo,
   detectIsolationInfo,
+  detectWebGL2Support,
   detectWebGPUInfo,
   type WebGPUInfo,
 } from './utils/environment'
@@ -78,8 +81,14 @@ export default function App() {
     isLoaded,
     isLoadingEngine,
     isProcessing,
+    isPreparingIsolation,
     progress,
+    hasExpectedDuration,
+    currentFrame: ffmpegCurrentFrame,
+    currentTimeLabel: ffmpegCurrentTimeLabel,
+    lastActivityAt: ffmpegLastActivityAt,
     logs,
+    pinnedLogSummary,
     engineMode,
     recommendedThreads,
     corePackage,
@@ -88,6 +97,9 @@ export default function App() {
     crossOriginIsolated,
     error: engineError,
     loadEngine,
+    setExpectedDuration,
+    setPinnedCommand,
+    setPinnedFinalSummary,
     exec,
     writeInputFile,
     readOutputAsBlobURL,
@@ -103,6 +115,7 @@ export default function App() {
   // Info diagnostik ringkas
   const deviceInfo = useMemo(() => detectDeviceInfo(), [])
   const isolationInfo = useMemo(() => detectIsolationInfo(), [])
+  const webgl2Supported = useMemo(() => detectWebGL2Support(), [])
   const [webgpu, setWebgpu] = useState<WebGPUInfo>({
     status: 'checking',
     summary: 'Memeriksa WebGPU...',
@@ -124,14 +137,15 @@ export default function App() {
     DEFAULT_COMPRESS_OPTIONS,
   )
 
-  // Tab 3: Jernihkan & HD + Filter Warna
+  // Tab 3: Jernihkan & HD + Filter Warna ([BUG-09] default colorFilter = 'none' agar netral)
   const [enhanceOptions, setEnhanceOptions] = useState<EnhanceOptions>({
     denoise: false,
     sharpen: false,
     colorFix: false,
     upscale1080p: false,
     scaleAlgorithm: 'bicubic',
-    colorFilter: 'iphone18',
+    colorFilter: 'none',
+    smartSizeCap: true,
   })
 
   // Tab 4: Stabilizer (Mandiri)
@@ -154,7 +168,10 @@ export default function App() {
   const metadataReqIdRef = useRef(0)
   const cancelledByUserRef = useRef(false)
   const aiAbortControllerRef = useRef<AbortController | null>(null)
+  const clearAiCacheRef = useRef<(() => number) | null>(null)
   const featureCardRef = useRef<HTMLDivElement | null>(null)
+  const lastWatchdogActivityRef = useRef<number>(Date.now())
+  const [idleSeconds, setIdleSeconds] = useState(0)
 
   useEffect(() => {
     if (result) {
@@ -186,8 +203,37 @@ export default function App() {
   }, [selectedVideo?.file])
 
   const aiWebGpuAvailable = isAiWebGpuSupported(isMobile, webgpu.status)
+  const aiAnyGpuAvailable = isAiAnyGpuSupported(isMobile, webgpu.status, webgl2Supported)
   const aiDurationOk = isDurationWithinAiLimit(selectedVideo?.metadata.duration ?? null)
   const isBusy = isLoadingEngine || isPreparing || isProcessing || isAiRunning
+
+  // [BUG-07] Watchdog liveness: catat setiap aktivitas log/frame dan hitung durasi diam
+  useEffect(() => {
+    if (!isBusy) return
+    lastWatchdogActivityRef.current = Date.now()
+    setIdleSeconds(0)
+  }, [
+    isBusy,
+    ffmpegLastActivityAt,
+    progress,
+    aiFrameProgress?.currentFrame,
+    aiFrameProgress?.percent,
+    statusStage,
+    logs.length,
+  ])
+
+  useEffect(() => {
+    if (!isBusy) {
+      setIdleSeconds(0)
+      return
+    }
+    lastWatchdogActivityRef.current = Date.now()
+    const intervalId = window.setInterval(() => {
+      const elapsedSec = Math.floor((Date.now() - lastWatchdogActivityRef.current) / 1000)
+      setIdleSeconds(elapsedSec)
+    }, 1000)
+    return () => window.clearInterval(intervalId)
+  }, [isBusy])
 
   const clearCurrentResult = async () => {
     const oldResultUrl = result?.url
@@ -215,6 +261,7 @@ export default function App() {
     const reqId = metadataReqIdRef.current + 1
     metadataReqIdRef.current = reqId
 
+    setExpectedDuration(null)
     await clearCurrentResult()
 
     const extension = getFileExtension(file.name) || 'mp4'
@@ -232,6 +279,8 @@ export default function App() {
     if (metadataReqIdRef.current === reqId) {
       setSelectedVideo((prev) => (prev ? { ...prev, metadata } : prev))
       setIsReadingMetadata(false)
+      // [BUG-04] Kirim durasi langsung ke useFFmpeg agar progress bar bergerak sejak frame pertama
+      setExpectedDuration(metadata.duration)
 
       // Sesuaikan otomatis batas Custom Target Size / Template Media Sosial terhadap file baru
       setCompressOptions((prev) => {
@@ -263,6 +312,7 @@ export default function App() {
     metadataReqIdRef.current += 1
     setSelectedVideo(null)
     setIsReadingMetadata(false)
+    setExpectedDuration(null)
     await clearCurrentResult()
   }
 
@@ -287,6 +337,13 @@ export default function App() {
     if (aiAbortControllerRef.current) {
       aiAbortControllerRef.current.abort()
       aiAbortControllerRef.current = null
+    }
+    // [BUG-14] Bersihkan modelBufferCache ONNX saat proses dibatalkan atau engine di-terminate
+    if (clearAiCacheRef.current) {
+      const freed = clearAiCacheRef.current()
+      if (freed > 0) {
+        addLog(`[LocalVid AI] Cache model ONNX dibebaskan (${freed} model).`)
+      }
     }
     setIsPreparing(false)
     setIsAiRunning(false)
@@ -325,18 +382,39 @@ export default function App() {
     compressCodecPair.compatibilityWarning === null
 
   const aiSettingsReady =
-    aiSettings.enginePreference === 'webgpu-shader' || isValidModelUrl(aiSettings.modelUrl)
+    !aiWebGpuAvailable ||
+    aiSettings.enginePreference !== 'auto-onnx' ||
+    isValidModelUrl(aiSettings.modelUrl)
 
   const canStartProcess =
     Boolean(selectedVideo) &&
     !isBusy &&
     (activeTab !== 'compress' || compressSettingsReady) &&
     (activeTab !== 'enhance' || activeEnhanceFilters.length > 0) &&
-    (activeTab !== 'ai-upscale' || (aiWebGpuAvailable && aiDurationOk && aiSettingsReady))
+    (activeTab !== 'ai-upscale' || (aiAnyGpuAvailable && aiDurationOk && aiSettingsReady))
+
+  // [BUG-09] Ringkasan singkat opsi aktif Tab 3 untuk ditampilkan tepat di atas tombol proses
+  const enhanceActiveSummaryItems = (() => {
+    const items: string[] = []
+    if (enhanceOptions.denoise) items.push('Kurangi Noise')
+    if (enhanceOptions.sharpen) items.push('Pertajam Detail')
+    if (enhanceOptions.colorFix) items.push('Perbaiki Warna')
+    if (enhanceOptions.upscale1080p) items.push(`Upscale 1080p (${enhanceOptions.scaleAlgorithm})`)
+    if (enhanceOptions.colorFilter !== 'none') {
+      items.push(`Filter ${getColorFilterPreset(enhanceOptions.colorFilter).name}`)
+    }
+    if (items.length > 0 && enhanceOptions.smartSizeCap) {
+      items.push('Smart Cap')
+    }
+    return items
+  })()
 
   const actionButtonLabel = (() => {
     if (isLoadingEngine) return 'Memuat Engine FFmpeg...'
     if (aiFrameProgress && isAiRunning) return aiFrameProgress.label
+    if (isProcessing && !hasExpectedDuration && ffmpegCurrentFrame !== null) {
+      return `Memproses frame ke-${ffmpegCurrentFrame}...`
+    }
     if (isPreparing || isProcessing || isAiRunning) return statusStage || 'Memproses Video...'
     if (activeTab === 'convert') {
       return `Ubah ke .${outputFormat.toUpperCase()}${fastRemux ? ' (Mode Kilat)' : ''}`
@@ -353,7 +431,9 @@ export default function App() {
       return `Stabilkan Video (${stab.title})`
     }
     if (activeTab === 'ai-upscale') {
-      if (!aiWebGpuAvailable) return 'Khusus Browser Desktop WebGPU'
+      if (!aiAnyGpuAvailable) return 'Membutuhkan WebGPU atau WebGL2'
+      if (!aiWebGpuAvailable) return 'Jalankan WebGL2 Fast Enhance HD (Fallback)'
+      if (aiSettings.enginePreference === 'webgl2-shader') return 'Jalankan WebGL2 Fast Enhance HD'
       return aiSettings.enginePreference === 'webgpu-shader'
         ? 'Jalankan WebGPU Fast Enhance HD'
         : 'Jalankan AI HD Upscaler (WebGPU)'
@@ -401,16 +481,26 @@ export default function App() {
 
       // TAB 5: AI / GPU HD UPSCALER (BETA) — Native <video>+<canvas> + Offscreen WebGPU/WebGL2
       if (activeTab === 'ai-upscale') {
-        if (!aiWebGpuAvailable) {
+        if (!aiAnyGpuAvailable) {
           throw new Error(
-            'AI HD Upscaler hanya tersedia pada Desktop modern dengan WebGPU aktif.',
+            'GPU HD Upscaler membutuhkan browser dengan dukungan WebGPU atau WebGL2.',
           )
         }
         if (!aiDurationOk) {
           throw new Error(
-            'Durasi video melebihi batas maksimal 15 detik untuk AI HD Upscaler WebGPU.',
+            'Durasi video melebihi batas maksimal 15 detik untuk GPU HD Upscaler.',
           )
         }
+
+        const effectiveAiSettings: AiUpscaleSettings = aiWebGpuAvailable
+          ? aiSettings
+          : { ...aiSettings, enginePreference: 'webgl2-shader' }
+
+        setPinnedCommand(
+          `AI/GPU Upscaler (${effectiveAiSettings.enginePreference}, ${effectiveAiSettings.targetFps} fps, 1080p=${String(
+            effectiveAiSettings.normalizeTo1080p,
+          )})`,
+        )
 
         registerTempFile(inputName)
         registerTempFile(outputName)
@@ -420,8 +510,9 @@ export default function App() {
         const controller = new AbortController()
         aiAbortControllerRef.current = controller
 
-        // Dynamic import memastikan 0 byte onnxruntime-web pernah dimuat di HP / non-WebGPU
-        const { runAiUpscalePipeline } = await import('./utils/aiUpscalerEngine')
+        // Dynamic import memastikan 0 byte onnxruntime-web pernah dimuat bila tidak dipakai
+        const { runAiUpscalePipeline, clearAiModelCache } = await import('./utils/aiUpscalerEngine')
+        clearAiCacheRef.current = clearAiModelCache
 
         const aiOutcome = await runAiUpscalePipeline({
           ffmpeg,
@@ -429,7 +520,7 @@ export default function App() {
           inputFileName: inputName,
           outputFileName: outputName,
           threads: recommendedThreads,
-          settings: aiSettings,
+          settings: effectiveAiSettings,
           signal: controller.signal,
           onProgress: (frameProgress) => {
             setAiFrameProgress(frameProgress)
@@ -452,7 +543,7 @@ export default function App() {
 
         const downloadFileName = buildOutputFileName(
           selectedVideo.name,
-          aiOutcome.usedFallbackShader ? 'webgpu_hd' : 'ai_hd_webgpu',
+          aiOutcome.usedFallbackShader ? 'gpu_hd' : 'ai_hd_webgpu',
           'mp4',
         )
 
@@ -460,6 +551,10 @@ export default function App() {
           selectedVideoDimensions.width && selectedVideoDimensions.height
             ? `${selectedVideoDimensions.width}×${selectedVideoDimensions.height}`
             : 'Asli'
+
+        setPinnedFinalSummary(
+          `Selesai: ${aiOutcome.backendName} • ${aiOutcome.totalFrames} frame (${aiOutcome.targetWidth}×${aiOutcome.targetHeight})`,
+        )
 
         setResult({
           url,
@@ -478,7 +573,7 @@ export default function App() {
             sourceResolution: srcRes,
             targetResolution: `${aiOutcome.targetWidth}×${aiOutcome.targetHeight}`,
             totalFrames: aiOutcome.totalFrames,
-            targetFps: aiSettings.targetFps,
+            targetFps: effectiveAiSettings.targetFps,
             fallbackNotice: aiOutcome.fallbackReason,
           },
         })
@@ -539,6 +634,7 @@ export default function App() {
               // Abaikan jika file output parsial tidak ada
             }
 
+            const fallbackShortCodec = targetFormat === 'webm' ? 'VP8/Vorbis' : 'H.264/AAC'
             const fallbackCodecLabel =
               targetFormat === 'webm'
                 ? 'VP8/Vorbis'
@@ -546,7 +642,7 @@ export default function App() {
 
             setStatusStage(`Fallback otomatis: Re-encode ${fallbackCodecLabel}...`)
             addLog(
-              `[LocalVid] Fast Remux gagal (codec tidak cocok dengan wadah .${targetFormat}). Fallback otomatis ke re-encode ${fallbackCodecLabel}...`,
+              `[LocalVid] Mode Kilat (-c copy) tidak kompatibel dengan codec/wadah .${targetFormat.toUpperCase()} — dialihkan otomatis ke re-encode ${fallbackShortCodec} (${fallbackCodecLabel}).`,
             )
 
             exitCode = await exec(
@@ -562,18 +658,18 @@ export default function App() {
             )
           }
 
+          const fallbackShort = targetFormat === 'webm' ? 'VP8/Vorbis' : 'H.264/AAC'
           summaryNote = usedFallbackEncode
-            ? `Konversi ke .${targetFormat.toUpperCase()} (Fallback Re-encode)`
+            ? `Konversi ke .${targetFormat.toUpperCase()} (Fallback Re-encode ${fallbackShort})`
             : `Fast Remux ke .${targetFormat.toUpperCase()} (-c copy)`
           resultDetails = {
             kind: 'convert',
             sourceFormat: `.${inputExt.toUpperCase()}`,
             targetFormat: `.${targetFormat.toUpperCase()}`,
             processMode: usedFallbackEncode
-              ? targetFormat === 'webm'
-                ? 'Fallback Re-encode (VP8/Vorbis)'
-                : 'Fallback Re-encode (H.264/AAC)'
+              ? `Fallback Re-encode (${fallbackShort})`
               : 'Fast Remux (-c copy)',
+            fallbackCodecLabel: usedFallbackEncode ? fallbackShort : undefined,
           }
         } else {
           setStatusStage(`Re-encode ke .${targetFormat.toUpperCase()}...`)
@@ -660,14 +756,18 @@ export default function App() {
                   : built.resolvedAudioCodec === 'libmp3lame'
                     ? 'MP3'
                     : built.resolvedAudioCodec.toUpperCase()
+        const derivedTpl = compressOptions.derivedFromTemplate
+          ? SOCIAL_TEMPLATES.find((t) => t.id === compressOptions.derivedFromTemplate)
+          : null
+        const customPrefix = derivedTpl ? `Custom (diubah dari ${derivedTpl.name})` : 'Custom'
         const modeOrTemplate =
           activeTpl && activeTpl.id !== 'custom'
             ? activeTpl.name
             : built.resolvedVideoCodec === 'copy'
-              ? 'Custom • Copy Video'
+              ? `${customPrefix} • Copy Video`
               : compressOptions.compressionMode === 'target-size'
-                ? `Custom • Target ${compressOptions.targetSizeMB.toFixed(1)} MB`
-                : `Custom • CRF ${getEffectiveCrf(compressOptions)}`
+                ? `${customPrefix} • Target ${compressOptions.targetSizeMB.toFixed(1)} MB`
+                : `${customPrefix} • CRF ${getEffectiveCrf(compressOptions)}`
 
         resultDetails = {
           kind: 'compress',
@@ -693,6 +793,7 @@ export default function App() {
             isMobile,
             recommendedThreads,
             selectedVideoDimensions,
+            { sizeBytes: selectedVideo.sizeBytes, durationSec },
           ),
           undefined,
           durationSec,
@@ -745,6 +846,7 @@ export default function App() {
             isMobile,
             recommendedThreads,
             selectedVideoDimensions,
+            { sizeBytes: selectedVideo.sizeBytes, durationSec },
           ),
           undefined,
           durationSec,
@@ -768,6 +870,9 @@ export default function App() {
                 ? 'Bilinear'
                 : 'Bicubic'
           activeEnhancements.push(`Upscale 1080p (${algoName})`)
+        }
+        if (enhanceOptions.smartSizeCap) {
+          activeEnhancements.push('Smart Cap')
         }
 
         resultDetails = {
@@ -892,29 +997,39 @@ export default function App() {
               </div>
             </div>
 
-            {/* Badge Mode Engine Aktif + Toggle Diagnostik */}
+            {/* Badge Mode Engine Aktif + Transisi Multi-Thread (BUG-17) + Toggle Diagnostik */}
             <div className="flex flex-wrap items-center gap-2">
-              <span
-                className={`inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold ring-1 ${
-                  isMultiThread
-                    ? 'bg-emerald-50 text-emerald-800 ring-emerald-200'
-                    : 'bg-amber-50 text-amber-800 ring-amber-200'
-                }`}
-                title={`Paket: ${corePackage} (${recommendedThreads} thread)`}
-              >
-                {isMultiThread ? (
-                  <Zap aria-hidden="true" className="h-3.5 w-3.5 text-emerald-600" />
-                ) : (
-                  <Cpu aria-hidden="true" className="h-3.5 w-3.5 text-amber-600" />
-                )}
-                <span>{engineMode}</span>
+              {isPreparingIsolation ? (
                 <span
-                  aria-label={isLoaded ? 'Engine aktif' : 'Engine siaga'}
-                  className={`ml-0.5 h-2 w-2 rounded-full ${
-                    isLoaded ? 'bg-emerald-500' : 'bg-slate-400'
+                  className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-full bg-sky-50 px-3.5 py-1.5 text-xs font-bold text-sky-800 ring-1 ring-sky-200"
+                  title="coi-serviceworker sedang mendaftar untuk mengaktifkan isolasi Multi-Thread"
+                >
+                  <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin text-sky-600" />
+                  <span>Menyiapkan mode Multi-Thread...</span>
+                </span>
+              ) : (
+                <span
+                  className={`inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold ring-1 ${
+                    isMultiThread
+                      ? 'bg-emerald-50 text-emerald-800 ring-emerald-200'
+                      : 'bg-amber-50 text-amber-800 ring-amber-200'
                   }`}
-                />
-              </span>
+                  title={`Paket: ${corePackage} (${recommendedThreads} thread)`}
+                >
+                  {isMultiThread ? (
+                    <Zap aria-hidden="true" className="h-3.5 w-3.5 text-emerald-600" />
+                  ) : (
+                    <Cpu aria-hidden="true" className="h-3.5 w-3.5 text-amber-600" />
+                  )}
+                  <span>{engineMode}</span>
+                  <span
+                    aria-label={isLoaded ? 'Engine aktif' : 'Engine siaga'}
+                    className={`ml-0.5 h-2 w-2 rounded-full ${
+                      isLoaded ? 'bg-emerald-500' : 'bg-slate-400'
+                    }`}
+                  />
+                </span>
+              )}
 
               <button
                 type="button"
@@ -1071,6 +1186,7 @@ export default function App() {
               deviceType={deviceType}
               webgpuStatus={webgpu.status}
               aiWebGpuAvailable={aiWebGpuAvailable}
+              webgl2Supported={webgl2Supported}
               selectedVideoSizeBytes={selectedVideo?.sizeBytes ?? null}
               selectedVideoDuration={selectedVideo?.metadata.duration ?? null}
               selectedVideoExtension={selectedVideo?.extension ?? null}
@@ -1107,6 +1223,30 @@ export default function App() {
           {/* Tombol Proses Utama & Progress Bar Real-time (Sembunyikan saat Clean Result View tampil) */}
           {!result && (
             <section aria-label="Eksekusi dan progres pemrosesan" className="flex flex-col gap-3">
+              {/* [BUG-09] Ringkasan singkat opsi aktif tepat di atas tombol proses pada Tab 3 */}
+              {activeTab === 'enhance' && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200/90 bg-white/90 px-4 py-2.5 text-xs">
+                  <span className="font-bold text-slate-700">Ringkasan opsi aktif:</span>
+                  {enhanceActiveSummaryItems.length > 0 ? (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {enhanceActiveSummaryItems.map((item) => (
+                        <span
+                          key={item}
+                          className="rounded-full bg-orange-50 px-2.5 py-0.5 font-semibold text-orange-800 ring-1 ring-orange-200"
+                        >
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="font-medium text-amber-800">
+                      Belum ada opsi dipilih — pilih minimal satu peningkatan atau filter warna di
+                      atas.
+                    </span>
+                  )}
+                </div>
+              )}
+
               <div className="flex flex-col gap-2.5 sm:flex-row">
                 <button
                   type="button"
@@ -1154,8 +1294,10 @@ export default function App() {
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="truncate font-bold text-slate-800">
                         {aiFrameProgress?.label ||
-                          statusStage ||
-                          (isLoaded && displayedPercent === 100 ? 'Selesai' : 'Memproses...')}
+                          (isProcessing && !hasExpectedDuration && ffmpegCurrentFrame !== null
+                            ? `Memproses frame ke-${ffmpegCurrentFrame}...`
+                            : statusStage ||
+                              (isLoaded && displayedPercent === 100 ? 'Selesai' : 'Memproses...'))}
                       </span>
                       {aiFrameProgress && aiFrameProgress.totalFrames > 0 && (
                         <span className="shrink-0 whitespace-nowrap rounded-full bg-violet-100 px-2.5 py-0.5 font-mono text-xs font-bold text-violet-800 tabular-nums">
@@ -1164,11 +1306,19 @@ export default function App() {
                       )}
                     </div>
                     <span className="shrink-0 font-mono font-bold text-blue-700 tabular-nums">
-                      {isLoadingEngine || isPreparing ? 'Menyiapkan...' : `${displayedPercent}%`}
+                      {isLoadingEngine || isPreparing
+                        ? 'Menyiapkan...'
+                        : isProcessing && !hasExpectedDuration
+                          ? ffmpegCurrentFrame !== null
+                            ? `Frame #${ffmpegCurrentFrame}`
+                            : 'Memproses...'
+                          : `${displayedPercent}%`}
                     </span>
                   </div>
                   <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-200/80">
-                    {isLoadingEngine || isPreparing ? (
+                    {isLoadingEngine ||
+                    isPreparing ||
+                    (isProcessing && !hasExpectedDuration && displayedPercent === 0) ? (
                       <div className="animate-lv-indeterminate h-full w-2/5 rounded-full bg-gradient-to-r from-blue-500 via-sky-400 to-indigo-500" />
                     ) : (
                       <div
@@ -1177,6 +1327,54 @@ export default function App() {
                       />
                     )}
                   </div>
+
+                  {/* [BUG-07] Indikator liveness frame/waktu terakhir & peringatan macet 30 detik */}
+                  {isBusy && (
+                    <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
+                      <span className="inline-flex items-center gap-1.5 font-mono tabular-nums">
+                        <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                        {aiFrameProgress && aiFrameProgress.totalFrames > 0 ? (
+                          <span>
+                            Frame terakhir: {aiFrameProgress.currentFrame} /{' '}
+                            {aiFrameProgress.totalFrames}
+                          </span>
+                        ) : ffmpegCurrentFrame !== null || ffmpegCurrentTimeLabel ? (
+                          <span>
+                            {ffmpegCurrentFrame !== null
+                              ? `Frame ke-${ffmpegCurrentFrame}`
+                              : 'Menyandikan'}
+                            {ffmpegCurrentTimeLabel
+                              ? ` • Waktu diproses: ${ffmpegCurrentTimeLabel}`
+                              : ''}
+                          </span>
+                        ) : (
+                          <span>Engine aktif memproses video...</span>
+                        )}
+                      </span>
+                      {idleSeconds >= 5 && idleSeconds < 30 && (
+                        <span className="font-mono text-slate-400 tabular-nums">
+                          Menunggu frame berikutnya ({idleSeconds} dtk)
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {isBusy && !isLoadingEngine && displayedPercent < 100 && idleSeconds >= 30 && (
+                    <div
+                      role="alert"
+                      className="mt-3 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-xs font-medium text-amber-950"
+                    >
+                      <AlertTriangle
+                        aria-hidden="true"
+                        className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
+                      />
+                      <span>
+                        Tidak ada kemajuan selama <strong className="font-mono">{idleSeconds}</strong>{' '}
+                        detik, periksa <strong className="font-bold">Log Teknis FFmpeg</strong> di
+                        bawah atau tekan <strong className="font-bold">Batalkan</strong>.
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1196,7 +1394,12 @@ export default function App() {
           )}
 
           {/* Panel Log Collapsible (Tetap di paling bawah dalam keadaan tertutup secara default) */}
-          <CollapsibleLogs logs={logs} isActive={isBusy} onClear={clearLogs} />
+          <CollapsibleLogs
+            logs={logs}
+            pinnedSummary={pinnedLogSummary}
+            isActive={isBusy}
+            onClear={clearLogs}
+          />
         </main>
 
         {/* Footer dengan Credit Pembuat Atainanur */}

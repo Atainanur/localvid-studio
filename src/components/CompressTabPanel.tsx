@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState, type KeyboardEvent } from 'react'
 import {
   AlertTriangle,
   ArrowRight,
@@ -31,6 +31,8 @@ import {
   FRAME_RATE_OPTIONS,
   getEffectiveAudioBitrateKbps,
   getEffectiveCrf,
+  getPreservedAdvancedLabels,
+  resetPreservedAdvancedOptions,
   RESOLUTION_PRESET_OPTIONS,
   resolveCodecPair,
   ROTATE_OPTIONS,
@@ -81,6 +83,7 @@ export function CompressTabPanel({
 }: CompressTabPanelProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [targetOutOfRangeNotice, setTargetOutOfRangeNotice] = useState<string | null>(null)
+  const [isEditingTargetText, setIsEditingTargetText] = useState(false)
 
   const isCustomMode = options.socialTemplate === 'custom'
 
@@ -97,6 +100,16 @@ export function CompressTabPanel({
   const clampedTargetMB = Number(
     Math.min(bounds.maxMB, Math.max(bounds.minMB, options.targetSizeMB)).toFixed(1),
   )
+
+  // [BUG-02] State teks lokal agar pengguna bebas mengetik angka desimal parsial ("0.", "0.5")
+  // dan baru dilakukan parsing + clamping saat onBlur atau Enter
+  const [targetSizeText, setTargetSizeText] = useState<string>(() => clampedTargetMB.toFixed(1))
+
+  useEffect(() => {
+    if (!isEditingTargetText) {
+      setTargetSizeText(clampedTargetMB.toFixed(1))
+    }
+  }, [clampedTargetMB, isEditingTargetText])
 
   const sizeEstimate =
     originalSizeBytes !== null
@@ -135,12 +148,28 @@ export function CompressTabPanel({
     sourceExtension,
   )
 
+  const derivedTemplateDef = options.derivedFromTemplate
+    ? SOCIAL_TEMPLATES.find((t) => t.id === options.derivedFromTemplate) ?? null
+    : null
+  const preservedAdvancedLabels = getPreservedAdvancedLabels(
+    options,
+    sourceDurationSec,
+    sourceDimensions,
+  )
+
   const update = (patch: Partial<CompressOptions>, detachTemplate = true) => {
     if (disabled) return
+    const nextDerivedFrom = detachTemplate
+      ? options.socialTemplate !== 'custom'
+        ? options.socialTemplate
+        : options.derivedFromTemplate
+      : options.derivedFromTemplate
+
     onChange({
       ...options,
       ...patch,
       socialTemplate: detachTemplate ? 'custom' : (patch.socialTemplate ?? options.socialTemplate),
+      derivedFromTemplate: nextDerivedFrom,
     })
   }
 
@@ -156,6 +185,10 @@ export function CompressTabPanel({
       ...options,
       outputFormat,
       socialTemplate: 'custom',
+      derivedFromTemplate:
+        options.socialTemplate !== 'custom'
+          ? options.socialTemplate
+          : options.derivedFromTemplate,
       videoCodec: shouldResetToAuto ? 'auto' : options.videoCodec,
       audioCodec: shouldResetToAuto ? 'auto' : options.audioCodec,
     })
@@ -164,6 +197,7 @@ export function CompressTabPanel({
   const handleSelectTemplate = (templateId: SocialTemplateId) => {
     if (disabled) return
     setTargetOutOfRangeNotice(null)
+    setIsEditingTargetText(false)
     if (templateId !== 'custom') {
       setAdvancedOpen(false)
     }
@@ -176,25 +210,62 @@ export function CompressTabPanel({
     onChange(next)
   }
 
-  const handleTargetSizeInput = (rawValue: string) => {
+  const commitTargetSizeValue = (rawValue: string) => {
     if (disabled) return
-    const parsed = Number.parseFloat(rawValue)
-    if (!Number.isFinite(parsed)) return
+    const normalized = rawValue.trim().replace(',', '.')
+    const parsed = Number.parseFloat(normalized)
+    if (!normalized || !Number.isFinite(parsed)) {
+      setTargetSizeText(clampedTargetMB.toFixed(1))
+      return
+    }
 
     if (parsed < bounds.minMB) {
       setTargetOutOfRangeNotice(
         `Nilai ${parsed} MB terlalu kecil untuk durasi video ini — otomatis disesuaikan ke batas aman minimal ${bounds.minMB.toFixed(1)} MB.`,
       )
+      setTargetSizeText(bounds.minMB.toFixed(1))
       update({ targetSizeMB: bounds.minMB })
     } else if (parsed > bounds.maxMB) {
       setTargetOutOfRangeNotice(
         `Nilai ${parsed} MB melebihi batas maksimal (95% ukuran asli) — otomatis disesuaikan ke ${bounds.maxMB.toFixed(1)} MB.`,
       )
+      setTargetSizeText(bounds.maxMB.toFixed(1))
       update({ targetSizeMB: bounds.maxMB })
     } else {
+      const rounded = Number(parsed.toFixed(1))
       setTargetOutOfRangeNotice(null)
-      update({ targetSizeMB: Number(parsed.toFixed(1)) })
+      setTargetSizeText(rounded.toFixed(1))
+      update({ targetSizeMB: rounded })
     }
+  }
+
+  const handleTargetSizeKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      setIsEditingTargetText(false)
+      commitTargetSizeValue(targetSizeText)
+      event.currentTarget.blur()
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault()
+      const currentNum = Number.parseFloat(targetSizeText.replace(',', '.'))
+      const base = Number.isFinite(currentNum) ? currentNum : clampedTargetMB
+      const delta = event.key === 'ArrowUp' ? 0.1 : -0.1
+      const nextVal = Math.min(bounds.maxMB, Math.max(bounds.minMB, Number((base + delta).toFixed(1))))
+      setTargetOutOfRangeNotice(null)
+      setTargetSizeText(nextVal.toFixed(1))
+      update({ targetSizeMB: nextVal })
+    }
+  }
+
+  const handleTargetSizeSliderChange = (rawValue: string) => {
+    if (disabled) return
+    const parsed = Number.parseFloat(rawValue)
+    if (!Number.isFinite(parsed)) return
+    const rounded = Number(Math.min(bounds.maxMB, Math.max(bounds.minMB, parsed)).toFixed(1))
+    setIsEditingTargetText(false)
+    setTargetOutOfRangeNotice(null)
+    setTargetSizeText(rounded.toFixed(1))
+    update({ targetSizeMB: rounded })
   }
 
   const autoPairingLabel =
@@ -253,8 +324,16 @@ export function CompressTabPanel({
               pengaturan penuh.
             </p>
           </div>
-          <span className="whitespace-nowrap rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-bold text-emerald-800">
-            {activeTemplate.badge}
+          <span
+            className={`whitespace-nowrap rounded-full px-3 py-1 text-[11px] font-bold ${
+              isCustomMode && derivedTemplateDef
+                ? 'bg-blue-100 text-blue-800 ring-1 ring-blue-200'
+                : 'bg-emerald-100 text-emerald-800'
+            }`}
+          >
+            {isCustomMode && derivedTemplateDef
+              ? `Custom (diubah dari ${derivedTemplateDef.name})`
+              : activeTemplate.badge}
           </span>
         </div>
 
@@ -405,6 +484,31 @@ export function CompressTabPanel({
               </span>
             ))}
           </div>
+
+          {/* [BUG-15] Tampilkan opsi lanjutan non-konflik yang tetap dipertahankan */}
+          {preservedAdvancedLabels.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200/80 bg-blue-50/80 px-3.5 py-2.5 text-xs text-blue-900">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-bold">Opsi lanjutan tetap aktif:</span>
+                {preservedAdvancedLabels.map((lbl) => (
+                  <span
+                    key={lbl}
+                    className="rounded-full bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-blue-800 ring-1 ring-blue-200"
+                  >
+                    {lbl}
+                  </span>
+                ))}
+              </div>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onChange(resetPreservedAdvancedOptions(options))}
+                className="cursor-pointer text-[11px] font-bold text-blue-700 underline underline-offset-2 hover:text-blue-900 disabled:opacity-50"
+              >
+                Reset Opsi Lanjutan
+              </button>
+            </div>
+          )}
 
           {/* Tautan cepat beralih ke Custom / Manual */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-emerald-200/70 pt-3 text-xs">
@@ -645,13 +749,26 @@ export function CompressTabPanel({
                   <div className="flex items-center gap-2">
                     <input
                       id="compress-target-size-mb"
-                      type="number"
-                      min={bounds.minMB}
-                      max={bounds.maxMB}
-                      step={0.1}
-                      value={clampedTargetMB}
+                      type="text"
+                      inputMode="decimal"
+                      role="spinbutton"
+                      aria-valuemin={bounds.minMB}
+                      aria-valuemax={bounds.maxMB}
+                      aria-valuenow={clampedTargetMB}
+                      value={targetSizeText}
                       disabled={disabled}
-                      onChange={(e) => handleTargetSizeInput(e.target.value)}
+                      onFocus={() => setIsEditingTargetText(true)}
+                      onChange={(e) => {
+                        const raw = e.target.value
+                        if (/^[0-9]*[.,]?[0-9]*$/.test(raw)) {
+                          setTargetSizeText(raw)
+                        }
+                      }}
+                      onBlur={() => {
+                        setIsEditingTargetText(false)
+                        commitTargetSizeValue(targetSizeText)
+                      }}
+                      onKeyDown={handleTargetSizeKeyDown}
                       className="min-h-11 w-28 rounded-xl border border-emerald-300 bg-white px-3 py-2 text-right font-mono text-sm font-bold text-slate-900 tabular-nums focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:opacity-60"
                     />
                     <span className="font-mono text-sm font-bold text-emerald-800">MB</span>
@@ -666,7 +783,7 @@ export function CompressTabPanel({
                   value={clampedTargetMB}
                   disabled={disabled || bounds.maxMB <= bounds.minMB}
                   aria-label="Slider target ukuran file dalam MB"
-                  onChange={(e) => handleTargetSizeInput(e.target.value)}
+                  onChange={(e) => handleTargetSizeSliderChange(e.target.value)}
                   className="h-2.5 w-full cursor-pointer accent-emerald-600 disabled:cursor-not-allowed"
                 />
 

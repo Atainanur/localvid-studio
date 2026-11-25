@@ -61,6 +61,16 @@ const MAX_INPUT_SIDE_BEFORE_TILING = 256
 
 const modelBufferCache = new Map<string, Uint8Array>()
 
+/**
+ * Menghapus seluruh cache buffer model ONNX di memori (dipanggil saat pembatalan atau terminate)
+ * agar tidak terjadi kebocoran memori WASM / JS.
+ */
+export function clearAiModelCache(): number {
+  const count = modelBufferCache.size
+  modelBufferCache.clear()
+  return count
+}
+
 function checkAborted(signal: AbortSignal): void {
   if (signal.aborted) {
     throw new DOMException('Proses AI Upscaler dibatalkan oleh pengguna.', 'AbortError')
@@ -253,10 +263,45 @@ async function loadNativeVideoElement(
   return { video, objectUrl }
 }
 
+async function attemptSingleVideoSeek(
+  video: HTMLVideoElement,
+  safeTime: number,
+  signal: AbortSignal,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    let settled = false
+
+    const finish = (err?: Error) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timer)
+      signal.removeEventListener('abort', onAbort)
+      video.removeEventListener('seeked', onSeeked)
+      if (err) reject(err)
+      else resolve()
+    }
+
+    const onAbort = () =>
+      finish(new DOMException('Proses AI Upscaler dibatalkan oleh pengguna.', 'AbortError'))
+
+    const onSeeked = () => finish()
+
+    const timer = window.setTimeout(() => {
+      finish(new Error('SEEK_TIMEOUT'))
+    }, SEEK_TIMEOUT_MS)
+
+    signal.addEventListener('abort', onAbort, { once: true })
+    video.addEventListener('seeked', onSeeked, { once: true })
+    video.currentTime = safeTime
+  })
+}
+
 async function seekVideoToTime(
   video: HTMLVideoElement,
   targetTime: number,
+  frameNumber: number,
   signal: AbortSignal,
+  onLog: (msg: string) => void,
 ): Promise<void> {
   checkAborted(signal)
 
@@ -265,45 +310,66 @@ async function seekVideoToTime(
 
   const alreadyAtTarget = Math.abs(video.currentTime - safeTime) < 0.002 && video.readyState >= 2
   if (!alreadyAtTarget) {
-    await new Promise<void>((resolve, reject) => {
-      let settled = false
+    let seekSucceeded = false
 
-      const finish = (err?: Error) => {
-        if (settled) return
-        settled = true
-        window.clearTimeout(timer)
-        signal.removeEventListener('abort', onAbort)
-        video.removeEventListener('seeked', onSeeked)
-        if (err) reject(err)
-        else resolve()
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      checkAborted(signal)
+      try {
+        const targetAttemptTime =
+          attempt === 1 ? safeTime : Math.max(0, safeTime - 0.001)
+        await attemptSingleVideoSeek(video, targetAttemptTime, signal)
+        seekSucceeded = true
+        break
+      } catch (err) {
+        if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+          throw err
+        }
+        if (attempt === 1) {
+          onLog(
+            `[LocalVid AI] Seek frame ke-${frameNumber} (${safeTime.toFixed(2)} dtk) timeout — mencoba ulang 1 kali...`,
+          )
+          await waitAnimationFrame()
+        } else {
+          const timeoutMsg = `Seek frame ke-${frameNumber} timeout (> ${SEEK_TIMEOUT_MS / 1000} detik pada waktu ${safeTime.toFixed(2)} dtk). Proses dihentikan agar tidak menghasilkan frame kosong/hitam.`
+          onLog(`[LocalVid AI] ERROR: ${timeoutMsg}`)
+          throw new Error(timeoutMsg)
+        }
       }
+    }
 
-      const onAbort = () =>
-        finish(new DOMException('Proses AI Upscaler dibatalkan oleh pengguna.', 'AbortError'))
-
-      const onSeeked = () => finish()
-
-      const timer = window.setTimeout(() => finish(), SEEK_TIMEOUT_MS)
-
-      signal.addEventListener('abort', onAbort, { once: true })
-      video.addEventListener('seeked', onSeeked, { once: true })
-      video.currentTime = safeTime
-    })
+    if (!seekSucceeded) {
+      throw new Error(`Seek frame ke-${frameNumber} timeout.`)
+    }
   }
 
   // Tunggu sampai readyState >= 2 (HAVE_CURRENT_DATA) agar frame tidak pernah kosong/hitam
   if (video.readyState < 2) {
-    await new Promise<void>((resolve) => {
-      const done = () => {
+    const ready = await new Promise<boolean>((resolve, reject) => {
+      let settled = false
+      const finish = (ok: boolean, err?: Error) => {
+        if (settled) return
+        settled = true
         window.clearTimeout(t)
-        video.removeEventListener('loadeddata', done)
-        video.removeEventListener('canplay', done)
-        resolve()
+        signal.removeEventListener('abort', onAbort)
+        video.removeEventListener('loadeddata', onReady)
+        video.removeEventListener('canplay', onReady)
+        if (err) reject(err)
+        else resolve(ok)
       }
-      const t = window.setTimeout(done, 1200)
-      video.addEventListener('loadeddata', done, { once: true })
-      video.addEventListener('canplay', done, { once: true })
+      const onAbort = () =>
+        finish(false, new DOMException('Proses AI Upscaler dibatalkan oleh pengguna.', 'AbortError'))
+      const onReady = () => finish(true)
+      const t = window.setTimeout(() => finish(video.readyState >= 2), 1800)
+      signal.addEventListener('abort', onAbort, { once: true })
+      video.addEventListener('loadeddata', onReady, { once: true })
+      video.addEventListener('canplay', onReady, { once: true })
     })
+
+    if (!ready) {
+      const readyMsg = `Seek frame ke-${frameNumber} timeout (decoder browser belum siap membaca piksel frame).`
+      onLog(`[LocalVid AI] ERROR: ${readyMsg}`)
+      throw new Error(readyMsg)
+    }
   }
 }
 
@@ -1396,15 +1462,28 @@ export async function runAiUpscalePipeline({
     onProgress({
       phase: 'loading-model',
       label:
-        settings.enginePreference === 'webgpu-shader'
-          ? 'Menyiapkan WebGPU Fast Enhance Shader lokal...'
-          : 'Mengunduh & menyiapkan model ONNX WebGPU...',
+        settings.enginePreference === 'webgl2-shader'
+          ? 'Menyiapkan WebGL2 Fast Enhance Shader (Mode Fallback)...'
+          : settings.enginePreference === 'webgpu-shader'
+            ? 'Menyiapkan WebGPU Fast Enhance Shader lokal...'
+            : 'Mengunduh & menyiapkan model ONNX WebGPU...',
       currentFrame: 0,
       totalFrames,
       percent: 8,
     })
 
-    if (settings.enginePreference === 'webgpu-shader') {
+    const hasNavigatorGpu = typeof navigator !== 'undefined' && 'gpu' in navigator
+
+    if (settings.enginePreference === 'webgl2-shader') {
+      enhancer = createWebGl2ShaderEnhancer(
+        srcW,
+        srcH,
+        targetDims.width,
+        targetDims.height,
+        onLog,
+      )
+      onLog(`[LocalVid AI] Mesin aktif: ${enhancer.backendName}.`)
+    } else if (settings.enginePreference === 'webgpu-shader') {
       enhancer = await createWebGpuShaderEnhancer(
         srcW,
         srcH,
@@ -1413,6 +1492,19 @@ export async function runAiUpscalePipeline({
         onLog,
       )
       onLog(`[LocalVid AI] Mesin aktif: ${enhancer.backendName}.`)
+    } else if (!hasNavigatorGpu) {
+      // Jaga aturan keamanan lintas platform: jangan pernah import ONNX bila WebGPU tidak tersedia
+      const fallbackNotice =
+        'Browser tidak mendukung WebGPU (navigator.gpu). Menggunakan Mode Fallback WebGL2 Fast Enhance Shader tanpa memuat modul ONNX.'
+      onLog(`[LocalVid AI] ${fallbackNotice}`)
+      enhancer = createWebGl2ShaderEnhancer(
+        srcW,
+        srcH,
+        targetDims.width,
+        targetDims.height,
+        onLog,
+        fallbackNotice,
+      )
     } else {
       try {
         enhancer = await createOnnxWebGpuEnhancer(
@@ -1480,7 +1572,7 @@ export async function runAiUpscalePipeline({
         fallbackNotice: enhancer.fallbackReason,
       })
 
-      await seekVideoToTime(videoElement, timestampSec, signal)
+      await seekVideoToTime(videoElement, timestampSec, currentFrame, signal, onLog)
       checkAborted(signal)
 
       srcCtx.drawImage(videoElement, 0, 0, srcW, srcH)
@@ -1623,14 +1715,39 @@ export async function runAiUpscalePipeline({
       videoElement.remove()
     }
 
+    // [BUG-14] Bersihkan cache model ONNX saat proses dibatalkan untuk mencegah kebocoran memori WASM
+    if (signal.aborted) {
+      const freedModels = clearAiModelCache()
+      if (freedModels > 0) {
+        onLog(`[LocalVid AI] Cache model ONNX dibersihkan (${freedModels} model) setelah pembatalan.`)
+      }
+    }
+
+    // [BUG-14] Pastikan seluruh file sementara ai_out_*.jpg di MEMFS FFmpeg terhapus tuntas
     if (ffmpeg.loaded) {
+      try {
+        const entries = await ffmpeg.listDir('.')
+        for (const entry of entries) {
+          if (!entry.isDir && entry.name.startsWith('ai_out_') && entry.name.endsWith('.jpg')) {
+            tempFiles.add(entry.name)
+          }
+        }
+      } catch {
+        // Abaikan jika listDir tidak tersedia pada keadaan worker tertentu
+      }
+
+      let deletedCount = 0
       for (const file of tempFiles) {
         if (file === outputFileName && succeeded) continue
         try {
           await ffmpeg.deleteFile(file)
+          deletedCount += 1
         } catch {
           // Abaikan bila sudah terhapus
         }
+      }
+      if (deletedCount > 0) {
+        onLog(`[LocalVid AI] Pembersihan MEMFS selesai: ${deletedCount} file sementara dihapus.`)
       }
     }
   }
