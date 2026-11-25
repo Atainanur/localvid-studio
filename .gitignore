@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Production build
+dist/
+dist-ssr/
+
+# Environment variables
+.env
+.env.*
+*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Test media files (prevent large videos from entering Git)
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE & Editor directories
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local AI agent skills & workspace configs
+.agent/
+.agents/

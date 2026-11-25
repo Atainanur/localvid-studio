@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+:root {
+  /* Semantic Design Tokens — LocalVid Studio (Sunlit Bento Creative) */
+  --color-background: #f6f8fc;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f1f5fb;
+  --color-foreground: #0f172a;
+  --color-muted-foreground: #475569;
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+
+  /* Brand & Mood Accents */
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-soft: #eff6ff;
+  --color-primary-border: #bfdbfe;
+
+  --color-sunny: #ea580c;
+  --color-sunny-soft: #fff7ed;
+  --color-sunny-border: #fed7aa;
+
+  --color-mint: #059669;
+  --color-mint-soft: #ecfdf5;
+  --color-mint-border: #a7f3d0;
+
+  --color-magic: #7c3aed;
+  --color-magic-soft: #f5f3ff;
+  --color-magic-border: #ddd6fe;
+
+  --color-destructive: #dc2626;
+  --color-destructive-soft: #fef2f2;
+  --color-destructive-border: #fecaca;
+
+  --color-ring: #2563eb;
+
+  /* Typography */
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    monospace;
+
+  /* Elevation */
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04),
+    0 12px 32px -12px rgba(37, 99, 235, 0.09);
+  --shadow-card-hover: 0 4px 10px rgba(15, 23, 42, 0.05),
+    0 16px 36px -12px rgba(37, 99, 235, 0.14);
+  --shadow-cta: 0 10px 24px -8px rgba(37, 99, 235, 0.45);
+  --shadow-mint: 0 10px 24px -8px rgba(5, 150, 105, 0.38);
+
+  /* Motion Tokens */
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+}
+
+@layer base {
+  html,
+  body {
+    min-height: 100dvh;
+    font-family: var(--font-sans);
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  code,
+  pre,
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Latar belakang studio cerah yang segar dan menenangkan */
+.studio-backdrop {
+  background-color: var(--color-background);
+  background-image:
+    radial-gradient(64rem 34rem at 8% -6%, rgba(56, 189, 248, 0.2), transparent 62%),
+    radial-gradient(52rem 30rem at 92% -4%, rgba(251, 146, 60, 0.16), transparent 60%),
+    radial-gradient(46rem 28rem at 52% 108%, rgba(52, 211, 153, 0.14), transparent 62%);
+  background-attachment: scroll;
+}
+
+.bento-card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Micro-interactions ringan (hanya transform & opacity) */
+@keyframes lv-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes lv-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+.animate-lv-fade-up {
+  animation: lv-fade-up 260ms var(--ease-spring) both;
+}
+
+.animate-lv-indeterminate {
+  animation: lv-indeterminate 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
