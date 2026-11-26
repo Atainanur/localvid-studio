@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import {
   AudioLines,
   Check,
+  Copy,
   Film,
   HardDrive,
   Music,
@@ -40,9 +42,21 @@ export function AudioDenoiseTabPanel({
   sourceDurationSec,
   sourceExtension,
 }: AudioDenoiseTabPanelProps) {
+  const [copiedChain, setCopiedChain] = useState(false)
   const afChain = buildAudioDenoiseFilterChain(options)
+  const afChainString = afChain.join(',')
   const outputTarget = resolveAudioDenoiseOutputTarget(options.outputMode, sourceExtension)
   const sizeEstimate = estimateAudioDenoiseSize(options, originalSizeBytes, sourceDurationSec)
+
+  const handleCopyFilterChain = async () => {
+    try {
+      await navigator.clipboard.writeText(afChainString)
+      setCopiedChain(true)
+      window.setTimeout(() => setCopiedChain(false), 1800)
+    } catch {
+      // Abaikan bila izin clipboard dibatasi browser
+    }
+  }
 
   const handleSelectPreset = (presetId: AudioDenoisePresetId) => {
     if (disabled) return
@@ -565,11 +579,14 @@ export function AudioDenoiseTabPanel({
             </div>
             <div className="rounded-xl bg-white/95 p-3 ring-1 ring-fuchsia-200/80 sm:text-right">
               <p className="text-[11px] font-bold uppercase tracking-wider text-fuchsia-700">
-                Estimasi Ukuran Hasil
+                Estimasi Ukuran Hasil (Perkiraan)
               </p>
               <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
                 ~{sizeEstimate.minEstimatedMB.toFixed(2)} MB -{' '}
-                {sizeEstimate.maxEstimatedMB.toFixed(2)} MB
+                {sizeEstimate.maxEstimatedMB.toFixed(2)} MB{' '}
+                <span className="font-sans text-[11px] font-semibold text-slate-500">
+                  (perkiraan)
+                </span>
               </p>
               <p className="mt-0.5 font-mono text-[11px] text-slate-500">
                 {options.outputMode === 'audio-mp3'
@@ -581,10 +598,30 @@ export function AudioDenoiseTabPanel({
         )}
 
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600">
-          <span className="font-bold text-slate-800">Rantai filter audio aktif (-af): </span>
-          <code className="font-mono font-medium text-fuchsia-800 [overflow-wrap:anywhere]">
-            {afChain.join(',')}
-          </code>
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-800">Rantai filter audio aktif (-af)</span>
+            <button
+              type="button"
+              onClick={() => void handleCopyFilterChain()}
+              aria-label="Salin rantai filter audio"
+              className="inline-flex min-h-7 shrink-0 cursor-pointer touch-manipulation items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 transition-colors hover:border-fuchsia-300 hover:bg-fuchsia-50 hover:text-fuchsia-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-600"
+            >
+              {copiedChain ? (
+                <>
+                  <Check aria-hidden="true" className="h-3 w-3 text-emerald-600" />
+                  <span className="text-emerald-700">Tersalin</span>
+                </>
+              ) : (
+                <>
+                  <Copy aria-hidden="true" className="h-3 w-3" />
+                  <span>Salin</span>
+                </>
+              )}
+            </button>
+          </div>
+          <div className="mt-1.5 overflow-x-auto whitespace-nowrap rounded-lg border border-slate-200/80 bg-white px-2.5 py-1.5 font-mono text-xs font-medium text-fuchsia-800">
+            <code>{afChainString}</code>
+          </div>
         </div>
       </div>
     </div>

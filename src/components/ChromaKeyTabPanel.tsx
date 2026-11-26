@@ -50,6 +50,7 @@ interface ChromaKeyTabPanelProps {
   onChange: (next: ChromaKeyOptions) => void
   isMobile: boolean
   disabled: boolean
+  nativeFormatWarning: boolean
   originalSizeBytes: number | null
   sourceDurationSec: number | null
   sourceDimensions: { width: number | null; height: number | null }
@@ -65,6 +66,7 @@ export function ChromaKeyTabPanel({
   onChange,
   isMobile,
   disabled,
+  nativeFormatWarning,
   originalSizeBytes,
   sourceDurationSec,
   sourceDimensions,
@@ -183,7 +185,7 @@ export function ChromaKeyTabPanel({
 
   // Render pratinjau live 1-frame (debounced 120ms untuk perubahan opsi/scrubber, instan saat tahan Before)
   useEffect(() => {
-    if (!sourcePreviewUrl || !previewVideoReady || disabled) return
+    if (!sourcePreviewUrl || !previewVideoReady || disabled || nativeFormatWarning) return
 
     const delayMs = holdOriginal ? 0 : 120
     let cancelled = false
@@ -299,6 +301,7 @@ export function ChromaKeyTabPanel({
     sourcePreviewUrl,
     previewVideoReady,
     disabled,
+    nativeFormatWarning,
     scrubTimeSec,
     holdOriginal,
     options.subjectMode,
@@ -468,7 +471,21 @@ export function ChromaKeyTabPanel({
         </div>
       )}
 
-      {sourcePreviewUrl ? (
+      {nativeFormatWarning ? (
+        <div
+          role="status"
+          className="flex flex-col items-center justify-center gap-2.5 rounded-2xl border border-amber-300 bg-amber-50/90 px-5 py-8 text-center"
+        >
+          <AlertTriangle aria-hidden="true" className="h-7 w-7 text-amber-600" />
+          <p className="text-xs font-bold text-amber-950 sm:text-sm">
+            Pratinjau dan proses membutuhkan format MP4, MOV, atau WebM
+          </p>
+          <p className="max-w-md text-xs leading-relaxed text-amber-900">
+            Decoder native browser tidak dapat membaca frame dari format video aktif saat ini.
+            Hapus tahap Ubah Ekstensi atau ubah video ke MP4 terlebih dahulu.
+          </p>
+        </div>
+      ) : sourcePreviewUrl ? (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-sm">
           {/* Hidden video terlampir DOM untuk ekstraksi frame pratinjau yang stabil */}
           <video
@@ -653,7 +670,9 @@ export function ChromaKeyTabPanel({
             </p>
           </div>
           <span className="whitespace-nowrap rounded-full bg-green-100 px-2.5 py-1 font-mono text-[11px] font-bold text-green-800 ring-1 ring-green-200">
-            Maks {maxDurationSec} dtk ({isMobile ? 'HP' : 'Desktop'})
+            {options.subjectMode === 'all-objects'
+              ? 'Maks 15 dtk (Desktop) • Maks 8 dtk (Mobile)'
+              : 'Maks 30 dtk (Desktop) • Maks 15 dtk (Mobile)'}
           </span>
         </div>
 
@@ -822,11 +841,14 @@ export function ChromaKeyTabPanel({
                 </div>
                 <div className="rounded-xl bg-white/95 p-3 ring-1 ring-green-200/80 sm:text-right">
                   <p className="text-[11px] font-bold uppercase tracking-wider text-green-700">
-                    Estimasi Ukuran Hasil
+                    Estimasi Ukuran Hasil (Perkiraan)
                   </p>
                   <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
                     ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
-                    {sizeEstimate.maxEstimatedMB.toFixed(1)} MB
+                    {sizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
+                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                      (perkiraan)
+                    </span>
                   </p>
                   <p className="mt-0.5 font-mono text-[11px] text-slate-500">
                     CRF 22 • {options.targetFps} fps
@@ -1406,11 +1428,14 @@ export function ChromaKeyTabPanel({
                 </div>
                 <div className="rounded-xl bg-white/95 p-3 ring-1 ring-green-200/80 sm:text-right">
                   <p className="text-[11px] font-bold uppercase tracking-wider text-green-700">
-                    Estimasi Ukuran Hasil
+                    Estimasi Ukuran Hasil (Perkiraan)
                   </p>
                   <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
                     ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
-                    {sizeEstimate.maxEstimatedMB.toFixed(1)} MB
+                    {sizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
+                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                      (perkiraan)
+                    </span>
                   </p>
                   <p className="mt-0.5 font-mono text-[11px] text-slate-500">
                     CRF {options.smartSizeCap ? '22' : '21'} • {options.targetFps} fps

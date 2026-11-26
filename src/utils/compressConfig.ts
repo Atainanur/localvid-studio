@@ -1,5 +1,6 @@
 import {
   COMPRESSION_PRESETS,
+  getAdaptiveSizeFactor,
   toEvenDimension,
   type CompressionPresetId,
   type OutputFormat,
@@ -913,7 +914,7 @@ export function calculateTargetVideoBitrateKbps(
 /**
  * Menghitung dimensi target resize.
  * ATURAN ANTI-BENGKAK (maxResolutionOnly = true pada seluruh Template Media Sosial):
- * Cek dimensi video asli — jika sisi terpanjang & terpendek SUDAH lebih kecil atau sama
+ * Cek dimensi video asli: jika sisi terpanjang & terpendek SUDAH lebih kecil atau sama
  * dengan batas maksimal template (mis. 544x932 pada Maks 1080p atau Maks 720p),
  * JANGAN lakukan filter `scale` sama sekali (return null)!
  */
@@ -946,7 +947,7 @@ function computeTargetDimensions(
       const currentShort = isPortrait ? workW : workH
       const currentLong = isPortrait ? workH : workW
 
-      // Template Media Sosial HANYA DOWNSCALE — jangan pernah upscale jika sudah di bawah batas!
+      // Template Media Sosial HANYA DOWNSCALE: jangan pernah upscale jika sudah di bawah batas!
       if (options.maxResolutionOnly) {
         if (currentLong <= maxLong && currentShort <= maxShort) {
           return null
@@ -1073,33 +1074,37 @@ export function estimateCompressedSize(
   }
 
   // Hitung estimasi video bitrate aktual berbasis bitrate asli + Smart Bitrate Cap
-  // [BUG-03] Kalibrasi realistis: video sumber yang sudah padat (< 1800 kbps) pada CRF 18-21
-  // cenderung mendekati batas VBV (-maxrate) + ~4% overhead wadah MP4/MKV.
+  // [BUG-03 & BUG-26NOV-01] Kalibrasi realistis untuk video pendek <10 detik dan resolusi <720p
+  // disertai rentang jujur +-32% (klip pendek) dan faktor adaptif localStorage.
   const crf = getEffectiveCrf(options)
+  const isShortClip = trim.effectiveDurationSec < 10
   const isAlreadyTightSource = Boolean(sourceProfile && sourceProfile.sourceTotalKbps < 1800)
+  const calibrationKey = `compress:${options.socialTemplate}`
+  const adaptiveFactor = getAdaptiveSizeFactor(calibrationKey)
+
   const crfBitrateScale = isAlreadyTightSource
     ? crf <= 18
-      ? 0.94
+      ? 0.84
       : crf <= 20
-        ? 0.88
+        ? 0.72
         : crf <= 21
-          ? 0.84
+          ? 0.68
           : crf <= 23
-            ? 0.74
+            ? 0.62
             : crf <= 26
-              ? 0.6
-              : 0.48
+              ? 0.5
+              : 0.4
     : crf <= 18
-      ? 0.88
+      ? 0.78
       : crf <= 20
-        ? 0.82
+        ? 0.66
         : crf <= 21
-          ? 0.76
+          ? 0.62
           : crf <= 23
-            ? 0.65
+            ? 0.55
             : crf <= 26
-              ? 0.52
-              : 0.42
+              ? 0.45
+              : 0.36
 
   const crop = validateCropSettings(options, sourceDims.width, sourceDims.height)
   const workW = crop.isActive && crop.isValid && crop.width ? crop.width : sourceDims.width
@@ -1117,6 +1122,11 @@ export function estimateCompressedSize(
     }
   }
 
+  const shortSidePx =
+    sourceDims.width && sourceDims.height ? Math.min(sourceDims.width, sourceDims.height) : null
+  const lowResEfficiency =
+    shortSidePx !== null && shortSidePx < 720 && pixelFactor <= 1.01 ? 0.9 : 1
+
   let fpsFactor = 1
   if (options.frameRate !== 'no-change') {
     const fpsNum = Number.parseFloat(options.frameRate)
@@ -1129,40 +1139,36 @@ export function estimateCompressedSize(
   const codecFactor =
     videoCodec === 'libx265' ? 0.78 : videoCodec === 'libvpx-vp9' ? 0.8 : 1
 
+  const spread = isShortClip ? 0.32 : 0.2
+
   if (sourceProfile) {
-    // Karena Smart Bitrate Cap (-maxrate) aktif, video bitrate dikontrol ketat.
-    // Rentang atas memperhitungkan puncak 1-pass VBV (~1.04x maxrate) + overhead kontainer (~3%).
     const minFloorKbps = Math.min(64, sourceProfile.maxVideoKbps)
     const rawProjectedVideoKbps =
-      sourceProfile.sourceVideoKbps * crfBitrateScale * pixelFactor * fpsFactor * codecFactor
+      sourceProfile.sourceVideoKbps *
+      crfBitrateScale *
+      pixelFactor *
+      lowResEfficiency *
+      fpsFactor *
+      codecFactor
     const cappedMidVideoKbps = Math.min(
       sourceProfile.maxVideoKbps,
       Math.max(minFloorKbps, rawProjectedVideoKbps),
     )
 
-    const vbvUpperCapKbps = Math.round(sourceProfile.maxVideoKbps * 1.04)
-    const lowVideoKbps = Math.min(
-      sourceProfile.maxVideoKbps,
-      Math.max(minFloorKbps, cappedMidVideoKbps * 0.84),
-    )
-    const highVideoKbps = Math.min(
-      vbvUpperCapKbps,
-      Math.max(lowVideoKbps, Math.max(cappedMidVideoKbps * 1.12, isAlreadyTightSource ? sourceProfile.maxVideoKbps : 0)),
-    )
-
     const audioKbps = options.removeAudio ? 0 : sourceProfile.effectiveAudioKbps
     const containerOverhead = 1.03
-    const minEst = Number(
-      Math.max(
-        0.1,
-        (((lowVideoKbps + audioKbps) * trim.effectiveDurationSec) / 8192) * containerOverhead,
-      ).toFixed(2),
-    )
+    const rawMidMB =
+      (((cappedMidVideoKbps + audioKbps) * trim.effectiveDurationSec) / 8192) *
+      containerOverhead *
+      adaptiveFactor
+    const vbvMaxMB =
+      (((Math.round(sourceProfile.maxVideoKbps * 1.08) + audioKbps) * trim.effectiveDurationSec) /
+        8192) *
+      containerOverhead
+
+    const minEst = Number(Math.max(0.1, rawMidMB * (1 - spread)).toFixed(2))
     const maxEst = Number(
-      Math.max(
-        minEst,
-        (((highVideoKbps + audioKbps) * trim.effectiveDurationSec) / 8192) * containerOverhead,
-      ).toFixed(2),
+      Math.max(minEst, Math.min(vbvMaxMB * 1.05, rawMidMB * (1 + spread))).toFixed(2),
     )
 
     return {
@@ -1181,10 +1187,18 @@ export function estimateCompressedSize(
   const audioFactor = options.removeAudio ? 0.88 : 1
   const midMB = Math.max(
     0.1,
-    originalMB * durationRatio * crfBitrateScale * pixelFactor * fpsFactor * codecFactor * audioFactor,
+    originalMB *
+      durationRatio *
+      crfBitrateScale *
+      pixelFactor *
+      lowResEfficiency *
+      fpsFactor *
+      codecFactor *
+      audioFactor *
+      adaptiveFactor,
   )
-  const minEst = Number(Math.max(0.1, midMB * 0.82).toFixed(2))
-  const maxEst = Number(Math.max(minEst, midMB * 1.08).toFixed(2))
+  const minEst = Number(Math.max(0.1, midMB * (1 - spread)).toFixed(2))
+  const maxEst = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
 
   return {
     mode: 'crf',
@@ -1418,7 +1432,7 @@ export function buildAdvancedCompressArgs(
   sourceDims: { width: number | null; height: number | null },
   sourceExtension?: string | null,
 ): BuildAdvancedCompressResult {
-  const safeThreads = Math.max(1, Math.min(4, threads))
+  const safeThreads = Math.max(1, Math.min(6, threads))
   const { videoCodec, audioCodec } = resolveCodecPair(options)
   const trim = validateTrimSettings(options.trimStart, options.trimEnd, sourceDurationSec)
   const crop = validateCropSettings(options, sourceDims.width, sourceDims.height)
@@ -1464,8 +1478,9 @@ export function buildAdvancedCompressArgs(
   let targetVideoBitrateKbps: number | undefined
   let smartCapVideoKbps: number | undefined
 
-  // Preset encoder optimal untuk kompresi efisien: `fast` di Desktop, `veryfast` di Mobile
-  const x264Preset = isMobile ? 'veryfast' : 'fast'
+  // Preset encoder optimal: `veryfast` pada seluruh Template Media Sosial & Mobile agar 20-30% lebih cepat, `fast` pada Custom Desktop
+  const x264Preset =
+    options.socialTemplate !== 'custom' || isMobile ? 'veryfast' : 'fast'
 
   if (videoCodec === 'copy') {
     args.push('-c:v', 'copy')
@@ -1512,7 +1527,7 @@ export function buildAdvancedCompressArgs(
     // 6. format=yuv420p (wajib di akhir jika bukan mode Copy)
     vfChain.push('format=yuv420p')
 
-    args.push('-vf', vfChain.join(','))
+    args.push('-filter_threads', String(safeThreads), '-vf', vfChain.join(','))
 
     const audioKbps = getEffectiveAudioBitrateKbps(
       options,

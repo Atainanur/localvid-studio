@@ -13,8 +13,11 @@ import {
 } from './chromaKeyConfig'
 import { toEvenDimension } from './videoProcessing'
 
+import type { WebCodecsFrameReader } from './webCodecsFrameReader'
+
 export const MEDIAPIPE_VISION_VERSION = '1.2.3'
 export const RMBG_MODEL_ID = 'briaai/RMBG-1.4'
+export const RMBG_BENCHMARK_SESSION_KEY = 'localvid_rmbg_backend_v1'
 
 const WASM_CDN_BASE_URLS = [
   `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VISION_VERSION}/wasm`,
@@ -113,7 +116,7 @@ interface CompositorScratch {
   /** Kanvas blur fallback (hanya dibuat jika browser tidak mendukung ctx.filter) */
   blurFallbackCanvas: HTMLCanvasElement | null
   blurFallbackCtx: CanvasRenderingContext2D | null
-  /** Buffer probabilitas & alpha reusable (zero allocation di dalam loop) */
+  /** Buffer probabilitas, alpha, dan hole-fill reusable (zero allocation di dalam loop) */
   probCurrent: Float32Array
   probPrev: Float32Array
   probNext: Float32Array
@@ -121,6 +124,8 @@ interface CompositorScratch {
   alphaA: Uint8Array
   alphaB: Uint8Array
   alphaTemp: Uint8Array
+  holeVisited: Uint8Array
+  holeQueue: Int32Array
 }
 
 export interface RunChromaKeyParams {
@@ -177,6 +182,38 @@ let rmbgLoadPromise: Promise<ActiveRmbgHandle> | null = null
 const rmbgProcessorCache = new Map<number, DynamicProcessor>()
 let rmbgRequiresFixed1024 = false
 let rmbgPreferWasmAfterBenchmark = false
+
+function readCachedRmbgBackendPref(): 'webgpu' | 'wasm' | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const val = window.sessionStorage.getItem(RMBG_BENCHMARK_SESSION_KEY)
+    return val === 'webgpu' || val === 'wasm' ? val : null
+  } catch {
+    return null
+  }
+}
+
+function writeCachedRmbgBackendPref(pref: 'webgpu' | 'wasm' | null): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (pref === null) {
+      window.sessionStorage.removeItem(RMBG_BENCHMARK_SESSION_KEY)
+    } else {
+      window.sessionStorage.setItem(RMBG_BENCHMARK_SESSION_KEY, pref)
+    }
+  } catch {
+    // Abaikan jika sessionStorage dibatasi
+  }
+}
+
+/**
+ * [BUG-26NOV-11] Mereset flag sticky backend & cache benchmark sesi (dipanggil saat unggah file baru).
+ */
+export function resetChromaRuntimeState(): void {
+  rmbgRequiresFixed1024 = false
+  rmbgPreferWasmAfterBenchmark = false
+  writeCachedRmbgBackendPref(null)
+}
 
 function checkAborted(signal: AbortSignal): void {
   if (signal.aborted) {
@@ -242,13 +279,15 @@ export async function disposeRmbgModelInstance(): Promise<void> {
 }
 
 /**
- * Membersihkan seluruh cache model MediaPipe & sesi AI RMBG-1.4 (dipanggil saat pembatalan).
+ * Membersihkan seluruh cache model MediaPipe, sesi AI RMBG-1.4, flag sticky backend,
+ * dan cache benchmark sessionStorage (dipanggil saat pembatalan).
  */
 export function clearChromaModelCache(): number {
   let cleared = modelBufferCache.size
   disposeChromaPreviewSegmenter()
   modelBufferCache.clear()
   rmbgProcessorCache.clear()
+  resetChromaRuntimeState()
   if (cachedRmbgHandle) {
     cleared += 1
     void disposeRmbgModelInstance()
@@ -534,6 +573,68 @@ function writeMediaPipeMaskToProbBuffer(
   resampleProbabilitiesIntoBuffer(srcData, mW, mH, invert, outProb, workW, workH)
 }
 
+/**
+ * [BUG-26NOV-13] Membungkus callback MediaPipe `segment` dalam Promise agar kode selalu
+ * menunggu mask selesai ditulis ke `outProb` sebelum compositing (anti-asinkron).
+ */
+function runMediaPipeImageSegment(
+  mpHandle: ActiveMediaPipeHandle,
+  inputCanvas: HTMLCanvasElement,
+  outProb: Float32Array,
+  workW: number,
+  workH: number,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    try {
+      mpHandle.segmenter.segment(inputCanvas, (res) => {
+        try {
+          writeMediaPipeMaskToProbBuffer(res, mpHandle.labels, outProb, workW, workH)
+          resolve()
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)))
+        }
+      })
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)))
+    }
+  })
+}
+
+/**
+ * [BUG-26NOV-13] Membungkus callback MediaPipe `segmentForVideo` dalam Promise.
+ */
+function runMediaPipeVideoSegment(
+  mpHandle: ActiveMediaPipeHandle,
+  inputCanvas: HTMLCanvasElement,
+  timestampMs: number,
+  outProb: Float32Array,
+  workW: number,
+  workH: number,
+  onFirstMaskInfo?: (info: string) => void,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    try {
+      mpHandle.segmenter.segmentForVideo(inputCanvas, timestampMs, (res) => {
+        try {
+          writeMediaPipeMaskToProbBuffer(
+            res,
+            mpHandle.labels,
+            outProb,
+            workW,
+            workH,
+            onFirstMaskInfo,
+          )
+          resolve()
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)))
+        }
+      })
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)))
+    }
+  })
+}
+
 /* ============================================================================
  * 2. MESIN B: AI SEMUA OBJEK (briaai/RMBG-1.4 - ZERO WEBGPU+Q8 TRAP + BENCHMARK)
  *    - WebGPU pakai fp16 (atau fp32 jika shader-f16 tidak ada)
@@ -618,6 +719,7 @@ async function getRmbgProcessorForSize(
 
 function createDownloadProgressReporter(
   sizeNote: string,
+  expectedTotalMB: number,
   signal: AbortSignal,
   onStatus?: (msg: string, downloadPercent?: number) => void,
 ) {
@@ -628,18 +730,29 @@ function createDownloadProgressReporter(
     if (info.status === 'progress') {
       const isWeightsFile =
         typeof info.file === 'string' && info.file.toLowerCase().includes('.onnx')
+      const hasByteMetrics =
+        typeof info.loaded === 'number' &&
+        typeof info.total === 'number' &&
+        info.total > 0
       const rawPct =
         typeof info.progress === 'number'
           ? info.progress
-          : typeof info.loaded === 'number' && typeof info.total === 'number' && info.total > 0
+          : hasByteMetrics
             ? (info.loaded / info.total) * 100
             : null
       if (rawPct !== null && (isWeightsFile || lastReportedPct < 0)) {
         const clampedPct = Math.max(0, Math.min(100, Math.round(rawPct)))
         if (clampedPct !== lastReportedPct) {
           lastReportedPct = clampedPct
+          const totalMB = hasByteMetrics ? info.total / (1024 * 1024) : expectedTotalMB
+          const loadedMB = hasByteMetrics
+            ? info.loaded / (1024 * 1024)
+            : (clampedPct / 100) * expectedTotalMB
+          const sizeDetail = hasByteMetrics
+            ? `${loadedMB.toFixed(1)} MB / ${totalMB.toFixed(1)} MB (${clampedPct}%)`
+            : `${loadedMB.toFixed(1)} MB / ~${expectedTotalMB} MB (${clampedPct}%)`
           onStatus?.(
-            `Mengunduh model AI Semua Objek (${sizeNote}, sekali saja lalu tersimpan di cache browser): ${clampedPct}%`,
+            `Mengunduh model AI Semua Objek (${sizeNote}): ${sizeDetail}`,
             clampedPct,
           )
         }
@@ -650,7 +763,7 @@ function createDownloadProgressReporter(
       info.file.includes('.onnx')
     ) {
       onStatus?.(
-        `Mengunduh model AI Semua Objek (${sizeNote}, sekali saja lalu tersimpan di cache browser): 0%`,
+        `Mengunduh model AI Semua Objek (${sizeNote}): 0.0 MB / ~${expectedTotalMB} MB (0%)`,
         0,
       )
     }
@@ -668,7 +781,7 @@ async function createRmbgWasmQ8Handle(
   await configureTransformersEnv(transformers, onLog)
 
   const { AutoModel, RawImage } = transformers
-  const progressCb = createDownloadProgressReporter('~44 MB q8', signal, onStatus)
+  const progressCb = createDownloadProgressReporter('~44 MB q8', 44, signal, onStatus)
 
   onStatus?.('Menyiapkan AI RMBG-1.4 (Multi-Thread WASM SIMD q8)...')
   try {
@@ -699,7 +812,7 @@ async function createRmbgWasmQ8Handle(
       dtype: 'fp32',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       config: { model_type: 'custom' } as any,
-      progress_callback: createDownloadProgressReporter('fp32', signal, onStatus),
+      progress_callback: createDownloadProgressReporter('~176 MB fp32', 176, signal, onStatus),
     })
     checkAborted(signal)
     onLog(`[LocalVid Chroma] Model ${RMBG_MODEL_ID} siap pada WASM (dtype=fp32).`)
@@ -727,9 +840,14 @@ async function createRmbgHandle(
   await configureTransformersEnv(transformers, onLog)
   const { AutoModel, RawImage } = transformers
 
-  // Jika benchmark sebelumnya membuktikan WASM multi-thread lebih cepat di perangkat ini, langsung pakai WASM q8
-  if (rmbgPreferWasmAfterBenchmark) {
-    onLog('[LocalVid Chroma] Menggunakan Multi-Thread WASM SIMD q8 sesuai hasil benchmark perangkat.')
+  const cachedBackendPref = readCachedRmbgBackendPref()
+
+  // Jika benchmark sebelumnya (memori atau sessionStorage) memilih WASM multi-thread, langsung pakai WASM q8
+  if (rmbgPreferWasmAfterBenchmark || cachedBackendPref === 'wasm') {
+    rmbgPreferWasmAfterBenchmark = true
+    onLog(
+      '[LocalVid Chroma] Menggunakan Multi-Thread WASM SIMD q8 sesuai cache benchmark sesi ini.',
+    )
     return createRmbgWasmQ8Handle(signal, onLog, onStatus)
   }
 
@@ -740,6 +858,7 @@ async function createRmbgHandle(
   if (gpuInfo.available) {
     const webgpuDtype: 'fp16' | 'fp32' = gpuInfo.hasShaderF16 ? 'fp16' : 'fp32'
     const sizeNote = webgpuDtype === 'fp16' ? '~88 MB fp16' : '~176 MB fp32'
+    const expectedMB = webgpuDtype === 'fp16' ? 88 : 176
 
     try {
       onLog(
@@ -752,7 +871,7 @@ async function createRmbgHandle(
         dtype: webgpuDtype,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         config: { model_type: 'custom' } as any,
-        progress_callback: createDownloadProgressReporter(sizeNote, signal, onStatus),
+        progress_callback: createDownloadProgressReporter(sizeNote, expectedMB, signal, onStatus),
       })
       checkAborted(signal)
       onLog(`[LocalVid Chroma] Model ${RMBG_MODEL_ID} siap pada WebGPU (dtype=${webgpuDtype}).`)
@@ -761,7 +880,7 @@ async function createRmbgHandle(
         RawImage,
         device: 'webgpu',
         dtype: webgpuDtype,
-        benchmarked: false,
+        benchmarked: cachedBackendPref === 'webgpu',
       }
     } catch (webgpuErr) {
       if (signal.aborted || (webgpuErr instanceof DOMException && webgpuErr.name === 'AbortError')) {
@@ -945,7 +1064,7 @@ async function runRmbgInferenceToProbBuffer(
     }
   }
 
-  // Smart Backend Auto-Benchmark pada frame pertama WebGPU
+  // Smart Backend Auto-Benchmark pada frame pertama WebGPU ([BUG-26NOV-12] + cache sessionStorage)
   if (activeHandle.device === 'webgpu' && !activeHandle.benchmarked) {
     activeHandle.benchmarked = true
     const webgpuMs = resultMeta.elapsedMs
@@ -957,10 +1076,13 @@ async function runRmbgInferenceToProbBuffer(
       onStatus?.(
         `WebGPU lambat (${Math.round(webgpuMs)} ms), menguji Multi-Thread WASM SIMD q8...`,
       )
+      const origOutProb = new Float32Array(outProb)
+      let switchedToWasm = false
+      let candidateWasm: ActiveRmbgHandle | null = null
+
       try {
-        const candidateWasm = await createRmbgWasmQ8Handle(signal, onLog, onStatus)
+        candidateWasm = await createRmbgWasmQ8Handle(signal, onLog, onStatus)
         const candidateProb = new Float32Array(workW * workH)
-        const origOutProb = new Float32Array(outProb)
 
         const tWasm0 = performance.now()
         await runOnce(candidateWasm, inferSize)
@@ -972,6 +1094,7 @@ async function runRmbgInferenceToProbBuffer(
             `[LocalVid Chroma] WebGPU lambat (${Math.round(webgpuMs)} ms/frame), beralih otomatis ke Multi-Thread WASM SIMD q8 (${Math.round(wasmMs)} ms/frame) agar lebih cepat.`,
           )
           rmbgPreferWasmAfterBenchmark = true
+          writeCachedRmbgBackendPref('wasm')
           if (activeHandle.model && typeof activeHandle.model.dispose === 'function') {
             try {
               await activeHandle.model.dispose()
@@ -981,13 +1104,15 @@ async function runRmbgInferenceToProbBuffer(
           }
           activeHandle = candidateWasm
           cachedRmbgHandle = candidateWasm
+          candidateWasm = null
           outProb.set(candidateProb)
           resultMeta.elapsedMs = wasmMs
+          switchedToWasm = true
         } else {
           onLog(
             `[LocalVid Chroma] Benchmark selesai: WebGPU (${Math.round(webgpuMs)} ms) lebih cepat dari WASM (${Math.round(wasmMs)} ms), mempertahankan WebGPU.`,
           )
-          outProb.set(origOutProb)
+          writeCachedRmbgBackendPref('webgpu')
           if (candidateWasm.model && typeof candidateWasm.model.dispose === 'function') {
             try {
               await candidateWasm.model.dispose()
@@ -995,16 +1120,30 @@ async function runRmbgInferenceToProbBuffer(
               // Abaikan error dispose
             }
           }
+          candidateWasm = null
         }
       } catch (benchErr) {
         if (signal.aborted || (benchErr instanceof DOMException && benchErr.name === 'AbortError')) {
           throw benchErr
         }
+        // Benchmark gagal -> tandai tidak valid, jangan ubah pilihan backend, & pulihkan mask asli di finally
+        if (candidateWasm?.model && typeof candidateWasm.model.dispose === 'function') {
+          try {
+            await candidateWasm.model.dispose()
+          } catch {
+            // Abaikan error dispose kandidat
+          }
+        }
         onLog(
-          `[LocalVid Chroma] Pengujian fallback WASM dilewati (${benchErr instanceof Error ? benchErr.message : String(benchErr)}), melanjutkan dengan WebGPU.`,
+          `[LocalVid Chroma] Pengujian fallback WASM gagal/dilewati (${benchErr instanceof Error ? benchErr.message : String(benchErr)}), memulihkan mask WebGPU asli.`,
         )
+      } finally {
+        if (!switchedToWasm) {
+          outProb.set(origOutProb)
+        }
       }
     } else {
+      writeCachedRmbgBackendPref('webgpu')
       onLog(
         `[LocalVid Chroma] Benchmark WebGPU cepat (${Math.round(webgpuMs)} ms/frame pada input ${inferSize}x${inferSize}).`,
       )
@@ -1194,6 +1333,107 @@ function dilate3x3(
   }
 }
 
+/**
+ * [BUG-26NOV-03] Hole-Fill (Isi Lubang Interior Mask) zero-allocation (< 0.5 ms pada <= 384px):
+ * Melakukan flood-fill 4-arah dari seluruh piksel background (alpha < 128) di tepi luar kanvas.
+ * Setiap piksel background yang tidak terjangkau dari tepi luar merupakan lubang interior
+ * di dalam objek (mis. pantulan mengilap pada produk/benda) dan langsung diisi menjadi 255 foreground.
+ */
+export function fillMaskHoles(
+  alpha: Uint8Array,
+  visited: Uint8Array,
+  queue: Int32Array,
+  w: number,
+  h: number,
+): void {
+  const total = w * h
+  if (w < 3 || h < 3 || total === 0) return
+
+  visited.fill(0, 0, total)
+  let head = 0
+  let tail = 0
+
+  // Seed baris atas & baris bawah
+  const bottomRow = (h - 1) * w
+  for (let x = 0; x < w; x += 1) {
+    if (alpha[x] < 128 && visited[x] === 0) {
+      visited[x] = 1
+      queue[tail] = x
+      tail += 1
+    }
+    const bIdx = bottomRow + x
+    if (alpha[bIdx] < 128 && visited[bIdx] === 0) {
+      visited[bIdx] = 1
+      queue[tail] = bIdx
+      tail += 1
+    }
+  }
+
+  // Seed kolom kiri & kolom kanan
+  for (let y = 1; y < h - 1; y += 1) {
+    const leftIdx = y * w
+    if (alpha[leftIdx] < 128 && visited[leftIdx] === 0) {
+      visited[leftIdx] = 1
+      queue[tail] = leftIdx
+      tail += 1
+    }
+    const rightIdx = leftIdx + w - 1
+    if (alpha[rightIdx] < 128 && visited[rightIdx] === 0) {
+      visited[rightIdx] = 1
+      queue[tail] = rightIdx
+      tail += 1
+    }
+  }
+
+  // BFS 4-tetangga pada area background eksterior
+  while (head < tail) {
+    const idx = queue[head]
+    head += 1
+    const x = idx % w
+    const y = (idx - x) / w
+
+    if (x > 0) {
+      const n = idx - 1
+      if (visited[n] === 0 && alpha[n] < 128) {
+        visited[n] = 1
+        queue[tail] = n
+        tail += 1
+      }
+    }
+    if (x < w - 1) {
+      const n = idx + 1
+      if (visited[n] === 0 && alpha[n] < 128) {
+        visited[n] = 1
+        queue[tail] = n
+        tail += 1
+      }
+    }
+    if (y > 0) {
+      const n = idx - w
+      if (visited[n] === 0 && alpha[n] < 128) {
+        visited[n] = 1
+        queue[tail] = n
+        tail += 1
+      }
+    }
+    if (y < h - 1) {
+      const n = idx + w
+      if (visited[n] === 0 && alpha[n] < 128) {
+        visited[n] = 1
+        queue[tail] = n
+        tail += 1
+      }
+    }
+  }
+
+  // Isi seluruh piksel background tertutup (lubang interior) menjadi foreground padat (255)
+  for (let i = 0; i < total; i += 1) {
+    if (alpha[i] < 128 && visited[i] === 0) {
+      alpha[i] = 255
+    }
+  }
+}
+
 function createCompositorScratch(dstW: number, dstH: number): CompositorScratch {
   const { workW, workH } = computeMaskWorkDimensions(dstW, dstH)
   const workLen = workW * workH
@@ -1265,6 +1505,8 @@ function createCompositorScratch(dstW: number, dstH: number): CompositorScratch 
     alphaA: new Uint8Array(workLen),
     alphaB: new Uint8Array(workLen),
     alphaTemp: new Uint8Array(workLen),
+    holeVisited: new Uint8Array(workLen),
+    holeQueue: new Int32Array(workLen),
   }
 }
 
@@ -1369,10 +1611,13 @@ function compositeProbBufferToOutput(
     }
   }
 
-  // 2. Morphological Cleanup (Opening 3x3: Erode lalu Dilate) untuk melenyapkan bercak kecil di luar objek
+  // 2. Morphological Cleanup (Opening 3x3: Erode lalu Dilate) + Hole-Fill interior (khusus Semua Objek)
   if (options.maskCleanup && workW >= 4 && workH >= 4) {
     erode3x3(activeAlpha, scratch.alphaTemp, spareAlpha, workW, workH)
     dilate3x3(spareAlpha, scratch.alphaTemp, activeAlpha, workW, workH)
+    if (options.subjectMode === 'all-objects') {
+      fillMaskHoles(activeAlpha, scratch.holeVisited, scratch.holeQueue, workW, workH)
+    }
   }
 
   // 3. Edge Shift akurat (-3..+3): negatif -> erode (buang halo), positif -> dilate (perluas mask)
@@ -1584,21 +1829,13 @@ export async function renderChromaPreviewFrame({
 
     scratch.mpInputCtx.drawImage(srcCanvas, 0, 0, scratch.workW, scratch.workH)
 
-    let mpError: Error | null = null
-    mpHandle.segmenter.segment(scratch.mpInputCanvas, (res) => {
-      try {
-        writeMediaPipeMaskToProbBuffer(
-          res,
-          mpHandle.labels,
-          scratch.probCurrent,
-          scratch.workW,
-          scratch.workH,
-        )
-      } catch (err) {
-        mpError = err instanceof Error ? err : new Error(String(err))
-      }
-    })
-    if (mpError) throw mpError
+    await runMediaPipeImageSegment(
+      mpHandle,
+      scratch.mpInputCanvas,
+      scratch.probCurrent,
+      scratch.workW,
+      scratch.workH,
+    )
 
     const { foregroundRatio } = compositeProbBufferToOutput(
       srcCanvas,
@@ -1822,7 +2059,33 @@ async function seekVideoToTime(
   }
 }
 
+let reusableJpegOffscreen: OffscreenCanvas | null = null
+
 async function canvasToJpegUint8Array(canvas: HTMLCanvasElement): Promise<Uint8Array> {
+  // Off-main-thread JPEG encode via OffscreenCanvas.convertToBlob bila didukung browser
+  if (typeof OffscreenCanvas !== 'undefined') {
+    try {
+      if (
+        !reusableJpegOffscreen ||
+        reusableJpegOffscreen.width !== canvas.width ||
+        reusableJpegOffscreen.height !== canvas.height
+      ) {
+        reusableJpegOffscreen = new OffscreenCanvas(canvas.width, canvas.height)
+      }
+      const offCtx = reusableJpegOffscreen.getContext('2d')
+      if (offCtx && typeof reusableJpegOffscreen.convertToBlob === 'function') {
+        offCtx.drawImage(canvas, 0, 0)
+        const offBlob = await reusableJpegOffscreen.convertToBlob({
+          type: 'image/jpeg',
+          quality: 0.88,
+        })
+        return new Uint8Array(await offBlob.arrayBuffer())
+      }
+    } catch {
+      // Fallback otomatis ke HTMLCanvasElement.toBlob
+    }
+  }
+
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (result) => {
@@ -1836,26 +2099,45 @@ async function canvasToJpegUint8Array(canvas: HTMLCanvasElement): Promise<Uint8A
   return new Uint8Array(await blob.arrayBuffer())
 }
 
+/**
+ * [BUG-26NOV-05] Menghitung FPS & ETA memakai rolling average 5 frame terakhir,
+ * mengabaikan 3 frame pertama (fase warmup) agar estimasi tidak melonjak 4-6x lipat di awal.
+ */
 function formatLiveSpeedProgress(
   doneFrames: number,
   totalFrames: number,
-  segStartedAtMs: number,
+  recentFrameTimesMs: number[],
   modeTag: string,
   engineBadge: ChromaEngineBadge,
 ): ChromaFrameProgress {
-  const elapsedSec = Math.max(0.1, (performance.now() - segStartedAtMs) / 1000)
-  const fpsSpeed = doneFrames / elapsedSec
-  const remaining = Math.max(0, totalFrames - doneFrames)
-  const etaSeconds =
-    doneFrames >= 1 && remaining > 0
-      ? Math.max(1, Math.round(remaining / Math.max(0.05, fpsSpeed)))
-      : remaining === 0
-        ? 0
-        : null
   const framePercent = Math.min(86, Math.round(12 + (doneFrames / totalFrames) * 74))
+  const remaining = Math.max(0, totalFrames - doneFrames)
 
-  const etaText = etaSeconds !== null && etaSeconds > 0 ? ` • Sisa ~${etaSeconds} detik` : ''
-  const speedText = doneFrames >= 1 ? ` • ${fpsSpeed.toFixed(1)} fps` : ''
+  if (doneFrames < 3 || recentFrameTimesMs.length < 3) {
+    return {
+      phase: 'segmenting',
+      label: `Frame ${doneFrames} / ${totalFrames} • Menghitung estimasi... (${modeTag})`,
+      currentFrame: doneFrames,
+      totalFrames,
+      percent: framePercent,
+      engineLabel: engineBadge,
+      fpsSpeed: undefined,
+      etaSeconds: null,
+      modeTag,
+    }
+  }
+
+  const windowIntervals = recentFrameTimesMs.length - 1
+  const windowSec = Math.max(
+    0.05,
+    (recentFrameTimesMs[recentFrameTimesMs.length - 1] - recentFrameTimesMs[0]) / 1000,
+  )
+  const rollingFps = windowIntervals / windowSec
+  const etaSeconds =
+    remaining > 0 ? Math.max(1, Math.round(remaining / Math.max(0.05, rollingFps))) : 0
+
+  const etaText = etaSeconds > 0 ? ` • Sisa ~${etaSeconds} detik` : ''
+  const speedText = ` • ${rollingFps.toFixed(1)} fps`
 
   return {
     phase: 'segmenting',
@@ -1864,7 +2146,7 @@ function formatLiveSpeedProgress(
     totalFrames,
     percent: framePercent,
     engineLabel: engineBadge,
-    fpsSpeed: Number(fpsSpeed.toFixed(1)),
+    fpsSpeed: Number(rollingFps.toFixed(1)),
     etaSeconds,
     modeTag,
   }
@@ -1889,12 +2171,13 @@ export async function runChromaKeyPipeline({
   onLog,
 }: RunChromaKeyParams): Promise<RunChromaKeyResult> {
   const tempFiles = new Set<string>([inputFileName, outputFileName])
-  const safeThreads = String(Math.max(1, Math.min(4, threads)))
+  const safeThreads = String(Math.max(1, Math.min(6, threads)))
   const maxDurationSec = getChromaMaxDurationSec(isMobile, options.subjectMode)
   const speedDef = getChromaSpeedProfileDef(options.speedProfile)
 
   let videoElement: HTMLVideoElement | null = null
   let videoObjectUrl: string | null = null
+  let webCodecsReader: WebCodecsFrameReader | null = null
   let mpHandle: ActiveMediaPipeHandle | null = null
   let rmbgHandle: ActiveRmbgHandle | null = null
   let scratch: CompositorScratch | null = null
@@ -1917,6 +2200,14 @@ export async function runChromaKeyPipeline({
     const loaded = await loadNativeVideoElement(videoFile, signal)
     videoElement = loaded.video
     videoObjectUrl = loaded.objectUrl
+
+    // Coba akselerasi WebCodecs VideoDecoder (lazy-loaded) dengan fallback 100% aman ke <video> seek
+    try {
+      const { tryCreateWebCodecsFrameReader } = await import('./webCodecsFrameReader')
+      webCodecsReader = await tryCreateWebCodecsFrameReader(videoFile, signal, onLog)
+    } catch {
+      webCodecsReader = null
+    }
 
     const srcW = videoElement.videoWidth
     const srcH = videoElement.videoHeight
@@ -2027,7 +2318,41 @@ export async function runChromaKeyPipeline({
     scratch = createCompositorScratch(targetDims.width, targetDims.height)
     let loggedMaskInfo = false
     const segStartedAtMs = performance.now()
+    const recentFrameTimesMs: number[] = []
     let writtenFrames = 0
+
+    const captureFrameToCanvas = async (
+      frameIdx: number,
+      targetCtx: CanvasRenderingContext2D,
+    ): Promise<void> => {
+      checkAborted(signal)
+      const tsSec = frameIdx / options.targetFps
+      if (webCodecsReader) {
+        try {
+          await webCodecsReader.drawFrameAtTime(
+            tsSec,
+            targetCtx,
+            targetDims.width,
+            targetDims.height,
+            signal,
+          )
+          return
+        } catch (wcErr) {
+          if (signal.aborted || (wcErr instanceof DOMException && wcErr.name === 'AbortError')) {
+            throw wcErr
+          }
+          const reason = wcErr instanceof Error ? wcErr.message : String(wcErr)
+          onLog(
+            `[LocalVid Chroma] WebCodecs dialihkan otomatis ke decoder native <video> (${reason}).`,
+          )
+          webCodecsReader.dispose()
+          webCodecsReader = null
+        }
+      }
+      await seekVideoToTime(videoElement!, tsSec, frameIdx + 1, signal, onLog)
+      checkAborted(signal)
+      targetCtx.drawImage(videoElement!, 0, 0, targetDims.width, targetDims.height)
+    }
 
     const writeCompositeFrame = async (
       frameIndex: number,
@@ -2049,8 +2374,12 @@ export async function runChromaKeyPipeline({
       tempFiles.add(outFrameName)
       await ffmpeg.writeFile(outFrameName, jpegBytes)
       writtenFrames += 1
+      recentFrameTimesMs.push(performance.now())
+      if (recentFrameTimesMs.length > 6) {
+        recentFrameTimesMs.shift()
+      }
       onProgress(
-        formatLiveSpeedProgress(writtenFrames, totalFrames, segStartedAtMs, modeTag, engineBadge),
+        formatLiveSpeedProgress(writtenFrames, totalFrames, recentFrameTimesMs, modeTag, engineBadge),
       )
     }
 
@@ -2084,10 +2413,8 @@ export async function runChromaKeyPipeline({
         destProb: Float32Array,
       ): Promise<void> => {
         checkAborted(signal)
-        const tsSec = frameIdx / options.targetFps
-        await seekVideoToTime(videoElement!, tsSec, frameIdx + 1, signal, onLog)
+        await captureFrameToCanvas(frameIdx, targetCtx)
         checkAborted(signal)
-        targetCtx.drawImage(videoElement!, 0, 0, targetDims.width, targetDims.height)
 
         const { activeHandle } = await runRmbgInferenceToProbBuffer(
           targetCanvas,
@@ -2160,10 +2487,8 @@ export async function runChromaKeyPipeline({
               interp[p] = oneMinusT * prevProb[p] + t * nextProb[p]
             }
 
-            const midTimeSec = midIdx / options.targetFps
-            await seekVideoToTime(videoElement, midTimeSec, midIdx + 1, signal, onLog)
+            await captureFrameToCanvas(midIdx, srcCtx)
             checkAborted(signal)
-            srcCtx.drawImage(videoElement, 0, 0, targetDims.width, targetDims.height)
 
             await writeCompositeFrame(midIdx, srcCanvas, interp, modeTag)
             await yieldToMainThread()
@@ -2198,12 +2523,9 @@ export async function runChromaKeyPipeline({
       for (let index = 0; index < totalFrames; index += 1) {
         checkAborted(signal)
 
-        const timestampSec = index / options.targetFps
-        await seekVideoToTime(videoElement, timestampSec, index + 1, signal, onLog)
-        checkAborted(signal)
-
         // Gambar frame resolusi penuh ke srcCanvas & versi hemat (maks 384px) ke mpInputCanvas
-        srcCtx.drawImage(videoElement, 0, 0, targetDims.width, targetDims.height)
+        await captureFrameToCanvas(index, srcCtx)
+        checkAborted(signal)
         scratch.mpInputCtx.drawImage(srcCanvas, 0, 0, scratch.workW, scratch.workH)
 
         // Timestamp selalu naik secara monoton untuk MediaPipe segmentForVideo
@@ -2213,27 +2535,20 @@ export async function runChromaKeyPipeline({
         )
         mpHandle.lastVideoTimestampMs = monotonicTsMs
 
-        let mpError: Error | null = null
-        mpHandle.segmenter.segmentForVideo(scratch.mpInputCanvas, monotonicTsMs, (res) => {
-          try {
-            writeMediaPipeMaskToProbBuffer(
-              res,
-              mpHandle!.labels,
-              scratch!.probCurrent,
-              scratch!.workW,
-              scratch!.workH,
-              !loggedMaskInfo
-                ? (info) => {
-                    loggedMaskInfo = true
-                    onLog(`[LocalVid Chroma] Info mask frame pertama: ${info}`)
-                  }
-                : undefined,
-            )
-          } catch (err) {
-            mpError = err instanceof Error ? err : new Error(String(err))
-          }
-        })
-        if (mpError) throw mpError
+        await runMediaPipeVideoSegment(
+          mpHandle,
+          scratch.mpInputCanvas,
+          monotonicTsMs,
+          scratch.probCurrent,
+          scratch.workW,
+          scratch.workH,
+          !loggedMaskInfo
+            ? (info) => {
+                loggedMaskInfo = true
+                onLog(`[LocalVid Chroma] Info mask frame pertama: ${info}`)
+              }
+            : undefined,
+        )
 
         // Temporal Smoothing ringan antar-frame (0.78 current + 0.22 prev) agar rambut & bahu tidak berkedip
         if (index === 0) {
@@ -2281,6 +2596,10 @@ export async function runChromaKeyPipeline({
       rmbgHandle = null
     }
 
+    if (webCodecsReader) {
+      webCodecsReader.dispose()
+      webCodecsReader = null
+    }
     if (videoObjectUrl) {
       URL.revokeObjectURL(videoObjectUrl)
       videoObjectUrl = null
@@ -2343,7 +2662,7 @@ export async function runChromaKeyPipeline({
       baseAssembleArgs.push('-maxrate', `${smartMaxRateKbps}k`, '-bufsize', `${smartMaxRateKbps * 2}k`)
     }
 
-    baseAssembleArgs.push('-pix_fmt', 'yuv420p', '-threads', safeThreads)
+    baseAssembleArgs.push('-pix_fmt', 'yuv420p', '-threads', safeThreads, '-filter_threads', safeThreads)
 
     let assembleExit = await ffmpeg.exec(
       [...baseAssembleArgs, '-c:a', 'copy', '-shortest', '-movflags', '+faststart', outputFileName],
@@ -2421,6 +2740,14 @@ export async function runChromaKeyPipeline({
     }
     if (mpHandle) {
       disposeChromaPreviewSegmenter()
+    }
+    if (webCodecsReader) {
+      webCodecsReader.dispose()
+    }
+    if (reusableJpegOffscreen) {
+      reusableJpegOffscreen.width = 0
+      reusableJpegOffscreen.height = 0
+      reusableJpegOffscreen = null
     }
     if (videoObjectUrl) {
       URL.revokeObjectURL(videoObjectUrl)

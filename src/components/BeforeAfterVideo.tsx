@@ -268,7 +268,7 @@ export function BeforeAfterVideo({
           onPointerCancel={handleSplitPointerUp}
           className="relative select-none touch-none overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-inner cursor-ew-resize"
         >
-          {/* Layer Bawah: After (Hasil) — menentukan dimensi tinggi kotak */}
+          {/* Layer Bawah: After (Hasil) - menentukan dimensi tinggi kotak */}
           <video
             ref={afterRef}
             key={`split-after-${afterUrl}`}
@@ -282,7 +282,7 @@ export function BeforeAfterVideo({
             className="mx-auto block max-h-[420px] w-full bg-black object-contain"
           />
 
-          {/* Layer Atas: Before (Asli) — selalu muted agar suara tidak dobel, dipotong presisi via clip-path */}
+          {/* Layer Atas: Before (Asli) - selalu muted agar suara tidak dobel, dipotong presisi via clip-path */}
           <video
             ref={beforeRef}
             key={`split-before-${beforeUrl}`}

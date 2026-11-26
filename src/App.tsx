@@ -12,6 +12,7 @@ import {
   Lock,
   Monitor,
   Play,
+  RotateCcw,
   ShieldAlert,
   ShieldCheck,
   Smartphone,
@@ -28,11 +29,12 @@ import { UploadZone } from './components/UploadZone'
 import { useFFmpeg } from './hooks/useFFmpeg'
 import {
   DEFAULT_AI_UPSCALE_SETTINGS,
+  estimateAiOutputSize,
+  getAiMaxDurationSec,
   isAiAnyGpuSupported,
   isAiWebGpuSupported,
   isDurationWithinAiLimit,
   isValidModelUrl,
-  MAX_AI_DURATION_SECONDS,
   type AiFrameProgress,
   type AiUpscaleSettings,
 } from './utils/aiUpscalerConfig'
@@ -50,6 +52,7 @@ import {
   type AudioDenoiseOptions,
 } from './utils/audioDenoiseConfig'
 import {
+  estimateChromaOutputSize,
   getChromaBgDisplayLabel,
   getChromaMaxDurationSec,
   getChromaOutputSuffix,
@@ -65,6 +68,7 @@ import {
   buildAdvancedCompressArgs,
   computeTargetSizeBounds,
   DEFAULT_COMPRESS_OPTIONS,
+  estimateCompressedSize,
   getCompressOutputTag,
   getEffectiveCrf,
   resolveCodecPair,
@@ -89,6 +93,8 @@ import {
   buildStabilizerArgs,
   buildStabilizerFilterChain,
   computeTarget1080pResolution,
+  estimateEnhanceOutputSize,
+  estimateStabilizerOutputSize,
   FEATURE_TAB_LABELS,
   formatDuration,
   formatFileSizeMB,
@@ -100,6 +106,7 @@ import {
   isAudioOnlyResultFile,
   NATIVE_DECODER_EXTENSIONS,
   readVideoMetadata,
+  recordAdaptiveSizeCalibration,
   toEvenDimension,
   type EditPipelineStep,
   type EnhanceOptions,
@@ -109,7 +116,26 @@ import {
   type ResultContextualDetails,
   type SelectedVideo,
   type StabilizerLevel,
+  type VideoMetadata,
 } from './utils/videoProcessing'
+
+const DEFAULT_ENHANCE_OPTIONS: EnhanceOptions = {
+  denoise: false,
+  sharpen: false,
+  colorFix: false,
+  upscale1080p: false,
+  scaleAlgorithm: 'bicubic',
+  colorFilter: 'none',
+  smartSizeCap: true,
+}
+
+interface UndoRemovedStepState {
+  removedStep: EditPipelineStep
+  previousSteps: EditPipelineStep[]
+  previousDisplayFile: File
+  previousDisplayMetadata: VideoMetadata
+  optionsBeforeReset: TabOptionsSnapshot
+}
 
 type TabOptionsSnapshot =
   | { tab: 'convert'; outputFormat: OutputFormat; fastRemux: boolean }
@@ -172,7 +198,10 @@ export default function App() {
   const [selectedVideo, setSelectedVideo] = useState<SelectedVideo | null>(null)
   const [pipelineSteps, setPipelineSteps] = useState<EditPipelineStep[]>([])
   const [activeResultStepId, setActiveResultStepId] = useState<string | null>(null)
+  const [viewedResultBeforeUrl, setViewedResultBeforeUrl] = useState<string | null>(null)
   const [pendingRemoveStepId, setPendingRemoveStepId] = useState<string | null>(null)
+  const [pendingResetAll, setPendingResetAll] = useState(false)
+  const [undoRemovedStep, setUndoRemovedStep] = useState<UndoRemovedStepState | null>(null)
   const [chainNotice, setChainNotice] = useState<string | null>(null)
   const [sourcePreviewUrl, setSourcePreviewUrl] = useState<string | null>(null)
   const [isReadingMetadata, setIsReadingMetadata] = useState(false)
@@ -188,15 +217,7 @@ export default function App() {
   )
 
   // Tab 3: Jernihkan & HD + Filter Warna ([BUG-09] default colorFilter = 'none' agar netral)
-  const [enhanceOptions, setEnhanceOptions] = useState<EnhanceOptions>({
-    denoise: false,
-    sharpen: false,
-    colorFix: false,
-    upscale1080p: false,
-    scaleAlgorithm: 'bicubic',
-    colorFilter: 'none',
-    smartSizeCap: true,
-  })
+  const [enhanceOptions, setEnhanceOptions] = useState<EnhanceOptions>(DEFAULT_ENHANCE_OPTIONS)
 
   // Tab 4: Stabilizer (Mandiri)
   const [stabilizerLevel, setStabilizerLevel] = useState<StabilizerLevel>('medium')
@@ -230,10 +251,13 @@ export default function App() {
   const metadataReqIdRef = useRef(0)
   const chainNoticeTimerRef = useRef<number | null>(null)
   const cancelledByUserRef = useRef(false)
+  const lastProcessedWasAudioOnlyRef = useRef(false)
+  const viewedResultBeforeUrlRef = useRef<string | null>(null)
   const aiAbortControllerRef = useRef<AbortController | null>(null)
   const clearAiCacheRef = useRef<(() => number) | null>(null)
   const chromaAbortControllerRef = useRef<AbortController | null>(null)
   const clearChromaCacheRef = useRef<(() => number) | null>(null)
+  const resetChromaRuntimeRef = useRef<(() => void) | null>(null)
   const featureCardRef = useRef<HTMLDivElement | null>(null)
   const lastWatchdogActivityRef = useRef<number>(Date.now())
   const [idleSeconds, setIdleSeconds] = useState(0)
@@ -249,16 +273,26 @@ export default function App() {
       if (chainNoticeTimerRef.current !== null) {
         window.clearTimeout(chainNoticeTimerRef.current)
       }
+      if (viewedResultBeforeUrlRef.current) {
+        URL.revokeObjectURL(viewedResultBeforeUrlRef.current)
+        viewedResultBeforeUrlRef.current = null
+      }
     }
   }, [])
 
-  const showChainNotice = (message: string, durationMs = 4000) => {
+  const showChainNotice = (
+    message: string,
+    durationMs = 4000,
+    undoPayload: UndoRemovedStepState | null = null,
+  ) => {
     setChainNotice(message)
+    setUndoRemovedStep(undoPayload)
     if (chainNoticeTimerRef.current !== null) {
       window.clearTimeout(chainNoticeTimerRef.current)
     }
     chainNoticeTimerRef.current = window.setTimeout(() => {
       setChainNotice(null)
+      setUndoRemovedStep(null)
       chainNoticeTimerRef.current = null
     }, durationMs)
   }
@@ -269,6 +303,7 @@ export default function App() {
       chainNoticeTimerRef.current = null
     }
     setChainNotice(null)
+    setUndoRemovedStep(null)
   }
 
   useEffect(() => {
@@ -319,7 +354,15 @@ export default function App() {
 
   const aiWebGpuAvailable = isAiWebGpuSupported(isMobile, webgpu.status)
   const aiAnyGpuAvailable = isAiAnyGpuSupported(isMobile, webgpu.status, webgl2Supported)
-  const aiDurationOk = isDurationWithinAiLimit(effectiveInputVideo?.metadata.duration ?? null)
+  const aiMaxDurationSec = getAiMaxDurationSec(isMobile)
+  const aiDurationOk = isDurationWithinAiLimit(
+    effectiveInputVideo?.metadata.duration ?? null,
+    isMobile,
+  )
+  const isSeparateMp3Export =
+    activeTab === 'audio-denoise' &&
+    activeTabStep !== null &&
+    audioDenoiseOptions.outputMode === 'audio-mp3'
   const chromaDurationOk = isDurationWithinChromaLimit(
     effectiveInputVideo?.metadata.duration ?? null,
     isMobile,
@@ -363,8 +406,17 @@ export default function App() {
     return () => window.clearInterval(intervalId)
   }, [isBusy])
 
+  const revokeViewedBeforeUrl = () => {
+    if (viewedResultBeforeUrlRef.current) {
+      URL.revokeObjectURL(viewedResultBeforeUrlRef.current)
+      viewedResultBeforeUrlRef.current = null
+    }
+    setViewedResultBeforeUrl(null)
+  }
+
   const clearCurrentResult = async () => {
     const oldResultUrl = result?.url
+    revokeViewedBeforeUrl()
     setResult(null)
     setActiveResultStepId(null)
     setStatusStage('')
@@ -455,6 +507,33 @@ export default function App() {
     }
   }
 
+  const resetTabOptionsToDefault = (tab: FeatureTabId) => {
+    switch (tab) {
+      case 'convert':
+        setOutputFormat('mp4')
+        setFastRemux(true)
+        break
+      case 'compress':
+        setCompressOptions(DEFAULT_COMPRESS_OPTIONS)
+        break
+      case 'enhance':
+        setEnhanceOptions(DEFAULT_ENHANCE_OPTIONS)
+        break
+      case 'stabilize':
+        setStabilizerLevel('medium')
+        break
+      case 'ai-upscale':
+        setAiSettings(DEFAULT_AI_UPSCALE_SETTINGS)
+        break
+      case 'audio-denoise':
+        setAudioDenoiseOptions(DEFAULT_AUDIO_DENOISE_OPTIONS)
+        break
+      case 'auto-chroma':
+        setChromaKeyOptions(getDefaultChromaKeyOptions(isMobile))
+        break
+    }
+  }
+
   const loadPipelineDisplayVideo = async (
     file: File,
     options: { resetOriginal: boolean; syncCompress?: boolean },
@@ -467,6 +546,9 @@ export default function App() {
       setOriginalSourceFile(file)
       setPipelineSteps([])
       setPendingRemoveStepId(null)
+      setPendingResetAll(false)
+      setUndoRemovedStep(null)
+      lastProcessedWasAudioOnlyRef.current = false
     }
 
     const extension = getFileExtension(file.name) || 'mp4'
@@ -496,14 +578,21 @@ export default function App() {
   const handleTabChange = (nextTab: FeatureTabId) => {
     if (isBusy) return
     setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+
+    const leavingAudioOnly = Boolean(
+      (result && isAudioOnlyResultFile(result)) || lastProcessedWasAudioOnlyRef.current,
+    )
 
     if (nextTab === activeTab) {
       if (result) {
+        lastProcessedWasAudioOnlyRef.current = false
         void clearCurrentResult()
       }
       return
     }
 
+    lastProcessedWasAudioOnlyRef.current = false
     void clearCurrentResult()
     setActiveTab(nextTab)
 
@@ -513,6 +602,21 @@ export default function App() {
       restoreTabOptionsSnapshot(existingStep.optionsSnapshot)
       if (nextTab === 'compress') {
         syncCompressBoundsForFile(existingStep.inputFile.size, existingStep.inputMetadata.duration)
+      }
+      if (leavingAudioOnly) {
+        showChainNotice(
+          'Ekspor MP3 tidak masuk ke rantai edit video. Input video tetap memakai tahap sebelumnya.',
+          4500,
+        )
+      }
+    } else if (leavingAudioOnly) {
+      // [BUG-26NOV-02 & BUG-26NOV-16] Jangan pernah klaim melanjutkan dari hasil MP3
+      showChainNotice(
+        'Ekspor MP3 tidak masuk ke rantai edit video. Input video tetap memakai tahap sebelumnya.',
+        4500,
+      )
+      if (nextTab === 'compress' && selectedVideo) {
+        syncCompressBoundsForFile(selectedVideo.sizeBytes, selectedVideo.metadata.duration)
       }
     } else if (pipelineSteps.length > 0) {
       // Tab baru: otomatis lanjutkan dari hasil tahap terakhir di pipelineSteps
@@ -526,10 +630,26 @@ export default function App() {
 
   const handleEditSettingsFromResult = () => {
     if (isBusy) return
-    if (activeTabStep) {
+    if (activeTabStep && !(result && isAudioOnlyResultFile(result))) {
       restoreTabOptionsSnapshot(activeTabStep.optionsSnapshot)
     }
+    lastProcessedWasAudioOnlyRef.current = false
     void clearCurrentResult()
+  }
+
+  const handleReturnToVideoEditor = () => {
+    if (isBusy) return
+    lastProcessedWasAudioOnlyRef.current = false
+    void clearCurrentResult()
+    const latestVideoStep = pipelineSteps[pipelineSteps.length - 1]
+    if (latestVideoStep && latestVideoStep.tabId !== activeTab) {
+      setActiveTab(latestVideoStep.tabId)
+      restoreTabOptionsSnapshot(latestVideoStep.optionsSnapshot)
+    }
+    showChainNotice(
+      'Kembali ke editor video aktif. Ekspor MP3 tetap tersimpan terpisah.',
+      3500,
+    )
   }
 
   const handleViewStepResult = async (stepId: string) => {
@@ -541,6 +661,12 @@ export default function App() {
     if (oldResultUrl) {
       await cleanupMemory({ blobUrls: [oldResultUrl] })
     }
+    // [BUG-26NOV-17] Buat Blob URL khusus dari step.inputFile milik stage yang dilihat agar Before/After 100% akurat
+    revokeViewedBeforeUrl()
+    const stepBeforeUrl = URL.createObjectURL(step.inputFile)
+    viewedResultBeforeUrlRef.current = stepBeforeUrl
+    setViewedResultBeforeUrl(stepBeforeUrl)
+
     const freshUrl = URL.createObjectURL(step.outputFile)
     setActiveResultStepId(step.id)
     setResult({
@@ -555,13 +681,34 @@ export default function App() {
     if (idx < 0) return
 
     const removedStep = pipelineSteps[idx]
-    const hadDependentSteps = idx < pipelineSteps.length - 1
+    const removedSteps = pipelineSteps.slice(idx)
+    const isLastStage = idx === pipelineSteps.length - 1
+    const hadDependentSteps = !isLastStage
     const nextSteps = pipelineSteps.slice(0, idx)
     const restoredFile = idx > 0 ? nextSteps[idx - 1].outputFile : originalSourceFile
 
+    // [BUG-26NOV-04b] Simpan snapshot stage terakhir untuk tombol Undo 5 detik tanpa render ulang
+    const undoSnapshot: UndoRemovedStepState | null =
+      isLastStage && selectedVideo
+        ? {
+            removedStep,
+            previousSteps: pipelineSteps,
+            previousDisplayFile: selectedVideo.file,
+            previousDisplayMetadata: selectedVideo.metadata,
+            optionsBeforeReset: captureTabOptionsSnapshot(removedStep.tabId),
+          }
+        : null
+
     setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+    lastProcessedWasAudioOnlyRef.current = false
     await clearCurrentResult()
     setPipelineSteps(nextSteps)
+
+    // [BUG-26NOV-07] Reset setelan seluruh tab yang stage-nya dihapus ke default bersih
+    for (const step of removedSteps) {
+      resetTabOptionsToDefault(step.tabId)
+    }
 
     addLog(
       hadDependentSteps
@@ -577,8 +724,25 @@ export default function App() {
       hadDependentSteps
         ? `Efek ${removedStep.tabLabel} dan tahap sesudahnya dihapus. Video dikembalikan ke kondisi sebelumnya.`
         : `Efek ${removedStep.tabLabel} dihapus. Video dikembalikan ke kondisi sebelumnya.`,
-      4500,
+      isLastStage ? 5000 : 4500,
+      undoSnapshot,
     )
+  }
+
+  const handleUndoRemoveStep = async () => {
+    if (isBusy || !undoRemovedStep) return
+    const snap = undoRemovedStep
+    dismissChainNotice()
+    setPipelineSteps(snap.previousSteps)
+    restoreTabOptionsSnapshot(snap.optionsBeforeReset)
+    addLog(
+      `[LocalVid] Penghapusan efek ${snap.removedStep.tabLabel} dibatalkan (Undo instan tanpa render ulang).`,
+    )
+    await loadPipelineDisplayVideo(snap.previousDisplayFile, {
+      resetOriginal: false,
+      syncCompress: snap.removedStep.tabId !== 'compress',
+    })
+    showChainNotice(`Efek ${snap.removedStep.tabLabel} dikembalikan.`, 3200)
   }
 
   const handleRequestRemoveStep = (stepId: string) => {
@@ -586,11 +750,12 @@ export default function App() {
     const idx = pipelineSteps.findIndex((s) => s.id === stepId)
     if (idx < 0) return
 
+    setPendingResetAll(false)
     if (idx === pipelineSteps.length - 1) {
-      // Tahap terakhir: langsung hapus instan tanpa modal rumit
+      // Tahap terakhir: langsung hapus instan + sediakan tombol Undo 5 detik di toast
       void executeRemoveStep(stepId)
     } else {
-      // Tahap tengah/awal: tampilkan bar konfirmasi ringan inline
+      // Tahap tengah/awal: tampilkan bar konfirmasi ringan inline (role="alertdialog")
       setPendingRemoveStepId(stepId)
     }
   }
@@ -598,6 +763,15 @@ export default function App() {
   const handleSelectFile = async (file: File) => {
     dismissChainNotice()
     setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+    lastProcessedWasAudioOnlyRef.current = false
+    // [BUG-26NOV-11] Reset flag sticky backend Tab 7 & cache benchmark sesi saat file baru diunggah
+    resetChromaRuntimeRef.current?.()
+    try {
+      window.sessionStorage.removeItem('localvid_rmbg_backend_v1')
+    } catch {
+      // Abaikan bila sessionStorage dibatasi
+    }
     await clearCurrentResult()
     await loadPipelineDisplayVideo(file, { resetOriginal: true, syncCompress: true })
   }
@@ -606,6 +780,8 @@ export default function App() {
     metadataReqIdRef.current += 1
     dismissChainNotice()
     setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+    lastProcessedWasAudioOnlyRef.current = false
     setOriginalSourceFile(null)
     setSelectedVideo(null)
     setPipelineSteps([])
@@ -614,11 +790,23 @@ export default function App() {
     await clearCurrentResult()
   }
 
-  const handleRevertToOriginal = async () => {
-    if (isBusy || !originalSourceFile) return
+  const handleRequestRevertToOriginal = () => {
+    if (isBusy || !originalSourceFile || pipelineSteps.length === 0) return
     setPendingRemoveStepId(null)
+    setPendingResetAll(true)
+  }
+
+  const executeRevertToOriginal = async () => {
+    if (isBusy || !originalSourceFile) return
+    const removedSteps = pipelineSteps
+    setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+    lastProcessedWasAudioOnlyRef.current = false
     await clearCurrentResult()
     setPipelineSteps([])
+    for (const step of removedSteps) {
+      resetTabOptionsToDefault(step.tabId)
+    }
     addLog(
       `[LocalVid] Video dikembalikan ke file asli: ${originalSourceFile.name} (${formatFileSizeMB(originalSourceFile.size)}).`,
     )
@@ -759,8 +947,14 @@ export default function App() {
     if (activeTab === 'ai-upscale' && !aiAnyGpuAvailable) {
       return 'Membutuhkan WebGPU atau WebGL2'
     }
+    if (activeTab === 'ai-upscale' && !aiDurationOk) {
+      return `Durasi Melebihi Batas (${aiMaxDurationSec} dtk)`
+    }
     if (activeTab === 'auto-chroma' && !chromaDurationOk) {
       return `Durasi Melebihi Batas (${getChromaMaxDurationSec(isMobile, chromaKeyOptions.subjectMode)} dtk)`
+    }
+    if (isSeparateMp3Export) {
+      return 'Ekstrak Audio (.MP3) Terpisah'
     }
     if (activeTabStep) {
       return `Terapkan Ulang & Ganti Efek ${FEATURE_TAB_LABELS[activeTab]}`
@@ -813,13 +1007,17 @@ export default function App() {
     workVideo: SelectedVideo,
     replacingStepId: string | null,
   ) => {
+    revokeViewedBeforeUrl()
     setResult(processedResult)
 
     // Pengaman Audio-Only (.MP3): jangan masukkan ke pipeline video agar tab video di atas tidak rusak
     if (isAudioOnlyResultFile(processedResult)) {
+      lastProcessedWasAudioOnlyRef.current = true
       setActiveResultStepId(null)
       return
     }
+
+    lastProcessedWasAudioOnlyRef.current = false
 
     const outputFile = new File([processedResult.blob], processedResult.fileName, {
       type: processedResult.mimeType || processedResult.blob.type || 'video/mp4',
@@ -868,10 +1066,13 @@ export default function App() {
     const workVideo = effectiveInputVideo
     if (!workVideo || !canStartProcess) return
 
-    const replacingStepId = activeTabStep?.id ?? null
+    const replacingStepId = isSeparateMp3Export ? null : (activeTabStep?.id ?? null)
 
     cancelledByUserRef.current = false
     setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+    dismissChainNotice()
+    revokeViewedBeforeUrl()
     setProcessError(null)
     setResult(null)
     setActiveResultStepId(null)
@@ -927,13 +1128,21 @@ export default function App() {
         }
         if (!aiDurationOk) {
           throw new Error(
-            'Durasi video melebihi batas maksimal 15 detik untuk GPU HD Upscaler.',
+            `Durasi video melebihi batas maksimal ${aiMaxDurationSec} detik untuk GPU HD Upscaler di perangkat ini.`,
           )
         }
 
         const effectiveAiSettings: AiUpscaleSettings = aiWebGpuAvailable
           ? aiSettings
           : { ...aiSettings, enginePreference: 'webgl2-shader' }
+
+        const preAiEstimate = estimateAiOutputSize(
+          effectiveAiSettings,
+          workVideo.sizeBytes,
+          durationSec,
+          workDimensions,
+          isMobile,
+        )
 
         setPinnedCommand(
           `AI/GPU Upscaler (${effectiveAiSettings.enginePreference}, ${effectiveAiSettings.targetFps} fps, 1080p=${String(
@@ -942,7 +1151,7 @@ export default function App() {
         )
         const aiEffectiveDur =
           durationSec !== null && Number.isFinite(durationSec) && durationSec > 0
-            ? Math.min(durationSec, MAX_AI_DURATION_SECONDS)
+            ? Math.min(durationSec, aiMaxDurationSec)
             : null
         setPinnedDurationLine(
           aiEffectiveDur !== null
@@ -967,6 +1176,7 @@ export default function App() {
           videoFile: workVideo.file,
           inputFileName: inputName,
           outputFileName: finalOutputName,
+          isMobile,
           threads: recommendedThreads,
           settings: effectiveAiSettings,
           signal: controller.signal,
@@ -988,6 +1198,16 @@ export default function App() {
           files: aiOutcome.tempFiles,
           preserveBlobUrls: [url],
         })
+
+        if (preAiEstimate) {
+          const midBytes =
+            ((preAiEstimate.minEstimatedMB + preAiEstimate.maxEstimatedMB) / 2) * 1024 * 1024
+          recordAdaptiveSizeCalibration(
+            `ai-upscale:${effectiveAiSettings.smartSizeCap ? 'cap' : 'uncapped'}`,
+            blob.size,
+            midBytes,
+          )
+        }
 
         const downloadFileName = buildBrandedFilename('gpu-hd', 'mp4')
 
@@ -1066,11 +1286,20 @@ export default function App() {
         const controller = new AbortController()
         chromaAbortControllerRef.current = controller
 
+        const preChromaEstimate = estimateChromaOutputSize(
+          chromaKeyOptions,
+          workVideo.sizeBytes,
+          durationSec,
+          isMobile,
+          workDimensions,
+        )
+
         // Dynamic import memastikan 0 byte MediaPipe / Transformers.js dimuat bila Tab 7 tidak dipakai
-        const { runChromaKeyPipeline, clearChromaModelCache } = await import(
+        const { runChromaKeyPipeline, clearChromaModelCache, resetChromaRuntimeState } = await import(
           './utils/chromaKeyEngine'
         )
         clearChromaCacheRef.current = clearChromaModelCache
+        resetChromaRuntimeRef.current = resetChromaRuntimeState
 
         const chromaOutcome = await runChromaKeyPipeline({
           ffmpeg,
@@ -1096,6 +1325,14 @@ export default function App() {
           files: chromaOutcome.tempFiles,
           preserveBlobUrls: [url],
         })
+
+        if (preChromaEstimate) {
+          const midBytes =
+            ((preChromaEstimate.minEstimatedMB + preChromaEstimate.maxEstimatedMB) / 2) *
+            1024 *
+            1024
+          recordAdaptiveSizeCalibration(`auto-chroma:${chromaKeyOptions.bgMode}`, blob.size, midBytes)
+        }
 
         const downloadFileName = buildBrandedFilename(
           getChromaOutputSuffix(chromaKeyOptions),
@@ -1153,6 +1390,7 @@ export default function App() {
       let suffix = 'processed'
       let summaryNote = 'Diproses dengan LocalVid Studio'
       let resultDurationSec: number | null = durationSec
+      let calibrationToRecord: { key: string; midBytes: number } | null = null
       let resultDetails: ResultContextualDetails = {
         kind: 'convert',
         sourceFormat: `.${inputExt.toUpperCase()}`,
@@ -1255,6 +1493,20 @@ export default function App() {
           }
         }
       } else if (activeTab === 'compress') {
+        const preCompressEst = estimateCompressedSize(
+          compressOptions,
+          workVideo.sizeBytes,
+          durationSec,
+          workDimensions,
+          inputExt,
+        )
+        if (compressOptions.compressionMode === 'crf' && compressOptions.videoCodec !== 'copy') {
+          calibrationToRecord = {
+            key: `compress:${compressOptions.socialTemplate}`,
+            midBytes:
+              ((preCompressEst.minEstimatedMB + preCompressEst.maxEstimatedMB) / 2) * 1024 * 1024,
+          }
+        }
         const built = buildAdvancedCompressArgs(
           inputName,
           outputName,
@@ -1333,6 +1585,18 @@ export default function App() {
           codecSummary: `${videoCodecPretty} / ${audioCodecPretty}`,
         }
       } else if (activeTab === 'stabilize') {
+        const preStabEst = estimateStabilizerOutputSize(
+          stabilizerLevel,
+          workVideo.sizeBytes,
+          durationSec,
+          workDimensions,
+        )
+        if (preStabEst) {
+          calibrationToRecord = {
+            key: `stabilize:${stabilizerLevel}`,
+            midBytes: ((preStabEst.minEstimatedMB + preStabEst.maxEstimatedMB) / 2) * 1024 * 1024,
+          }
+        }
         const stabOpt = getStabilizerOption(stabilizerLevel)
         const stabChain = buildStabilizerFilterChain(stabilizerLevel, workDimensions)
         suffix = 'stabil'
@@ -1396,6 +1660,7 @@ export default function App() {
           finalOutputName,
           sanitizedAudio,
           inputExt,
+          recommendedThreads,
         )
         exitCode = await exec(primaryArgs, undefined, durationSec)
 
@@ -1523,6 +1788,19 @@ export default function App() {
           fallbackCodecLabel: usedFallbackEncode ? 'H.264/AAC' : undefined,
         }
       } else {
+        const preEnhanceEst = estimateEnhanceOutputSize(
+          enhanceOptions,
+          workVideo.sizeBytes,
+          durationSec,
+          workDimensions,
+        )
+        if (preEnhanceEst) {
+          calibrationToRecord = {
+            key: `enhance:${enhanceOptions.upscale1080p ? '1080p' : 'native'}`,
+            midBytes:
+              ((preEnhanceEst.minEstimatedMB + preEnhanceEst.maxEstimatedMB) / 2) * 1024 * 1024,
+          }
+        }
         const notes: string[] = []
         if (enhanceOptions.colorFilter !== 'none') {
           notes.push(getColorFilterPreset(enhanceOptions.colorFilter).name)
@@ -1609,6 +1887,14 @@ export default function App() {
       const { url, blob } = await readOutputAsBlobURL(finalOutputName, finalMimeType)
 
       await cleanupMemory({ preserveBlobUrls: [url] })
+
+      if (calibrationToRecord) {
+        recordAdaptiveSizeCalibration(
+          calibrationToRecord.key,
+          blob.size,
+          calibrationToRecord.midBytes,
+        )
+      }
 
       const downloadFileName = buildBrandedFilename(suffix, finalOutputExt)
 
@@ -1901,9 +2187,48 @@ export default function App() {
             onClearFile={() => void handleClearFile()}
             onSelectStepTab={handleTabChange}
             onRemoveStep={handleRequestRemoveStep}
-            onRevertToOriginal={() => void handleRevertToOriginal()}
+            onRevertToOriginal={handleRequestRevertToOriginal}
             onSuggestFastRemux={handleSuggestFastRemux}
           />
+
+          {/* [BUG-26NOV-04a] Konfirmasi Inline (alertdialog) saat Reset Semua Efek ke Video Asli */}
+          {pendingResetAll && pipelineSteps.length > 0 && (
+            <div
+              role="alertdialog"
+              aria-label="Konfirmasi reset ke video asli"
+              className="animate-lv-fade-up flex flex-col gap-3 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3.5 text-xs leading-relaxed text-rose-950 shadow-xs sm:flex-row sm:items-center sm:justify-between sm:text-sm"
+            >
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle
+                  aria-hidden="true"
+                  className="mt-0.5 h-4 w-4 shrink-0 text-rose-600"
+                />
+                <span>
+                  Menghapus semua{' '}
+                  <strong className="font-bold">{pipelineSteps.length} efek</strong> dan kembali ke
+                  video asli? Lanjutkan?
+                </span>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => void executeRevertToOriginal()}
+                  className="inline-flex min-h-9 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-2xs transition-colors hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1 disabled:opacity-50"
+                >
+                  <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
+                  <span>Ya, Reset Semua</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingResetAll(false)}
+                  className="inline-flex min-h-9 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+                >
+                  Batal
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Konfirmasi Inline Ringan saat Menghapus Tahap Tengah / Awal yang Memiliki Tahap Lanjutan */}
           {(() => {
@@ -1952,27 +2277,40 @@ export default function App() {
             )
           })()}
 
-          {/* Banner/Toast Notifikasi Tipis saat Melanjutkan atau Menghapus Efek */}
+          {/* Banner/Toast Notifikasi Tipis saat Melanjutkan atau Menghapus Efek (+ Tombol Undo 5 Detik) */}
           {chainNotice && (
             <div
               role="status"
               aria-live="polite"
-              className="animate-lv-fade-up flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/95 px-4 py-2.5 text-xs font-semibold text-emerald-900 shadow-xs sm:text-sm"
+              className="animate-lv-fade-up flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/95 px-4 py-2.5 text-xs font-semibold text-emerald-900 shadow-xs sm:flex-nowrap sm:text-sm"
             >
-              <div className="flex items-center gap-2.5">
+              <div className="flex min-w-0 items-center gap-2.5">
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white">
                   <Check aria-hidden="true" className="h-3.5 w-3.5" />
                 </span>
-                <span>{chainNotice}</span>
+                <span className="break-words">{chainNotice}</span>
               </div>
-              <button
-                type="button"
-                onClick={dismissChainNotice}
-                aria-label="Tutup notifikasi alur edit"
-                className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-emerald-700 transition-colors hover:bg-emerald-100 hover:text-emerald-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
-              >
-                <X aria-hidden="true" className="h-4 w-4" />
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                {undoRemovedStep && (
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => void handleUndoRemoveStep()}
+                    className="inline-flex min-h-8 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl border border-emerald-400 bg-white px-3 py-1 text-xs font-bold text-emerald-900 shadow-2xs transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:opacity-50"
+                  >
+                    <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
+                    <span>Undo / Batalkan</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={dismissChainNotice}
+                  aria-label="Tutup notifikasi alur edit"
+                  className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-emerald-700 transition-colors hover:bg-emerald-100 hover:text-emerald-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                >
+                  <X aria-hidden="true" className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           )}
 
@@ -2018,7 +2356,7 @@ export default function App() {
                 result ? (
                   <ResultPreview
                     result={result}
-                    beforeUrl={sourcePreviewUrl}
+                    beforeUrl={viewedResultBeforeUrl ?? sourcePreviewUrl}
                     isMobile={isMobile}
                     deviceType={deviceType}
                     pipelineSteps={pipelineSteps}
@@ -2029,6 +2367,7 @@ export default function App() {
                         ? () => handleRequestRemoveStep(activeResultStepId)
                         : undefined
                     }
+                    onReturnToVideoEditor={handleReturnToVideoEditor}
                     onChangeVideo={handleChangeVideoFromResult}
                   />
                 ) : null
@@ -2124,17 +2463,25 @@ export default function App() {
                 )}
               </div>
 
-              {activeTabStep && !isBusy && !nativeFormatWarning && (
-                <p className="text-center text-xs text-slate-500">
-                  Akan mengganti hasil{' '}
-                  <strong className="font-semibold text-slate-700">
-                    {FEATURE_TAB_LABELS[activeTab]}
-                  </strong>{' '}
-                  sebelumnya tanpa menumpuk efek ganda.
-                  {activeTabStepIndex < pipelineSteps.length - 1
-                    ? ' Tahap sesudahnya akan disesuaikan ulang.'
-                    : ''}
+              {isSeparateMp3Export && !isBusy && !nativeFormatWarning ? (
+                <p className="text-center text-xs font-medium text-fuchsia-800">
+                  Ekspor MP3 dibuat terpisah dan tidak mengganti stage video di rantai edit.
                 </p>
+              ) : (
+                activeTabStep &&
+                !isBusy &&
+                !nativeFormatWarning && (
+                  <p className="text-center text-xs text-slate-500">
+                    Akan mengganti hasil{' '}
+                    <strong className="font-semibold text-slate-700">
+                      {FEATURE_TAB_LABELS[activeTab]}
+                    </strong>{' '}
+                    sebelumnya tanpa menumpuk efek ganda.
+                    {activeTabStepIndex < pipelineSteps.length - 1
+                      ? ' Tahap sesudahnya akan dihapus.'
+                      : ''}
+                  </p>
+                )
               )}
 
               {aiFallbackNotice && (
@@ -2197,7 +2544,7 @@ export default function App() {
                       <div className="animate-lv-indeterminate h-full w-2/5 rounded-full bg-gradient-to-r from-blue-500 via-sky-400 to-indigo-500" />
                     ) : (
                       <div
-                        className="h-full rounded-full bg-gradient-to-r from-blue-600 via-sky-500 to-emerald-500 transition-[width] duration-200"
+                        className="h-full rounded-full bg-gradient-to-r from-blue-600 via-sky-500 to-emerald-500 transition-[width] duration-150 ease-linear"
                         style={{
                           width: `${displayedPercent}%`,
                           minWidth: displayedPercent > 0 ? '6px' : undefined,
@@ -2311,7 +2658,7 @@ export default function App() {
               pada hasil unduhan.
             </span>
           </div>
-          <span className="whitespace-nowrap font-mono font-semibold text-slate-600">
+          <span className="font-mono font-semibold text-slate-600 sm:whitespace-nowrap">
             LocalVid Studio • Open-Source • Created by Atainanur
           </span>
         </footer>

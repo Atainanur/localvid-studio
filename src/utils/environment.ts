@@ -41,6 +41,30 @@ interface NavigatorGPU {
   requestAdapter: () => Promise<LegacyGPUAdapter | null>
 }
 
+export const MAX_SAFE_FFMPEG_THREADS = 6
+
+/**
+ * Menghitung jumlah thread aman FFmpeg.wasm:
+ * - Single-Thread (Mobile / non-COI): selalu 1 thread.
+ * - Multi-Thread (Desktop + COI): dibatasi hingga Math.min(hardwareConcurrency || 4, 6)
+ *   agar proses lebih cepat sekaligus mencegah risiko pthread deadlock di WASM.
+ */
+export function getRecommendedFFmpegThreads(
+  useMultiThread: boolean,
+  hardwareConcurrency?: number | null,
+): number {
+  if (!useMultiThread) return 1
+  const cores =
+    typeof hardwareConcurrency === 'number' &&
+    Number.isFinite(hardwareConcurrency) &&
+    hardwareConcurrency > 0
+      ? hardwareConcurrency
+      : typeof navigator !== 'undefined' && typeof navigator.hardwareConcurrency === 'number'
+        ? navigator.hardwareConcurrency
+        : 4
+  return Math.max(2, Math.min(Math.floor(cores), MAX_SAFE_FFMPEG_THREADS))
+}
+
 export function detectDeviceInfo(): DeviceInfo {
   const ua = navigator.userAgent || ''
   const platform = navigator.platform || ''

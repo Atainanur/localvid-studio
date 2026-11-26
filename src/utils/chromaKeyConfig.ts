@@ -1,4 +1,8 @@
-import { toEvenDimension, type SimpleSizeEstimate } from './videoProcessing'
+import {
+  getAdaptiveSizeFactor,
+  toEvenDimension,
+  type SimpleSizeEstimate,
+} from './videoProcessing'
 
 export type ChromaTemplateId =
   | 'custom'
@@ -75,7 +79,7 @@ export interface ChromaSpeedProfileDef {
   shortTag: string
   hint: string
   keyframeStep: 1 | 2 | 3
-  targetInferenceSize: 384 | 512 | 768
+  targetInferenceSize: 384 | 512
 }
 
 export const MAX_CHROMA_PERSON_DESKTOP_SEC = 30
@@ -104,9 +108,9 @@ export const CHROMA_SPEED_PROFILES: readonly ChromaSpeedProfileDef[] = [
     id: 'detail',
     label: 'Detail Penuh (Tiap Frame)',
     shortTag: 'AI Tiap Frame',
-    hint: 'Inferensi di seluruh frame untuk gerakan cepat',
+    hint: 'Inferensi di seluruh frame untuk gerakan cepat (512px optimal)',
     keyframeStep: 1,
-    targetInferenceSize: 768,
+    targetInferenceSize: 512,
   },
 ]
 
@@ -184,7 +188,7 @@ export const CHROMA_SUBJECT_MODES: ReadonlyArray<{
     id: 'person',
     title: 'Subjek Manusia (Cepat - MediaPipe)',
     badge: 'MediaPipe ~1 MB',
-    modelSizeLabel: 'Cepat (VIDEO Mode) • Maks 30 dtk (Desktop) / 15 dtk (HP)',
+    modelSizeLabel: 'Cepat (VIDEO Mode) • Maks 30 dtk (Desktop) • Maks 15 dtk (Mobile)',
     description:
       'Sangat cepat dan ringan untuk vlog, presentasi, review wajah, atau orang berbicara di depan kamera dengan stabilisasi tepi antar-frame.',
   },
@@ -192,7 +196,7 @@ export const CHROMA_SUBJECT_MODES: ReadonlyArray<{
     id: 'all-objects',
     title: 'Semua Objek / Produk / Hewan (AI RMBG-1.4)',
     badge: 'AI RMBG-1.4 ~44 MB',
-    modelSizeLabel: 'Akselerasi Keyframe • Maks 15 dtk (Desktop) / 8 dtk (HP)',
+    modelSizeLabel: 'Akselerasi Keyframe • Maks 15 dtk (Desktop) • Maks 8 dtk (Mobile)',
     description:
       'Mendeteksi produk, benda mati, kendaraan, hewan, maupun manusia. Hasil paling bersih pada pencahayaan terang dan objek yang kontras dengan latar.',
   },
@@ -546,6 +550,7 @@ export function estimateChromaOutputSize(
 ): SimpleSizeEstimate | null {
   if (!sizeBytes || sizeBytes <= 0) return null
   const originalMB = sizeBytes / (1024 * 1024)
+  const adaptiveFactor = getAdaptiveSizeFactor(`auto-chroma:${options.bgMode}`)
 
   let pixelRatio = 1
   if (sourceDims?.width && sourceDims?.height) {
@@ -572,6 +577,7 @@ export function estimateChromaOutputSize(
       durationSec,
       getChromaMaxDurationSec(isMobile, options.subjectMode),
     )
+    const isShortClip = effectiveDur < 10
     const sourceTotalKbps = Math.max(120, Math.floor((sizeBytes * 8) / (durationSec * 1000)))
     const estAudioKbps = sourceTotalKbps <= 600 ? 96 : 128
     const sourceVideoKbps = Math.max(150, sourceTotalKbps - estAudioKbps)
@@ -580,21 +586,14 @@ export function estimateChromaOutputSize(
     const rawProjectedVideoKbps =
       sourceVideoKbps * baseFactor * pixelRatio * bgComplexityFactor * fpsFactor
     const effectiveVideoKbps = maxRateKbps
-      ? Math.min(maxRateKbps, rawProjectedVideoKbps)
+      ? Math.min(maxRateKbps * (isShortClip ? 1.12 : 1.04), rawProjectedVideoKbps)
       : rawProjectedVideoKbps
 
-    const minEst = Number(
-      Math.max(
-        0.1,
-        (((effectiveVideoKbps * 0.82 + estAudioKbps) * effectiveDur) / 8192) * 1.04,
-      ).toFixed(2),
-    )
-    const maxVideo = maxRateKbps
-      ? Math.min(Math.round(maxRateKbps * 1.08), Math.max(effectiveVideoKbps * 1.18, maxRateKbps))
-      : effectiveVideoKbps * 1.28
-    const maxEst = Number(
-      Math.max(minEst, (((maxVideo + estAudioKbps) * effectiveDur) / 8192) * 1.05).toFixed(2),
-    )
+    const midMB =
+      ((((effectiveVideoKbps + estAudioKbps) * effectiveDur) / 8192) * 1.05) * adaptiveFactor
+    const spread = isShortClip ? 0.32 : 0.22
+    const minEst = Number(Math.max(0.1, midMB * (1 - spread)).toFixed(2))
+    const maxEst = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
 
     return {
       originalMB,
@@ -607,10 +606,10 @@ export function estimateChromaOutputSize(
 
   const midMB = Math.max(
     0.1,
-    originalMB * pixelRatio * bgComplexityFactor * (options.smartSizeCap ? 1.15 : 2.1),
+    originalMB * pixelRatio * bgComplexityFactor * (options.smartSizeCap ? 1.15 : 2.1) * adaptiveFactor,
   )
-  const minEst = Number(Math.max(0.1, midMB * 0.85).toFixed(2))
-  const maxEst = Number(Math.max(minEst, midMB * 1.25).toFixed(2))
+  const minEst = Number(Math.max(0.1, midMB * 0.7).toFixed(2))
+  const maxEst = Number(Math.max(minEst, midMB * 1.3).toFixed(2))
   return {
     originalMB,
     minEstimatedMB: minEst,

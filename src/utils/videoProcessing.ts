@@ -405,15 +405,119 @@ export const STABILIZER_OPTIONS: ReadonlyArray<StabilizerOption> = [
     id: 'strong',
     title: 'Kuat (Aksi)',
     subtitle:
-      'Memotong tepi 8% untuk menghilangkan getaran pinggir lalu mengembalikannya ke resolusi asli. Cocok untuk rekaman motor, lari, atau guncangan berat (search=exhaustive).',
+      'Memotong tepi 8% untuk menghilangkan getaran pinggir lalu mengembalikannya ke resolusi asli. Cocok untuk rekaman motor, lari, atau guncangan berat (search=less cepat).',
     badge: '48px + Auto-Crop 8%',
-    searchMode: 'exhaustive',
+    searchMode: 'less',
     rangePx: 48,
   },
 ]
 
 export const MOBILE_RAM_LIMIT_MB = 150
 export const DESKTOP_RAM_LIMIT_MB = 500
+
+const SIZE_CALIBRATION_STORAGE_KEY = 'localvid_size_calibration_v1'
+const SIZE_CALIBRATION_MIN = 0.55
+const SIZE_CALIBRATION_MAX = 1.75
+const SIZE_CALIBRATION_EMA_ALPHA = 0.35
+
+interface SizeCalibrationEntry {
+  factor: number
+  samples: number
+  updatedAt: number
+}
+
+function readSizeCalibrationStore(): Record<string, SizeCalibrationEntry> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = window.localStorage.getItem(SIZE_CALIBRATION_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object') return {}
+    return parsed as Record<string, SizeCalibrationEntry>
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Mengambil faktor koreksi adaptif hasil kalibrasi localStorage per kunci tab/template.
+ * Nilai selalu di-clamp aman pada rentang 0.55 - 1.75 (default 1.0).
+ */
+export function getAdaptiveSizeFactor(calibrationKey: string): number {
+  if (!calibrationKey) return 1
+  const store = readSizeCalibrationStore()
+  const entry = store[calibrationKey]
+  if (!entry || typeof entry.factor !== 'number' || !Number.isFinite(entry.factor)) {
+    return 1
+  }
+  return Math.min(SIZE_CALIBRATION_MAX, Math.max(SIZE_CALIBRATION_MIN, entry.factor))
+}
+
+/**
+ * Mencatat rasio ukuran aktual dibanding estimasi tengah dasar (exponential moving average)
+ * di localStorage agar estimasi makin akurat pada perangkat dan pola video pengguna.
+ */
+export function recordAdaptiveSizeCalibration(
+  calibrationKey: string,
+  actualBytes: number,
+  estimatedMidBytes: number,
+  estimatedIncludedPriorFactor = true,
+): number | null {
+  if (
+    !calibrationKey ||
+    !Number.isFinite(actualBytes) ||
+    !Number.isFinite(estimatedMidBytes) ||
+    actualBytes <= 0 ||
+    estimatedMidBytes <= 0
+  ) {
+    return null
+  }
+
+  const store = readSizeCalibrationStore()
+  const prev = store[calibrationKey]
+  const prevFactor =
+    prev && typeof prev.factor === 'number' && Number.isFinite(prev.factor)
+      ? Math.min(SIZE_CALIBRATION_MAX, Math.max(SIZE_CALIBRATION_MIN, prev.factor))
+      : 1
+
+  const rawEstimatedMidBytes = estimatedIncludedPriorFactor
+    ? estimatedMidBytes / prevFactor
+    : estimatedMidBytes
+  if (!Number.isFinite(rawEstimatedMidBytes) || rawEstimatedMidBytes <= 0) {
+    return null
+  }
+
+  const observedRatio = Math.min(
+    SIZE_CALIBRATION_MAX,
+    Math.max(SIZE_CALIBRATION_MIN, actualBytes / rawEstimatedMidBytes),
+  )
+
+  const nextFactor =
+    prev && prev.samples > 0
+      ? prevFactor * (1 - SIZE_CALIBRATION_EMA_ALPHA) +
+        observedRatio * SIZE_CALIBRATION_EMA_ALPHA
+      : prevFactor * 0.5 + observedRatio * 0.5
+
+  const clampedNext = Number(
+    Math.min(SIZE_CALIBRATION_MAX, Math.max(SIZE_CALIBRATION_MIN, nextFactor)).toFixed(3),
+  )
+
+  store[calibrationKey] = {
+    factor: clampedNext,
+    samples: (prev?.samples ?? 0) + 1,
+    updatedAt: Date.now(),
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(SIZE_CALIBRATION_STORAGE_KEY, JSON.stringify(store))
+    } catch {
+      // Abaikan bila localStorage tidak tersedia atau penuh
+    }
+  }
+
+  return clampedNext
+}
 
 export function toEvenDimension(value: number): number {
   return Math.max(2, Math.round(value / 2) * 2)
@@ -483,19 +587,19 @@ export function formatFileSizeMB(bytes: number): string {
 }
 
 /**
- * [BUG-16] Memformat durasi video dengan 1 angka desimal bila bukan bilangan bulat
- * (contoh: 6.5 detik -> "00:06.5") agar akurat untuk keperluan Trim.
+ * [BUG-16 & BUG-26NOV-08] Memformat durasi video secara konsisten dengan aturan floor ke 0.1 detik
+ * (contoh: 2.89 detik -> "00:02.8", 6.5 detik -> "00:06.5") agar seragam di header & seluruh kartu.
  */
 export function formatDuration(seconds: number | null): string {
   if (seconds === null || !Number.isFinite(seconds) || seconds < 0) {
     return 'Tidak terdeteksi'
   }
-  const roundedTenths = Math.round(seconds * 10) / 10
-  const hasFraction = Math.abs(roundedTenths - Math.round(roundedTenths)) > 0.001
-  const wholeSec = Math.floor(roundedTenths)
+  const flooredTenths = Math.floor(seconds * 10 + 1e-6) / 10
+  const hasFraction = Math.abs(flooredTenths - Math.floor(flooredTenths)) > 0.001
+  const wholeSec = Math.floor(flooredTenths)
   const hrs = Math.floor(wholeSec / 3600)
   const mins = Math.floor((wholeSec % 3600) / 60)
-  const secRemainder = Math.max(0, roundedTenths - hrs * 3600 - mins * 60)
+  const secRemainder = Math.max(0, flooredTenths - hrs * 3600 - mins * 60)
 
   const pad = (n: number) => String(n).padStart(2, '0')
   const secStr = hasFraction
@@ -623,7 +727,7 @@ export function buildConvertReencodeArgs(
   isMobile: boolean,
   threads = 2,
 ): string[] {
-  const safeThreads = String(Math.max(1, Math.min(4, threads)))
+  const safeThreads = String(Math.max(1, Math.min(6, threads)))
 
   if (targetFormat === 'webm') {
     return [
@@ -644,6 +748,8 @@ export function buildConvertReencodeArgs(
       '-cpu-used',
       isMobile ? '6' : '4',
       '-threads',
+      safeThreads,
+      '-filter_threads',
       safeThreads,
       '-c:a',
       'libvorbis',
@@ -673,6 +779,8 @@ export function buildConvertReencodeArgs(
     'yuv420p',
     '-threads',
     safeThreads,
+    '-filter_threads',
+    safeThreads,
     '-c:a',
     'aac',
     '-b:a',
@@ -696,7 +804,7 @@ export function buildCompressArgs(
 ): string[] {
   const selected =
     COMPRESSION_PRESETS.find((preset) => preset.id === presetId) ?? COMPRESSION_PRESETS[1]
-  const safeThreads = String(Math.max(1, Math.min(4, threads)))
+  const safeThreads = String(Math.max(1, Math.min(6, threads)))
 
   return [
     '-i',
@@ -716,6 +824,8 @@ export function buildCompressArgs(
     '-pix_fmt',
     'yuv420p',
     '-threads',
+    safeThreads,
+    '-filter_threads',
     safeThreads,
     '-c:a',
     'aac',
@@ -806,7 +916,9 @@ export function computeEnhanceSmartMaxRateKbps(
 }
 
 /**
- * [BUG-10] Estimasi ukuran hasil sebelum render untuk Tab 3 (Jernihkan & HD).
+ * [BUG-10 & BUG-26NOV-01] Estimasi ukuran hasil sebelum render untuk Tab 3 (Jernihkan & HD),
+ * dikalibrasi untuk video pendek <10 detik, upscale 1080p CRF 22-23 + Smart Cap,
+ * serta kalibrasi adaptif berbasis localStorage.
  */
 export function estimateEnhanceOutputSize(
   options: EnhanceOptions,
@@ -817,6 +929,9 @@ export function estimateEnhanceOutputSize(
   if (!sizeBytes || sizeBytes <= 0) return null
   const originalMB = sizeBytes / (1024 * 1024)
   const sourceTotalKbps = computeSourceKbps(sizeBytes, durationSec)
+  const calibrationKey = `enhance:${options.upscale1080p ? '1080p' : 'native'}`
+  const adaptiveFactor = getAdaptiveSizeFactor(calibrationKey)
+  const isShortClip = Boolean(durationSec && durationSec > 0 && durationSec < 10)
 
   let pixelRatio = 1
   if (options.upscale1080p && videoDimensions?.width && videoDimensions?.height) {
@@ -825,17 +940,17 @@ export function estimateEnhanceOutputSize(
       const srcPixels = videoDimensions.width * videoDimensions.height
       const dstPixels = target.width * target.height
       if (srcPixels > 0 && dstPixels > srcPixels) {
-        pixelRatio = Math.pow(dstPixels / srcPixels, 0.68)
+        pixelRatio = Math.pow(dstPixels / srcPixels, 0.72)
       }
     }
   } else if (options.upscale1080p) {
-    pixelRatio = 1.9
+    pixelRatio = 2.15
   }
 
   let filterMultiplier = 1
-  if (options.sharpen) filterMultiplier *= 1.15
-  if (options.colorFilter !== 'none') filterMultiplier *= 1.08
-  if (options.colorFix) filterMultiplier *= 1.05
+  if (options.sharpen) filterMultiplier *= 1.18
+  if (options.colorFilter !== 'none') filterMultiplier *= 1.1
+  if (options.colorFix) filterMultiplier *= 1.06
   if (options.denoise) filterMultiplier *= 0.92
 
   const maxRateKbps = computeEnhanceSmartMaxRateKbps(options, sizeBytes, durationSec)
@@ -843,23 +958,20 @@ export function estimateEnhanceOutputSize(
   if (sourceTotalKbps && durationSec && durationSec > 0) {
     const estAudioKbps = sourceTotalKbps <= 600 ? 96 : 128
     const sourceVideoKbps = Math.max(150, sourceTotalKbps - estAudioKbps)
-    // CRF 22/23 + preset fast lebih efisien dibanding ultrafast
-    const baseCrfFactor = options.upscale1080p ? 1.18 : 1.06
+    // Upscale 1080p pada video pendek sering menyentuh burst VBV 1-pass (~1.2x maxrate)
+    const baseCrfFactor = options.upscale1080p ? 1.48 : 1.12
+    const shortVbvBurst = isShortClip && options.upscale1080p ? 1.24 : 1.06
     const rawProjectedVideoKbps = sourceVideoKbps * baseCrfFactor * pixelRatio * filterMultiplier
     const effectiveVideoKbps = maxRateKbps
-      ? Math.min(maxRateKbps, rawProjectedVideoKbps)
+      ? Math.min(maxRateKbps * shortVbvBurst, rawProjectedVideoKbps)
       : rawProjectedVideoKbps
 
     const audioOutKbps = 128
-    const minEst = Number(
-      Math.max(0.1, (((effectiveVideoKbps * 0.82 + audioOutKbps) * durationSec) / 8192) * 1.03).toFixed(2),
-    )
-    const maxCapVideo = maxRateKbps
-      ? Math.min(maxRateKbps * 1.06, effectiveVideoKbps * 1.18)
-      : effectiveVideoKbps * 1.24
-    const maxEst = Number(
-      Math.max(minEst, (((maxCapVideo + audioOutKbps) * durationSec) / 8192) * 1.03).toFixed(2),
-    )
+    const midMB =
+      ((((effectiveVideoKbps + audioOutKbps) * durationSec) / 8192) * 1.05) * adaptiveFactor
+    const spread = isShortClip ? 0.32 : 0.22
+    const minEst = Number(Math.max(0.1, midMB * (1 - spread)).toFixed(2))
+    const maxEst = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
 
     return {
       originalMB,
@@ -870,9 +982,13 @@ export function estimateEnhanceOutputSize(
     }
   }
 
-  const midMB = Math.max(0.1, originalMB * pixelRatio * filterMultiplier * 1.15)
-  const minEst = Number(Math.max(0.1, midMB * 0.85).toFixed(2))
-  const maxEst = Number(Math.max(minEst, midMB * 1.2).toFixed(2))
+  const midMB = Math.max(
+    0.1,
+    originalMB * pixelRatio * filterMultiplier * (options.upscale1080p ? 1.42 : 1.12) * adaptiveFactor,
+  )
+  const spread = isShortClip ? 0.32 : 0.22
+  const minEst = Number(Math.max(0.1, midMB * (1 - spread)).toFixed(2))
+  const maxEst = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
   return {
     originalMB,
     minEstimatedMB: minEst,
@@ -892,11 +1008,11 @@ export function buildEnhanceArgs(
   sourceInfo?: { sizeBytes: number | null; durationSec: number | null },
 ): string[] {
   const filterChain = buildEnhanceFilterChain(options, videoDimensions)
-  const safeThreads = String(Math.max(1, Math.min(4, threads)))
+  const safeThreads = String(Math.max(1, Math.min(6, threads)))
   const args = ['-i', inputName, '-map', '0:v:0', '-map', '0:a?']
 
   if (filterChain.length > 0) {
-    args.push('-vf', filterChain.join(','))
+    args.push('-filter_threads', safeThreads, '-vf', filterChain.join(','))
   }
 
   // [BUG-10] Optimalkan encoder: CRF 22/23 + preset fast di Desktop (veryfast di Mobile) + opsional Smart Cap
@@ -940,10 +1056,10 @@ export function buildEnhanceArgs(
 }
 
 /**
- * Membangun rantai filter FFmpeg `deshake` yang 100% valid:
+ * Membangun rantai filter FFmpeg `deshake` yang 100% valid & cepat:
  * - Ringan : deshake=rx=16:ry=16:edge=mirror:search=less
  * - Sedang : deshake=rx=32:ry=32:edge=mirror:search=less
- * - Kuat   : deshake=rx=48:ry=48:edge=mirror:search=exhaustive + auto-crop 8% & scale dimensi genap
+ * - Kuat   : deshake=rx=48:ry=48:edge=mirror:search=less + auto-crop 8% & scale dimensi genap
  * Selalu diakhiri dengan `format=yuv420p`.
  */
 export function buildStabilizerFilterChain(
@@ -959,7 +1075,7 @@ export function buildStabilizerFilterChain(
   } else if (level === 'medium') {
     filters.push('deshake=rx=32:ry=32:edge=mirror:search=less')
   } else {
-    filters.push('deshake=rx=48:ry=48:edge=mirror:search=exhaustive')
+    filters.push('deshake=rx=48:ry=48:edge=mirror:search=less')
     if (srcW && srcH && srcW > 64 && srcH > 64) {
       const cropW = toEvenDimension(srcW * 0.92)
       const cropH = toEvenDimension(srcH * 0.92)
@@ -990,36 +1106,42 @@ export function computeStabilizerMaxRateKbps(
 }
 
 /**
- * [BUG-11 & NEW-04] Estimasi ukuran hasil sebelum render untuk Tab 4 (Stabilizer).
- * Dikalibrasi memperhitungkan residu gerak deshake pada CRF 22, puncak 1-pass VBV (~1.08x maxrate),
- * serta overhead kontainer MP4 (~4-5%) agar rentang estimasi realistis mencakup hasil aktual.
+ * [BUG-11, NEW-04 & BUG-26NOV-01] Estimasi ukuran hasil sebelum render untuk Tab 4 (Stabilizer).
+ * Dikalibrasi ulang untuk video pendek (<10 detik) dan resolusi <720p (di mana gerakan lebih halus
+ * membuat x264 CRF 22 lebih hemat bitrate) serta mendukung kalibrasi adaptif localStorage.
  */
 export function estimateStabilizerOutputSize(
   level: StabilizerLevel,
   sizeBytes: number | null,
   durationSec: number | null,
+  videoDimensions?: { width: number | null; height: number | null },
 ): SimpleSizeEstimate | null {
   if (!sizeBytes || sizeBytes <= 0) return null
   const originalMB = sizeBytes / (1024 * 1024)
   const sourceTotalKbps = computeSourceKbps(sizeBytes, durationSec)
   const maxRateKbps = computeStabilizerMaxRateKbps(sizeBytes, durationSec)
-  const levelFactor = level === 'strong' ? 1.32 : level === 'medium' ? 1.24 : 1.12
+  const adaptiveFactor = getAdaptiveSizeFactor(`stabilize:${level}`)
+  const isShortClip = Boolean(durationSec && durationSec > 0 && durationSec < 10)
+
+  const shortSide =
+    videoDimensions?.width && videoDimensions?.height
+      ? Math.min(videoDimensions.width, videoDimensions.height)
+      : null
+  const lowResFactor = shortSide !== null && shortSide < 720 ? 0.86 : 1
+  const shortClipFactor = isShortClip ? 0.92 : 1
+  const levelFactor = level === 'strong' ? 1.04 : level === 'medium' ? 0.9 : 0.84
 
   if (sourceTotalKbps && durationSec && durationSec > 0) {
     const estAudioKbps = sourceTotalKbps <= 600 ? 96 : 128
     const sourceVideoKbps = Math.max(180, sourceTotalKbps - estAudioKbps)
-    const rawProjected = sourceVideoKbps * levelFactor
+    const rawProjected = sourceVideoKbps * levelFactor * lowResFactor * shortClipFactor
     const cappedVideo = maxRateKbps ? Math.min(maxRateKbps, rawProjected) : rawProjected
 
-    const minEst = Number(
-      Math.max(0.1, (((cappedVideo * 0.9 + 128) * durationSec) / 8192) * 1.04).toFixed(2),
-    )
-    const maxVideo = maxRateKbps
-      ? Math.min(Math.round(maxRateKbps * 1.08), Math.max(cappedVideo * 1.18, maxRateKbps))
-      : cappedVideo * 1.28
-    const maxEst = Number(
-      Math.max(minEst, (((maxVideo + 128) * durationSec) / 8192) * 1.05).toFixed(2),
-    )
+    const midMB =
+      ((((cappedVideo + 128) * durationSec) / 8192) * 1.04) * adaptiveFactor
+    const spread = isShortClip ? 0.32 : 0.22
+    const minEst = Number(Math.max(0.1, midMB * (1 - spread)).toFixed(2))
+    const maxEst = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
     return {
       originalMB,
       minEstimatedMB: minEst,
@@ -1029,9 +1151,13 @@ export function estimateStabilizerOutputSize(
     }
   }
 
-  const midMB = Math.max(0.1, originalMB * levelFactor * 1.05)
-  const minEst = Number(Math.max(0.1, midMB * 0.9).toFixed(2))
-  const maxEst = Number(Math.max(minEst, midMB * 1.25).toFixed(2))
+  const midMB = Math.max(
+    0.1,
+    originalMB * levelFactor * lowResFactor * shortClipFactor * adaptiveFactor,
+  )
+  const spread = isShortClip ? 0.32 : 0.22
+  const minEst = Number(Math.max(0.1, midMB * (1 - spread)).toFixed(2))
+  const maxEst = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
   return {
     originalMB,
     minEstimatedMB: minEst,
@@ -1051,7 +1177,7 @@ export function buildStabilizerArgs(
   sourceInfo?: { sizeBytes: number | null; durationSec: number | null },
 ): string[] {
   const filterChain = buildStabilizerFilterChain(level, videoDimensions)
-  const safeThreads = String(Math.max(1, Math.min(4, threads)))
+  const safeThreads = String(Math.max(1, Math.min(6, threads)))
   const maxRateKbps = computeStabilizerMaxRateKbps(
     sourceInfo?.sizeBytes,
     sourceInfo?.durationSec,
@@ -1064,6 +1190,8 @@ export function buildStabilizerArgs(
     '0:v:0',
     '-map',
     '0:a?',
+    '-filter_threads',
+    safeThreads,
     '-vf',
     filterChain.join(','),
     '-c:v',

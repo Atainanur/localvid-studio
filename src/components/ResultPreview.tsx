@@ -45,6 +45,7 @@ interface ResultPreviewProps {
   currentStepId: string | null
   onEditSettings: () => void
   onRemoveCurrentStep?: () => void
+  onReturnToVideoEditor?: () => void
   onChangeVideo: () => void
 }
 
@@ -98,6 +99,7 @@ export function ResultPreview({
   currentStepId,
   onEditSettings,
   onRemoveCurrentStep,
+  onReturnToVideoEditor,
   onChangeVideo,
 }: ResultPreviewProps) {
   const [shareMessage, setShareMessage] = useState<string | null>(null)
@@ -160,17 +162,25 @@ export function ResultPreview({
     }
   }
 
-  // [NEW-01] Label penghematan konsisten positif ("Hemat XX.X%") seperti di CompressTabPanel
+  // [NEW-01 & BUG-26NOV-19] Label penghematan konsisten positif ("Hemat XX.X%") di seluruh tab saat savingsPercent > 0.5
+  const showSavingsBadge = savingsPercent > 0.5
   const sizeDeltaLabel = isSmaller
     ? `Hemat ${Math.abs(savingsPercent).toFixed(1)}%`
     : `Ukuran ${savingsPercent === 0 ? '0%' : `+${Math.abs(savingsPercent).toFixed(1)}%`}`
 
+  // [BUG-26NOV-08] Satu sumber kebenaran durasi (floor 0.1 detik via formatDuration) untuk header & seluruh kartu
   const formattedDuration =
     result.durationSeconds !== undefined &&
     result.durationSeconds !== null &&
+    Number.isFinite(result.durationSeconds) &&
     result.durationSeconds > 0
       ? formatDuration(result.durationSeconds)
       : null
+
+  // [BUG-26NOV-21] Pisahkan nama dasar + badge ekstensi agar ekstensi (.mp4/.mkv/.mp3) tidak pernah terpotong
+  const lastDotIdx = result.fileName.lastIndexOf('.')
+  const fileBaseName = lastDotIdx > 0 ? result.fileName.slice(0, lastDotIdx) : result.fileName
+  const fileExtLabel = lastDotIdx > 0 ? result.fileName.slice(lastDotIdx).toLowerCase() : ''
 
   return (
     <div
@@ -207,13 +217,18 @@ export function ResultPreview({
           </div>
         </div>
 
-        <span
-          className="inline-flex max-w-full items-center gap-1.5 truncate rounded-xl border border-emerald-200/80 bg-white/95 px-3 py-1.5 font-mono text-xs font-semibold text-slate-700 sm:max-w-xs"
+        <div
+          className="inline-flex max-w-full items-center gap-1.5 rounded-xl border border-emerald-200/80 bg-white/95 px-3 py-1.5 font-mono text-xs font-semibold text-slate-700 sm:max-w-sm"
           title={result.fileName}
         >
           <Film aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-          <span className="truncate">{result.fileName}</span>
-        </span>
+          <span className="min-w-0 break-words leading-snug line-clamp-2">{fileBaseName}</span>
+          {fileExtLabel && (
+            <span className="shrink-0 whitespace-nowrap rounded-md bg-emerald-100 px-1.5 py-0.5 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200">
+              {fileExtLabel}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Rekap Ringkas Fitur Terpasang (muncul saat hasil mengandung >= 2 tahap berantai) */}
@@ -286,6 +301,8 @@ export function ResultPreview({
           originalUrl={beforeUrl}
           outputUrl={result.url}
           isAudioOnly={isAudioOnlyResult}
+          originalSizeBytes={result.originalSizeBytes}
+          outputSizeBytes={result.outputSizeBytes}
         />
       ) : (
         <BeforeAfterVideo beforeUrl={beforeUrl} afterUrl={result.url} />
@@ -403,6 +420,14 @@ export function ResultPreview({
                 <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" />
                 <span>{formatFileSizeMB(result.outputSizeBytes)}</span>
               </div>
+              {showSavingsBadge && (
+                <div className="mt-1.5">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200 tabular-nums">
+                    <TrendingDown aria-hidden="true" className="h-3 w-3" />
+                    {sizeDeltaLabel}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -463,6 +488,14 @@ export function ResultPreview({
                 <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" />
                 <span>{formatFileSizeMB(result.outputSizeBytes)}</span>
               </div>
+              {showSavingsBadge && (
+                <div className="mt-1.5">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200 tabular-nums">
+                    <TrendingDown aria-hidden="true" className="h-3 w-3" />
+                    {sizeDeltaLabel}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -506,6 +539,14 @@ export function ResultPreview({
                 <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" />
                 <span>{formatFileSizeMB(result.outputSizeBytes)}</span>
               </div>
+              {showSavingsBadge && (
+                <div className="mt-1.5">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200 tabular-nums">
+                    <TrendingDown aria-hidden="true" className="h-3 w-3" />
+                    {sizeDeltaLabel}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -556,6 +597,14 @@ export function ResultPreview({
                 <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" />
                 <span>{formatFileSizeMB(result.outputSizeBytes)}</span>
               </div>
+              {showSavingsBadge && (
+                <div className="mt-1.5">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200 tabular-nums">
+                    <TrendingDown aria-hidden="true" className="h-3 w-3" />
+                    {sizeDeltaLabel}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -752,6 +801,17 @@ export function ResultPreview({
               <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />
               <span>Ubah Setelan</span>
             </button>
+
+            {isAudioOnlyResult && pipelineSteps.length > 0 && onReturnToVideoEditor && (
+              <button
+                type="button"
+                onClick={onReturnToVideoEditor}
+                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/80 px-4 py-2.5 text-xs font-bold text-emerald-800 transition-[background-color,border-color,color,transform] duration-150 hover:border-emerald-300 hover:bg-emerald-100 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 sm:text-sm"
+              >
+                <Film aria-hidden="true" className="h-4 w-4" />
+                <span>Kembali ke Editor Video</span>
+              </button>
+            )}
 
             {currentStepId && onRemoveCurrentStep && !isAudioOnlyResult && (
               <button

@@ -299,7 +299,7 @@ export function CompressTabPanel({
   const templateAutoBadges: string[] = !isCustomMode
     ? [
         `.${options.outputFormat.toUpperCase()}`,
-        `H.264 (${isMobile ? 'veryfast' : 'fast'})`,
+        'H.264 (veryfast)',
         options.resolutionPreset === '720p' ? 'Maks 720p (No Upscale)' : 'Maks 1080p (No Upscale)',
         options.frameRate === 'no-change' ? 'FPS Asli (≤60)' : `${options.frameRate} fps`,
         options.compressionMode === 'target-size'
@@ -440,22 +440,28 @@ export function CompressTabPanel({
 
               <div className="rounded-xl bg-white/95 p-3.5 ring-1 ring-emerald-200/80 sm:text-right">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
-                  Estimasi Hasil Real-Time
+                  Estimasi Hasil Real-Time (Perkiraan)
                 </p>
                 {sizeEstimate.mode === 'target-size' ? (
                   <p className="mt-0.5 font-mono text-base font-extrabold text-emerald-800 tabular-nums">
                     ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB{' '}
+                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                      (perkiraan)
+                    </span>{' '}
                     <span className="text-xs font-bold text-emerald-600">
                       (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}%)
                     </span>
                   </p>
                 ) : (
                   <p className="mt-0.5 font-mono text-base font-extrabold text-emerald-800 tabular-nums">
-                    ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB –{' '}
-                    {sizeEstimate.maxEstimatedMB.toFixed(1)} MB
+                    ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
+                    {sizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
+                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                      (perkiraan)
+                    </span>
                     {sizeEstimate.savingsPercentMax > 5 && (
                       <span className="ml-1.5 text-xs font-bold text-emerald-600">
-                        (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}–
+                        (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}-
                         {Math.max(0, Math.round(sizeEstimate.savingsPercentMax))}%)
                       </span>
                     )}
@@ -834,22 +840,28 @@ export function CompressTabPanel({
 
               <div className="rounded-xl bg-white/90 p-3 ring-1 ring-emerald-200/80 sm:text-right">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
-                  Estimasi Ukuran Hasil
+                  Estimasi Ukuran Hasil (Perkiraan)
                 </p>
                 {sizeEstimate.mode === 'target-size' ? (
                   <p className="mt-0.5 font-mono text-base font-extrabold text-emerald-800 tabular-nums">
                     ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB{' '}
+                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                      (perkiraan)
+                    </span>{' '}
                     <span className="text-xs font-bold text-emerald-600">
                       (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}%)
                     </span>
                   </p>
                 ) : (
                   <p className="mt-0.5 font-mono text-base font-extrabold text-emerald-800 tabular-nums">
-                    ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB –{' '}
-                    {sizeEstimate.maxEstimatedMB.toFixed(1)} MB
+                    ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
+                    {sizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
+                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                      (perkiraan)
+                    </span>
                     {sizeEstimate.savingsPercentMax > 5 && (
                       <span className="ml-1.5 text-xs font-bold text-emerald-600">
-                        (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}–
+                        (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}-
                         {Math.max(0, Math.round(sizeEstimate.savingsPercentMax))}%)
                       </span>
                     )}
@@ -874,7 +886,7 @@ export function CompressTabPanel({
             </div>
           )}
 
-          {/* === ACCORDION PENGATURAN LANJUTAN (ADVANCED SETTINGS — DEFAULT TERTUTUP) === */}
+          {/* === ACCORDION PENGATURAN LANJUTAN (ADVANCED SETTINGS - DEFAULT TERTUTUP) === */}
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60">
             <button
               type="button"

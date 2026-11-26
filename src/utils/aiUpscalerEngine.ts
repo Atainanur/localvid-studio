@@ -3,11 +3,12 @@ import { fetchFile } from '@ffmpeg/util'
 import type { InferenceSession, Tensor } from 'onnxruntime-web/webgpu'
 import {
   computeAiSmartMaxRateKbps,
-  MAX_AI_DURATION_SECONDS,
+  getAiMaxDurationSec,
   type AiFrameProgress,
   type AiUpscaleSettings,
 } from './aiUpscalerConfig'
 import { computeTarget1080pResolution, toEvenDimension } from './videoProcessing'
+import type { WebCodecsFrameReader } from './webCodecsFrameReader'
 
 type OrtWebGpuModule = typeof import('onnxruntime-web/webgpu')
 
@@ -36,6 +37,7 @@ export interface RunAiUpscaleParams {
   videoFile: File
   inputFileName: string
   outputFileName: string
+  isMobile: boolean
   threads: number
   settings: AiUpscaleSettings
   signal: AbortSignal
@@ -327,7 +329,7 @@ async function seekVideoToTime(
         }
         if (attempt === 1) {
           onLog(
-            `[LocalVid AI] Seek frame ke-${frameNumber} (${safeTime.toFixed(2)} dtk) timeout — mencoba ulang 1 kali...`,
+            `[LocalVid AI] Seek frame ke-${frameNumber} (${safeTime.toFixed(2)} dtk) timeout, mencoba ulang 1 kali...`,
           )
           await waitAnimationFrame()
         } else {
@@ -374,7 +376,33 @@ async function seekVideoToTime(
   }
 }
 
+let reusableAiJpegOffscreen: OffscreenCanvas | null = null
+
 async function canvasToJpegUint8Array(canvas: HTMLCanvasElement): Promise<Uint8Array> {
+  // Off-main-thread JPEG encode via OffscreenCanvas.convertToBlob bila didukung browser
+  if (typeof OffscreenCanvas !== 'undefined') {
+    try {
+      if (
+        !reusableAiJpegOffscreen ||
+        reusableAiJpegOffscreen.width !== canvas.width ||
+        reusableAiJpegOffscreen.height !== canvas.height
+      ) {
+        reusableAiJpegOffscreen = new OffscreenCanvas(canvas.width, canvas.height)
+      }
+      const offCtx = reusableAiJpegOffscreen.getContext('2d')
+      if (offCtx && typeof reusableAiJpegOffscreen.convertToBlob === 'function') {
+        offCtx.drawImage(canvas, 0, 0)
+        const offBlob = await reusableAiJpegOffscreen.convertToBlob({
+          type: 'image/jpeg',
+          quality: 0.92,
+        })
+        return new Uint8Array(await offBlob.arrayBuffer())
+      }
+    } catch {
+      // Fallback otomatis ke HTMLCanvasElement.toBlob
+    }
+  }
+
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (result) => {
@@ -563,7 +591,7 @@ function createWebGl2ShaderEnhancer(
   })
 
   if (!gl) {
-    onLog('[LocalVid AI] WebGL2 tidak tersedia — menggunakan Canvas 2D High-Quality Enhance.')
+    onLog('[LocalVid AI] WebGL2 tidak tersedia, menggunakan Canvas 2D High-Quality Enhance.')
     const c2d = document.createElement('canvas')
     c2d.width = dstW
     c2d.height = dstH
@@ -695,7 +723,7 @@ async function createWebGpuShaderEnhancer(
 
     device.pushErrorScope('validation')
 
-    // PENTING: TEX_COPY_DST adalah 0x02 (bukan 0x08 — 0x08 adalah STORAGE_BINDING!)
+    // PENTING: TEX_COPY_DST adalah 0x02 (bukan 0x08 karena 0x08 adalah STORAGE_BINDING)
     const srcTexture = device.createTexture({
       size: [srcW, srcH, 1],
       format: 'rgba8unorm',
@@ -830,7 +858,7 @@ async function createWebGpuShaderEnhancer(
         const frameValidationError = await device.popErrorScope()
         if (frameValidationError) {
           onLog(
-            `[LocalVid AI] WebGPU validation error terdeteksi (${frameValidationError.message}) — beralih ke WebGL2 Fast Enhance Shader.`,
+            `[LocalVid AI] WebGPU validation error terdeteksi (${frameValidationError.message}), beralih ke WebGL2 Fast Enhance Shader.`,
           )
           webglFallback = createWebGl2ShaderEnhancer(
             srcW,
@@ -871,7 +899,7 @@ async function createWebGpuShaderEnhancer(
           !isCanvasAllBlack(sourceCanvas)
         ) {
           onLog(
-            '[LocalVid AI] Readback WebGPU mengembalikan frame hitam pada driver GPU ini — beralih otomatis ke WebGL2 Fast Enhance Shader.',
+            '[LocalVid AI] Readback WebGPU mengembalikan frame hitam pada driver GPU ini, beralih otomatis ke WebGL2 Fast Enhance Shader.',
           )
           webglFallback = createWebGl2ShaderEnhancer(
             srcW,
@@ -1408,6 +1436,7 @@ export async function runAiUpscalePipeline({
   videoFile,
   inputFileName,
   outputFileName,
+  isMobile,
   threads,
   settings,
   signal,
@@ -1415,10 +1444,12 @@ export async function runAiUpscalePipeline({
   onLog,
 }: RunAiUpscaleParams): Promise<RunAiUpscaleResult> {
   const tempFiles = new Set<string>([inputFileName, outputFileName])
-  const safeThreads = String(Math.max(1, Math.min(4, threads)))
+  const safeThreads = String(Math.max(1, Math.min(6, threads)))
+  const maxDurationSec = getAiMaxDurationSec(isMobile)
 
   let videoElement: HTMLVideoElement | null = null
   let videoObjectUrl: string | null = null
+  let webCodecsReader: WebCodecsFrameReader | null = null
   let enhancer: FrameEnhancer | null = null
   let succeeded = false
 
@@ -1437,18 +1468,26 @@ export async function runAiUpscalePipeline({
     videoElement = loaded.video
     videoObjectUrl = loaded.objectUrl
 
+    // Coba akselerasi WebCodecs VideoDecoder (lazy-loaded) dengan fallback 100% aman ke <video> seek
+    try {
+      const { tryCreateWebCodecsFrameReader } = await import('./webCodecsFrameReader')
+      webCodecsReader = await tryCreateWebCodecsFrameReader(videoFile, signal, onLog)
+    } catch {
+      webCodecsReader = null
+    }
+
     const srcW = videoElement.videoWidth
     const srcH = videoElement.videoHeight
     const rawDuration =
       Number.isFinite(videoElement.duration) && videoElement.duration > 0
         ? videoElement.duration
         : 5
-    const effectiveDuration = Math.min(rawDuration, MAX_AI_DURATION_SECONDS)
+    const effectiveDuration = Math.min(rawDuration, maxDurationSec)
     const totalFrames = Math.max(
       1,
       Math.min(
         Math.round(effectiveDuration * settings.targetFps),
-        MAX_AI_DURATION_SECONDS * settings.targetFps,
+        maxDurationSec * settings.targetFps,
       ),
     )
 
@@ -1573,10 +1612,29 @@ export async function runAiUpscalePipeline({
         fallbackNotice: enhancer.fallbackReason,
       })
 
-      await seekVideoToTime(videoElement, timestampSec, currentFrame, signal, onLog)
-      checkAborted(signal)
+      let decodedByWebCodecs = false
+      if (webCodecsReader) {
+        try {
+          await webCodecsReader.drawFrameAtTime(timestampSec, srcCtx, srcW, srcH, signal)
+          decodedByWebCodecs = true
+        } catch (wcErr) {
+          if (signal.aborted || (wcErr instanceof DOMException && wcErr.name === 'AbortError')) {
+            throw wcErr
+          }
+          const reason = wcErr instanceof Error ? wcErr.message : String(wcErr)
+          onLog(
+            `[LocalVid AI] WebCodecs dialihkan otomatis ke decoder native <video> (${reason}).`,
+          )
+          webCodecsReader.dispose()
+          webCodecsReader = null
+        }
+      }
 
-      srcCtx.drawImage(videoElement, 0, 0, srcW, srcH)
+      if (!decodedByWebCodecs) {
+        await seekVideoToTime(videoElement, timestampSec, currentFrame, signal, onLog)
+        checkAborted(signal)
+        srcCtx.drawImage(videoElement, 0, 0, srcW, srcH)
+      }
 
       const enhancedCanvas = await enhancer.processFrame(srcCanvas, signal)
       checkAborted(signal)
@@ -1597,6 +1655,10 @@ export async function runAiUpscalePipeline({
 
     await enhancer.dispose()
     enhancer = null
+    if (webCodecsReader) {
+      webCodecsReader.dispose()
+      webCodecsReader = null
+    }
     if (videoObjectUrl) {
       URL.revokeObjectURL(videoObjectUrl)
       videoObjectUrl = null
@@ -1659,7 +1721,7 @@ export async function runAiUpscalePipeline({
       baseAssembleArgs.push('-maxrate', `${smartMaxRateKbps}k`, '-bufsize', `${smartMaxRateKbps * 2}k`)
     }
 
-    baseAssembleArgs.push('-pix_fmt', 'yuv420p', '-threads', safeThreads)
+    baseAssembleArgs.push('-pix_fmt', 'yuv420p', '-threads', safeThreads, '-filter_threads', safeThreads)
 
     let assembleExit = await ffmpeg.exec(
       [...baseAssembleArgs, '-c:a', 'copy', '-shortest', '-movflags', '+faststart', outputFileName],
@@ -1719,6 +1781,14 @@ export async function runAiUpscalePipeline({
   } finally {
     if (enhancer) {
       await enhancer.dispose()
+    }
+    if (webCodecsReader) {
+      webCodecsReader.dispose()
+    }
+    if (reusableAiJpegOffscreen) {
+      reusableAiJpegOffscreen.width = 0
+      reusableAiJpegOffscreen.height = 0
+      reusableAiJpegOffscreen = null
     }
     if (videoObjectUrl) {
       URL.revokeObjectURL(videoObjectUrl)

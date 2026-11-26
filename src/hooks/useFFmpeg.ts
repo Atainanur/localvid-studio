@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
-import { detectCoiReloadPending, detectDeviceInfo, type DeviceType } from '../utils/environment'
+import {
+  detectCoiReloadPending,
+  detectDeviceInfo,
+  getRecommendedFFmpegThreads,
+  type DeviceType,
+} from '../utils/environment'
 
 export type EngineMode = 'Multi-Thread' | 'Single-Thread Hemat RAM'
 
@@ -15,7 +20,7 @@ export interface EngineProfile {
   useMultiThread: boolean
   engineMode: EngineMode
   corePackage: CorePackageName
-  /** Jumlah thread aman untuk libx264/filter agar tidak pthread deadlock di WASM (1, 2, atau 4). */
+  /** Jumlah thread aman untuk libx264/filter agar tidak pthread deadlock di WASM (1 sampai 6). */
   recommendedThreads: number
 }
 
@@ -164,9 +169,11 @@ export function resolveEngineProfile(): EngineProfile {
     typeof window !== 'undefined' && window.crossOriginIsolated === true
   const useMultiThread = isDesktop && crossOriginIsolated
 
-  // Batasi thread secara eksplisit agar libx264 tidak memicu pthread deadlock di Emscripten WASM
-  const cores = deviceInfo.hardwareConcurrency ?? 4
-  const recommendedThreads = !useMultiThread ? 1 : cores >= 8 ? 4 : 2
+  // Batasi thread secara eksplisit hingga maks 6 agar libx264/filter cepat tanpa pthread deadlock di WASM
+  const recommendedThreads = getRecommendedFFmpegThreads(
+    useMultiThread,
+    deviceInfo.hardwareConcurrency,
+  )
 
   return {
     deviceType: deviceInfo.type,

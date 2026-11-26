@@ -30,9 +30,11 @@ import {
   AI_FPS_OPTIONS,
   AI_MODEL_PRESETS,
   estimateAiOutputSize,
+  getAiMaxDurationSec,
   isDurationWithinAiLimit,
   isValidModelUrl,
-  MAX_AI_DURATION_SECONDS,
+  MAX_AI_DURATION_DESKTOP_SECONDS,
+  MAX_AI_DURATION_MOBILE_SECONDS,
   type AiEnginePreference,
   type AiModelPresetId,
   type AiUpscaleSettings,
@@ -244,17 +246,20 @@ export function FeatureTabs({
     stabilizerLevel,
     selectedVideoSizeBytes,
     selectedVideoDuration,
+    selectedVideoDimensions,
   )
+  const aiMaxDurationSec = getAiMaxDurationSec(isMobile)
   const aiSizeEstimate = estimateAiOutputSize(
     aiSettings,
     selectedVideoSizeBytes,
     selectedVideoDuration,
     selectedVideoDimensions,
+    isMobile,
   )
 
   const aiCanRunFallbackWebGl2 = !aiWebGpuAvailable && webgl2Supported
   const aiAnyGpuAvailable = aiWebGpuAvailable || webgl2Supported
-  const durationWithinAiLimit = isDurationWithinAiLimit(selectedVideoDuration)
+  const durationWithinAiLimit = isDurationWithinAiLimit(selectedVideoDuration, isMobile)
   const modelUrlValid =
     !aiWebGpuAvailable ||
     aiSettings.enginePreference !== 'auto-onnx' ||
@@ -265,7 +270,7 @@ export function FeatureTabs({
       ? Math.max(
           1,
           Math.round(
-            Math.min(selectedVideoDuration, MAX_AI_DURATION_SECONDS) * aiSettings.targetFps,
+            Math.min(selectedVideoDuration, aiMaxDurationSec) * aiSettings.targetFps,
           ),
         )
       : null
@@ -323,12 +328,12 @@ export function FeatureTabs({
       aria-label="Pengaturan fitur video"
       className="bento-card overflow-hidden rounded-3xl bg-white"
     >
-      {/* Baris Navigasi 7 Tab - Horizontal Scroll halus di Mobile, Flex Wrap rapi di Desktop */}
+      {/* Baris Navigasi 7 Tab - Wajib 1 Baris Horizontal Scroll rapi di Desktop & Mobile tanpa overflow halaman */}
       <div className="border-b border-slate-200/80 bg-slate-50/90 p-2 sm:p-2.5">
         <div
           role="tablist"
           aria-label="Fitur pengolah video"
-          className="flex flex-nowrap gap-2 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex-wrap lg:justify-center lg:gap-1.5 lg:overflow-visible lg:pb-0"
+          className="flex flex-nowrap gap-2 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1.5 [scrollbar-width:thin] [scrollbar-color:#cbd5e1_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/80 hover:[&::-webkit-scrollbar-thumb]:bg-slate-400"
         >
           {TABS.map(({ id, label, badge, activeAccent, iconBg, Icon }) => {
             const isActive = activeTab === id
@@ -947,11 +952,14 @@ export function FeatureTabs({
                   </div>
                   <div className="rounded-xl bg-white/95 p-3 ring-1 ring-orange-200/80 sm:text-right">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-orange-700">
-                      Estimasi Ukuran Hasil
+                      Estimasi Ukuran Hasil (Perkiraan)
                     </p>
                     <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
-                      ~{enhanceSizeEstimate.minEstimatedMB.toFixed(1)} MB –{' '}
-                      {enhanceSizeEstimate.maxEstimatedMB.toFixed(1)} MB
+                      ~{enhanceSizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
+                      {enhanceSizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
+                      <span className="font-sans text-[11px] font-semibold text-slate-500">
+                        (perkiraan)
+                      </span>
                     </p>
                     <p className="mt-0.5 font-mono text-[11px] text-slate-500">
                       CRF {enhanceOptions.upscale1080p ? '23' : '22'} • preset{' '}
@@ -1086,11 +1094,14 @@ export function FeatureTabs({
                 </div>
                 <div className="rounded-xl bg-white/95 p-3 ring-1 ring-cyan-200/80 sm:text-right">
                   <p className="text-[11px] font-bold uppercase tracking-wider text-cyan-800">
-                    Estimasi Ukuran Hasil
+                    Estimasi Ukuran Hasil (Perkiraan)
                   </p>
                   <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
-                    ~{stabilizerSizeEstimate.minEstimatedMB.toFixed(1)} MB –{' '}
-                    {stabilizerSizeEstimate.maxEstimatedMB.toFixed(1)} MB
+                    ~{stabilizerSizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
+                    {stabilizerSizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
+                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                      (perkiraan)
+                    </span>
                   </p>
                   <p className="mt-0.5 font-mono text-[11px] text-slate-500">
                     CRF 22 • preset {isMobile ? 'veryfast' : 'fast'}
@@ -1178,6 +1189,10 @@ export function FeatureTabs({
                           <span className="whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-0.5 font-mono text-[10px] font-bold text-amber-900 ring-1 ring-amber-300">
                             WebGL2 Aktif • 0 Byte ONNX
                           </span>
+                          <span className="whitespace-nowrap rounded-full bg-white px-2.5 py-0.5 font-mono text-[10px] font-bold text-slate-700 ring-1 ring-amber-200">
+                            Maks {MAX_AI_DURATION_DESKTOP_SECONDS} dtk (Desktop) • Maks{' '}
+                            {MAX_AI_DURATION_MOBILE_SECONDS} dtk (Mobile)
+                          </span>
                         </div>
                         <p className="mt-1 text-xs leading-relaxed text-slate-700">
                           {isMobile
@@ -1186,9 +1201,9 @@ export function FeatureTabs({
                           <strong className="font-bold text-slate-900">
                             WebGL2 Fast Enhance Shader (Bicubic 16-tap + Unsharp + Contrast)
                           </strong>{' '}
-                          secara penuh di sini (batas durasi maks.{' '}
+                          secara penuh di sini (batas aktif perangkat ini:{' '}
                           <strong className="font-bold text-slate-900">
-                            {MAX_AI_DURATION_SECONDS} detik
+                            {aiMaxDurationSec} detik
                           </strong>
                           ).
                         </p>
@@ -1209,6 +1224,10 @@ export function FeatureTabs({
                           <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2.5 py-0.5 font-mono text-[10px] font-bold text-emerald-800 ring-1 ring-emerald-200">
                             WebGPU + WebGL2 Safe
                           </span>
+                          <span className="whitespace-nowrap rounded-full bg-white px-2.5 py-0.5 font-mono text-[10px] font-bold text-violet-800 ring-1 ring-violet-200">
+                            Maks {MAX_AI_DURATION_DESKTOP_SECONDS} dtk (Desktop) • Maks{' '}
+                            {MAX_AI_DURATION_MOBILE_SECONDS} dtk (Mobile)
+                          </span>
                         </div>
                         <p className="mt-1 text-xs leading-relaxed text-slate-700">
                           Ekstraksi frame native browser + render offscreen{' '}
@@ -1216,9 +1235,9 @@ export function FeatureTabs({
                             GPUTexture
                           </code>{' '}
                           tervalidasi dengan fallback otomatis WebGL2 (dijamin jernih, tidak hitam).
-                          Batas durasi maksimal{' '}
+                          Batas durasi aktif perangkat ini:{' '}
                           <strong className="font-bold text-slate-900">
-                            {MAX_AI_DURATION_SECONDS} detik
+                            {aiMaxDurationSec} detik
                           </strong>
                           .
                         </p>
@@ -1239,15 +1258,17 @@ export function FeatureTabs({
                       />
                       <div>
                         <p className="font-bold text-rose-800">
-                          Durasi Video Melebihi Batas Maksimal {MAX_AI_DURATION_SECONDS} Detik
+                          Durasi Video Melebihi Batas Maksimal {aiMaxDurationSec} Detik (
+                          {isMobile ? 'Mobile' : 'Desktop'})
                         </p>
                         <p className="mt-0.5 leading-relaxed text-rose-700">
                           Video terpilih berdurasi{' '}
                           <strong className="font-mono font-bold text-rose-950 tabular-nums">
                             {formatDuration(selectedVideoDuration)}
                           </strong>
-                          . Gunakan klip ≤ {MAX_AI_DURATION_SECONDS} detik untuk GPU Upscaler agar
-                          GPU tidak hang, atau gunakan Tab Jernihkan &amp; HD untuk video panjang.
+                          . Gunakan klip &le; {aiMaxDurationSec} detik untuk GPU Upscaler di{' '}
+                          {isMobile ? 'HP' : 'Desktop'} agar GPU tidak hang, atau gunakan Tab
+                          Jernihkan &amp; HD untuk video panjang.
                         </p>
                       </div>
                     </div>
@@ -1487,11 +1508,7 @@ export function FeatureTabs({
                                 active ? 'text-violet-100' : 'text-slate-500'
                               }`}
                             >
-                              {opt.value === 20
-                                ? '≤300 fr'
-                                : opt.value === 24
-                                  ? '≤360 fr'
-                                  : '≤450 fr'}
+                              &le;{aiMaxDurationSec * opt.value} fr
                             </div>
                           </button>
                         )
@@ -1592,11 +1609,14 @@ export function FeatureTabs({
                       </div>
                       <div className="rounded-xl bg-white/95 p-3 ring-1 ring-violet-200/80 sm:text-right">
                         <p className="text-[11px] font-bold uppercase tracking-wider text-violet-700">
-                          Estimasi Ukuran Hasil
+                          Estimasi Ukuran Hasil (Perkiraan)
                         </p>
                         <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
-                          ~{aiSizeEstimate.minEstimatedMB.toFixed(1)} MB –{' '}
-                          {aiSizeEstimate.maxEstimatedMB.toFixed(1)} MB
+                          ~{aiSizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
+                          {aiSizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
+                          <span className="font-sans text-[11px] font-semibold text-slate-500">
+                            (perkiraan)
+                          </span>
                         </p>
                         <p className="mt-0.5 font-mono text-[11px] text-slate-500">
                           CRF {aiSettings.smartSizeCap ? '22' : '19'} • {aiSettings.targetFps} fps
@@ -1652,6 +1672,7 @@ export function FeatureTabs({
             onChange={onChromaKeyOptionsChange}
             isMobile={isMobile}
             disabled={disabled}
+            nativeFormatWarning={nativeFormatWarning}
             originalSizeBytes={selectedVideoSizeBytes}
             sourceDurationSec={selectedVideoDuration}
             sourceDimensions={selectedVideoDimensions}

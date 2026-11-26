@@ -1,11 +1,18 @@
 import type { WebGPUState } from './environment'
 import {
   computeTarget1080pResolution,
+  getAdaptiveSizeFactor,
   toEvenDimension,
   type SimpleSizeEstimate,
 } from './videoProcessing'
 
-export const MAX_AI_DURATION_SECONDS = 15
+export const MAX_AI_DURATION_DESKTOP_SECONDS = 15
+export const MAX_AI_DURATION_MOBILE_SECONDS = 8
+export const MAX_AI_DURATION_SECONDS = MAX_AI_DURATION_DESKTOP_SECONDS
+
+export function getAiMaxDurationSec(isMobile: boolean): number {
+  return isMobile ? MAX_AI_DURATION_MOBILE_SECONDS : MAX_AI_DURATION_DESKTOP_SECONDS
+}
 
 export type AiModelPresetId = 'realesr-general-x4v3' | 'espcn-x3' | 'custom'
 
@@ -112,11 +119,14 @@ export function isAiAnyGpuSupported(
   return isAiWebGpuSupported(isMobile, webgpuStatus) || webgl2Supported
 }
 
-export function isDurationWithinAiLimit(durationSeconds: number | null): boolean {
+export function isDurationWithinAiLimit(
+  durationSeconds: number | null,
+  isMobile = false,
+): boolean {
   if (durationSeconds === null || !Number.isFinite(durationSeconds)) {
     return true
   }
-  return durationSeconds <= MAX_AI_DURATION_SECONDS + 0.05
+  return durationSeconds <= getAiMaxDurationSec(isMobile) + 0.05
 }
 
 export function isValidModelUrl(url: string): boolean {
@@ -151,18 +161,23 @@ export function computeAiSmartMaxRateKbps(
 }
 
 /**
- * [NEW-02] Estimasi ukuran hasil sebelum render untuk Tab 5 (AI / GPU HD Upscaler).
+ * [NEW-02 & BUG-26NOV-01] Estimasi ukuran hasil sebelum render untuk Tab 5 (AI / GPU HD Upscaler),
+ * dikalibrasi ulang untuk upscale 1080p klip pendek (<10 detik) + kalibrasi adaptif localStorage.
  */
 export function estimateAiOutputSize(
   settings: AiUpscaleSettings,
   sizeBytes: number | null,
   durationSec: number | null,
   videoDimensions?: { width: number | null; height: number | null },
+  isMobile = false,
 ): SimpleSizeEstimate | null {
   if (!sizeBytes || sizeBytes <= 0) return null
   const originalMB = sizeBytes / (1024 * 1024)
+  const adaptiveFactor = getAdaptiveSizeFactor(
+    `ai-upscale:${settings.smartSizeCap ? 'cap' : 'uncapped'}`,
+  )
 
-  let pixelRatio = 1.9
+  let pixelRatio = 2.1
   if (videoDimensions?.width && videoDimensions?.height) {
     const srcW = videoDimensions.width
     const srcH = videoDimensions.height
@@ -176,7 +191,7 @@ export function estimateAiOutputSize(
       const srcPixels = srcW * srcH
       const dstPixels = target.width * target.height
       if (srcPixels > 0) {
-        pixelRatio = Math.max(1, Math.pow(dstPixels / srcPixels, 0.72))
+        pixelRatio = Math.max(1, Math.pow(dstPixels / srcPixels, 0.75))
       }
     }
   }
@@ -185,27 +200,25 @@ export function estimateAiOutputSize(
   const maxRateKbps = computeAiSmartMaxRateKbps(settings, sizeBytes, durationSec)
 
   if (durationSec && Number.isFinite(durationSec) && durationSec > 0) {
-    const effectiveDur = Math.min(durationSec, MAX_AI_DURATION_SECONDS)
+    const effectiveDur = Math.min(durationSec, getAiMaxDurationSec(isMobile))
+    const isShortClip = effectiveDur < 10
     const sourceTotalKbps = Math.max(120, Math.floor((sizeBytes * 8) / (durationSec * 1000)))
     const estAudioKbps = sourceTotalKbps <= 600 ? 96 : 128
     const sourceVideoKbps = Math.max(150, sourceTotalKbps - estAudioKbps)
 
-    // Uncapped CRF 19 + unsharp + upscale biasanya 1.9x-2.4x * pixelRatio; Smart Cap CRF 22 membatasinya di maxRateKbps
-    const crfBaseFactor = settings.smartSizeCap ? 1.25 : 2.05
+    // Upscale 1080p + unsharp pada klip pendek sering menembus burst awal 1-pass VBV (~1.28x maxrate)
+    const crfBaseFactor = settings.smartSizeCap ? 1.52 : 2.35
+    const shortVbvBurst = isShortClip ? 1.28 : 1.08
     const rawProjectedVideoKbps = sourceVideoKbps * crfBaseFactor * pixelRatio * fpsFactor
     const effectiveVideoKbps = maxRateKbps
-      ? Math.min(maxRateKbps, rawProjectedVideoKbps)
+      ? Math.min(maxRateKbps * shortVbvBurst, rawProjectedVideoKbps)
       : rawProjectedVideoKbps
 
-    const minEst = Number(
-      Math.max(0.1, (((effectiveVideoKbps * 0.85 + estAudioKbps) * effectiveDur) / 8192) * 1.04).toFixed(2),
-    )
-    const maxVideo = maxRateKbps
-      ? Math.min(Math.round(maxRateKbps * 1.08), Math.max(effectiveVideoKbps * 1.18, maxRateKbps))
-      : effectiveVideoKbps * 1.28
-    const maxEst = Number(
-      Math.max(minEst, (((maxVideo + estAudioKbps) * effectiveDur) / 8192) * 1.05).toFixed(2),
-    )
+    const midMB =
+      ((((effectiveVideoKbps + estAudioKbps) * effectiveDur) / 8192) * 1.06) * adaptiveFactor
+    const spread = isShortClip ? 0.33 : 0.24
+    const minEst = Number(Math.max(0.1, midMB * (1 - spread)).toFixed(2))
+    const maxEst = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
 
     return {
       originalMB,
@@ -216,9 +229,12 @@ export function estimateAiOutputSize(
     }
   }
 
-  const midMB = Math.max(0.1, originalMB * pixelRatio * (settings.smartSizeCap ? 1.3 : 2.3))
-  const minEst = Number(Math.max(0.1, midMB * 0.85).toFixed(2))
-  const maxEst = Number(Math.max(minEst, midMB * 1.25).toFixed(2))
+  const midMB = Math.max(
+    0.1,
+    originalMB * pixelRatio * (settings.smartSizeCap ? 1.55 : 2.45) * adaptiveFactor,
+  )
+  const minEst = Number(Math.max(0.1, midMB * 0.68).toFixed(2))
+  const maxEst = Number(Math.max(minEst, midMB * 1.32).toFixed(2))
   return {
     originalMB,
     minEstimatedMB: minEst,

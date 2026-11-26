@@ -23,15 +23,27 @@ interface AudioBeforeAfterPlayerProps {
   originalUrl: string | null
   outputUrl: string
   isAudioOnly: boolean
+  originalSizeBytes?: number
+  outputSizeBytes?: number
 }
 
 interface DecodedWaveforms {
   beforeRaw: Float32Array | null
   afterRaw: Float32Array | null
+  beforeSkippedLarge: boolean
+  afterSkippedLarge: boolean
   globalPeak: number
 }
 
+interface EnvelopeDecodeOutcome {
+  bars: Float32Array | null
+  maxPeak: number
+  skippedLarge: boolean
+  failed: boolean
+}
+
 const WAVEFORM_BAR_COUNT = 160
+const MAX_WAVEFORM_DECODE_BYTES = 80 * 1024 * 1024
 
 /**
  * Ekstrak amplop amplitudo (kombinasi peak + RMS) dari AudioBuffer menjadi `barCount` batang.
@@ -89,15 +101,46 @@ function extractRawEnvelope(
 async function decodeUrlEnvelope(
   url: string,
   audioCtx: AudioContext,
-): Promise<{ bars: Float32Array; maxPeak: number } | null> {
+  signal: AbortSignal,
+  knownSizeBytes?: number,
+): Promise<EnvelopeDecodeOutcome> {
+  if (typeof knownSizeBytes === 'number' && knownSizeBytes > MAX_WAVEFORM_DECODE_BYTES) {
+    return { bars: null, maxPeak: 0, skippedLarge: true, failed: false }
+  }
+
   try {
-    const response = await fetch(url)
-    if (!response.ok) return null
+    const response = await fetch(url, { signal })
+    if (!response.ok) {
+      return { bars: null, maxPeak: 0, skippedLarge: false, failed: true }
+    }
+
+    const contentLengthHeader = response.headers.get('content-length')
+    if (contentLengthHeader) {
+      const parsedLen = Number.parseInt(contentLengthHeader, 10)
+      if (Number.isFinite(parsedLen) && parsedLen > MAX_WAVEFORM_DECODE_BYTES) {
+        return { bars: null, maxPeak: 0, skippedLarge: true, failed: false }
+      }
+    }
+
     const arrayBuffer = await response.arrayBuffer()
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0))
-    return extractRawEnvelope(audioBuffer, WAVEFORM_BAR_COUNT)
-  } catch {
-    return null
+    if (signal.aborted) {
+      return { bars: null, maxPeak: 0, skippedLarge: false, failed: false }
+    }
+    if (arrayBuffer.byteLength > MAX_WAVEFORM_DECODE_BYTES) {
+      return { bars: null, maxPeak: 0, skippedLarge: true, failed: false }
+    }
+
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
+    if (signal.aborted) {
+      return { bars: null, maxPeak: 0, skippedLarge: false, failed: false }
+    }
+    const env = extractRawEnvelope(audioBuffer, WAVEFORM_BAR_COUNT)
+    return { bars: env.bars, maxPeak: env.maxPeak, skippedLarge: false, failed: false }
+  } catch (err) {
+    if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+      return { bars: null, maxPeak: 0, skippedLarge: false, failed: false }
+    }
+    return { bars: null, maxPeak: 0, skippedLarge: false, failed: true }
   }
 }
 
@@ -172,6 +215,8 @@ export function AudioBeforeAfterPlayer({
   originalUrl,
   outputUrl,
   isAudioOnly,
+  originalSizeBytes,
+  outputSizeBytes,
 }: AudioBeforeAfterPlayerProps) {
   // Default awal WAJIB aktif di Audio Bersih (After)
   const [audioSource, setAudioSource] = useState<AudioTrackSource>('after')
@@ -186,11 +231,13 @@ export function AudioBeforeAfterPlayer({
   const [waveforms, setWaveforms] = useState<DecodedWaveforms>({
     beforeRaw: null,
     afterRaw: null,
+    beforeSkippedLarge: false,
+    afterSkippedLarge: false,
     globalPeak: 0.001,
   })
   const [canvasResizeTick, setCanvasResizeTick] = useState(0)
 
-  const beforeMediaRef = useRef<HTMLVideoElement | null>(null)
+  const beforeMediaRef = useRef<HTMLAudioElement | null>(null)
   const afterVideoRef = useRef<HTMLVideoElement | null>(null)
   const afterAudioRef = useRef<HTMLAudioElement | null>(null)
   const beforeCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -214,8 +261,10 @@ export function AudioBeforeAfterPlayer({
     setDuration(0)
   }, [originalUrl, outputUrl, isAudioOnly])
 
-  // Decode audio Before & After via Web Audio API dengan skala normalisasi global yang sama
+  // Decode audio Before & After secara SEKUENSIAL via Web Audio API agar puncak RAM rendah,
+  // dilengkapi AbortController saat unmount/ganti hasil & lewati decode jika file > 80 MB.
   useEffect(() => {
+    const abortController = new AbortController()
     let cancelled = false
     setIsDecodingWaveform(true)
 
@@ -225,7 +274,13 @@ export function AudioBeforeAfterPlayer({
         (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
       if (!AudioCtxCtor) {
         if (!cancelled) {
-          setWaveforms({ beforeRaw: null, afterRaw: null, globalPeak: 0.001 })
+          setWaveforms({
+            beforeRaw: null,
+            afterRaw: null,
+            beforeSkippedLarge: false,
+            afterSkippedLarge: false,
+            globalPeak: 0.001,
+          })
           setIsDecodingWaveform(false)
         }
         return
@@ -233,22 +288,39 @@ export function AudioBeforeAfterPlayer({
 
       const audioCtx = new AudioCtxCtor()
       try {
-        const [beforeDecoded, afterDecoded] = await Promise.all([
-          originalUrl ? decodeUrlEnvelope(originalUrl, audioCtx) : Promise.resolve(null),
-          decodeUrlEnvelope(outputUrl, audioCtx),
-        ])
+        // 1. Decode Before terlebih dahulu agar memori tidak melonjak ganda
+        const beforeDecoded: EnvelopeDecodeOutcome | null = originalUrl
+          ? await decodeUrlEnvelope(originalUrl, audioCtx, abortController.signal, originalSizeBytes)
+          : null
 
-        if (cancelled) return
+        if (cancelled || abortController.signal.aborted) return
+
+        // 2. Baru lanjut decode After setelah AudioBuffer Before dibebaskan
+        const afterDecoded = await decodeUrlEnvelope(
+          outputUrl,
+          audioCtx,
+          abortController.signal,
+          outputSizeBytes,
+        )
+
+        if (cancelled || abortController.signal.aborted) return
+
+        // Samakan state error deteksi antara jalur playback dan jalur waveform Before
+        if (beforeDecoded?.failed) {
+          setBeforeLoadError(true)
+        }
 
         const globalPeak = Math.max(
           beforeDecoded?.maxPeak ?? 0,
-          afterDecoded?.maxPeak ?? 0,
+          afterDecoded.maxPeak ?? 0,
           0.001,
         )
 
         setWaveforms({
           beforeRaw: beforeDecoded?.bars ?? null,
-          afterRaw: afterDecoded?.bars ?? null,
+          afterRaw: afterDecoded.bars ?? null,
+          beforeSkippedLarge: Boolean(beforeDecoded?.skippedLarge),
+          afterSkippedLarge: Boolean(afterDecoded.skippedLarge),
           globalPeak,
         })
       } finally {
@@ -266,8 +338,9 @@ export function AudioBeforeAfterPlayer({
     void runDecode()
     return () => {
       cancelled = true
+      abortController.abort()
     }
-  }, [originalUrl, outputUrl])
+  }, [originalUrl, outputUrl, originalSizeBytes, outputSizeBytes])
 
   // ResizeObserver agar canvas waveform selalu tajam saat layar berubah ukuran
   useEffect(() => {
@@ -498,13 +571,12 @@ export function AudioBeforeAfterPlayer({
 
   return (
     <div ref={stageWrapperRef} className="flex flex-col gap-3.5">
-      {/* Media Audio Asli (Before) tersembunyi untuk sinkronisasi audio real-time */}
+      {/* Media Audio Asli (Before) tersembunyi memakai elemen <audio> hemat CPU/RAM */}
       {originalUrl && !beforeLoadError && (
-        <video
+        <audio
           ref={beforeMediaRef}
           key={`audio-cmp-before-${originalUrl}`}
           src={originalUrl}
-          playsInline
           preload="auto"
           muted={isMuted || effectiveSource !== 'before'}
           onError={() => setBeforeLoadError(true)}
@@ -671,7 +743,9 @@ export function AudioBeforeAfterPlayer({
                   />
                 </div>
                 <span className="text-[10px] text-slate-400">
-                  Gelombang tidak tersedia untuk format ini (klik bar untuk seek)
+                  {waveforms.beforeSkippedLarge
+                    ? 'Mode hemat RAM (> 80 MB): gelombang dilewati, klik bar untuk seek'
+                    : 'Gelombang tidak tersedia untuk format ini (klik bar untuk seek)'}
                 </span>
               </div>
             )}
@@ -746,7 +820,9 @@ export function AudioBeforeAfterPlayer({
                   />
                 </div>
                 <span className="text-[10px] text-slate-400">
-                  Klik bar untuk melompat ke posisi waktu
+                  {waveforms.afterSkippedLarge
+                    ? 'Mode hemat RAM (> 80 MB): gelombang dilewati, klik bar untuk seek'
+                    : 'Klik bar untuk melompat ke posisi waktu'}
                 </span>
               </div>
             )}

@@ -41,6 +41,9 @@ export interface AudioDenoisePresetDef {
     lowpassHz: number
     noiseGate: boolean
     twoStageWindReduction: boolean
+    voiceClarity: boolean
+    autoLeveling: boolean
+    volumePercent: number
   }
 }
 
@@ -82,6 +85,9 @@ export const AUDIO_DENOISE_PRESETS: ReadonlyArray<AudioDenoisePresetDef> = [
       lowpassHz: 15000,
       noiseGate: true,
       twoStageWindReduction: false,
+      voiceClarity: false,
+      autoLeveling: true,
+      volumePercent: 100,
     },
   },
   {
@@ -98,6 +104,9 @@ export const AUDIO_DENOISE_PRESETS: ReadonlyArray<AudioDenoisePresetDef> = [
       lowpassHz: 11000,
       noiseGate: true,
       twoStageWindReduction: false,
+      voiceClarity: true,
+      autoLeveling: true,
+      volumePercent: 100,
     },
   },
   {
@@ -114,6 +123,9 @@ export const AUDIO_DENOISE_PRESETS: ReadonlyArray<AudioDenoisePresetDef> = [
       lowpassHz: 7000,
       noiseGate: true,
       twoStageWindReduction: true,
+      voiceClarity: true,
+      autoLeveling: true,
+      volumePercent: 100,
     },
   },
   {
@@ -171,6 +183,9 @@ export function applyAudioDenoisePreset(
     lowpassHz: found.params.lowpassHz,
     noiseGate: found.params.noiseGate,
     twoStageWindReduction: found.params.twoStageWindReduction,
+    voiceClarity: found.params.voiceClarity,
+    autoLeveling: found.params.autoLeveling,
+    volumePercent: found.params.volumePercent,
   }
 }
 
@@ -322,12 +337,18 @@ export function buildAudioDenoiseArgs(
   outputName: string,
   options: AudioDenoiseOptions,
   inputExt?: string | null,
+  threads = 2,
 ): string[] {
   const afChain = buildAudioDenoiseFilterChain(options)
   const target = resolveAudioDenoiseOutputTarget(options.outputMode, inputExt)
+  const safeThreads = String(Math.max(1, Math.min(6, threads)))
 
   if (options.outputMode === 'audio-mp3') {
     return [
+      '-threads',
+      safeThreads,
+      '-filter_threads',
+      safeThreads,
       '-i',
       inputName,
       '-vn',
@@ -344,6 +365,10 @@ export function buildAudioDenoiseArgs(
   }
 
   const args = [
+    '-threads',
+    safeThreads,
+    '-filter_threads',
+    safeThreads,
     '-i',
     inputName,
     '-map',
@@ -380,9 +405,13 @@ export function buildAudioDenoiseFallbackArgs(
   threads = 2,
 ): string[] {
   const afChain = buildAudioDenoiseFilterChain(options)
-  const safeThreads = String(Math.max(1, Math.min(4, threads)))
+  const safeThreads = String(Math.max(1, Math.min(6, threads)))
 
   return [
+    '-threads',
+    safeThreads,
+    '-filter_threads',
+    safeThreads,
     '-i',
     inputName,
     '-map',
