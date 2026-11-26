@@ -40,6 +40,7 @@ import {
   type AiUpscaleSettings,
 } from '../utils/aiUpscalerConfig'
 import type { AudioDenoiseOptions } from '../utils/audioDenoiseConfig'
+import type { BatchAppliedFeatureMap } from '../utils/batchQueue'
 import type { ChromaKeyOptions } from '../utils/chromaKeyConfig'
 import type { CompressOptions } from '../utils/compressConfig'
 import type { DeviceType, WebGPUState } from '../utils/environment'
@@ -128,6 +129,7 @@ interface FeatureTabsProps {
     items: ReadonlyArray<{ id: string; index: number; name: string }>
     onPreviewItemIdChange: (id: string) => void
   } | null
+  batchAppliedFeatureMap?: BatchAppliedFeatureMap | null
 
   // [BUG-4R-04a] Banner pengembalian cepat hasil batch sebelumnya saat pengguna sempat pindah tab
   savedBatchResultBanner?: {
@@ -237,6 +239,7 @@ export function FeatureTabs({
   onViewStepResult,
   onRemoveStep,
   batchModeInfo,
+  batchAppliedFeatureMap,
   savedBatchResultBanner,
   resultView,
 }: FeatureTabsProps) {
@@ -356,6 +359,10 @@ export function FeatureTabs({
             const isActive = activeTab === id
             const stepIndex = pipelineSteps.findIndex((s) => s.tabId === id)
             const installedStep = stepIndex >= 0 ? pipelineSteps[stepIndex] : null
+            const batchAppliedInfo =
+              batchModeInfo && batchAppliedFeatureMap ? (batchAppliedFeatureMap[id] ?? null) : null
+            const isBatchApplied = Boolean(batchAppliedInfo && batchAppliedInfo.count > 0)
+            const hasAppliedEffect = Boolean(installedStep) || isBatchApplied
             const activeTextClass = activeAccent.split(' ')[0]
 
             return (
@@ -370,26 +377,28 @@ export function FeatureTabs({
                     ? 'Proses sedang berjalan, tunggu selesai atau klik Batalkan untuk pindah tab'
                     : installedStep
                       ? `${label} sudah terpasang (Tahap ke-${stepIndex + 1}: ${installedStep.summary}). Klik untuk ubah setelan.`
-                      : label
+                      : isBatchApplied
+                        ? 'Fitur ini sudah diterapkan ke antrean video'
+                        : label
                 }
                 onClick={() => onTabChange(id)}
                 className={`flex min-h-11 shrink-0 snap-start cursor-pointer touch-manipulation items-center justify-center gap-1.5 whitespace-nowrap rounded-2xl px-3 py-2 text-xs font-bold transition-[background-color,color,box-shadow,border-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 lg:w-full lg:min-w-0 lg:gap-1.5 lg:px-2 lg:text-[11px] xl:px-2.5 xl:text-xs ${
                   isActive
-                    ? `bg-white shadow-sm ring-1 ${installedStep ? 'ring-emerald-400' : activeAccent} ${activeTextClass}`
-                    : installedStep
+                    ? `bg-white shadow-sm ring-1 ${hasAppliedEffect ? 'ring-emerald-400' : activeAccent} ${activeTextClass}`
+                    : hasAppliedEffect
                       ? 'bg-emerald-50/80 text-emerald-900 ring-1 ring-emerald-300/80 hover:bg-emerald-50'
                       : 'text-slate-600 hover:bg-white/75 hover:text-slate-900'
                 }`}
               >
                 <span
                   className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors lg:h-6 lg:w-6 ${
-                    isActive || installedStep ? iconBg : 'bg-slate-200/70 text-slate-500'
+                    isActive || hasAppliedEffect ? iconBg : 'bg-slate-200/70 text-slate-500'
                   }`}
                 >
                   <Icon aria-hidden="true" className="h-4 w-4 lg:h-3.5 lg:w-3.5" />
                 </span>
                 <span className="truncate">{label}</span>
-                {badge && !installedStep && (
+                {badge && !hasAppliedEffect && (
                   <span
                     className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
                       isActive ? 'bg-violet-600 text-white' : 'bg-violet-100 text-violet-700'
@@ -398,13 +407,22 @@ export function FeatureTabs({
                     {badge}
                   </span>
                 )}
-                {installedStep && (
+                {batchAppliedInfo && batchAppliedInfo.count > 1 ? (
                   <span
-                    aria-label="Efek terpasang"
-                    className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
+                    aria-label={`Fitur sudah diterapkan ${batchAppliedInfo.count} kali`}
+                    className="inline-flex h-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 px-1 font-mono text-[9px] font-extrabold text-white tabular-nums"
                   >
-                    <Check aria-hidden="true" className="h-2.5 w-2.5 stroke-[2.75]" />
+                    {batchAppliedInfo.count}x
                   </span>
+                ) : (
+                  hasAppliedEffect && (
+                    <span
+                      aria-label="Efek terpasang"
+                      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
+                    >
+                      <Check aria-hidden="true" className="h-2.5 w-2.5 stroke-[2.75]" />
+                    </span>
+                  )
                 )}
               </button>
             )
@@ -460,6 +478,35 @@ export function FeatureTabs({
                 </span>
               </div>
             )}
+
+            {/* Info ringan saat tab yang sudah pernah diterapkan di antrean batch dibuka lagi */}
+            {(() => {
+              const activeBatchApplied =
+                batchModeInfo && batchAppliedFeatureMap
+                  ? (batchAppliedFeatureMap[activeTab] ?? null)
+                  : null
+              if (!activeBatchApplied || activeBatchApplied.count <= 0) return null
+              const activeTabLabel = TABS.find((t) => t.id === activeTab)?.label ?? activeTab
+              const lastStepNumber =
+                activeBatchApplied.stepNumbers[activeBatchApplied.stepNumbers.length - 1]
+              return (
+                <div
+                  role="status"
+                  className="animate-lv-fade-up mb-5 flex items-start gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-xs leading-relaxed text-emerald-950"
+                >
+                  <CheckCircle2
+                    aria-hidden="true"
+                    className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600"
+                  />
+                  <span>
+                    Fitur <strong className="font-bold">{activeTabLabel}</strong> sudah diterapkan
+                    pada antrean video ini sebelumnya (Tahap ke-{lastStepNumber}:{' '}
+                    <strong className="font-semibold">{activeBatchApplied.lastSummary}</strong>).
+                    Kamu tetap bisa menjalankannya lagi atau pilih fitur lain di atas.
+                  </span>
+                </div>
+              )
+            })()}
 
             {/* Bar Kontrol Efek Aktif saat Tab yang Sudah Terpasang dibuka di mode ubah setelan */}
             {(() => {

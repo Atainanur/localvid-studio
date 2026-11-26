@@ -1,6 +1,7 @@
 import {
   getFileExtension,
   isSupportedVideoFile,
+  type FeatureTabId,
   type ProcessedVideoResult,
   type VideoMetadata,
 } from './videoProcessing'
@@ -8,6 +9,25 @@ import {
 export type ProcessResult = ProcessedVideoResult
 
 export type BatchItemStatus = 'pending' | 'processing' | 'done' | 'error' | 'skipped'
+
+/**
+ * Metadata teks ringan untuk riwayat efek Mode Antrean (tanpa snapshot File/Blob agar RAM HP tetap aman).
+ */
+export interface BatchAppliedHistoryEntry {
+  id: string
+  tabId: FeatureTabId
+  tabLabel: string
+  summary: string
+  timestamp: number
+}
+
+export interface BatchAppliedFeatureInfo {
+  count: number
+  lastSummary: string
+  stepNumbers: number[]
+}
+
+export type BatchAppliedFeatureMap = Partial<Record<FeatureTabId, BatchAppliedFeatureInfo>>
 
 export interface BatchQueueItem {
   id: string

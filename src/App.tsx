@@ -37,6 +37,8 @@ import {
   createScreenWakeLockController,
   reindexBatchItems,
   validateIncomingBatchFiles,
+  type BatchAppliedFeatureMap,
+  type BatchAppliedHistoryEntry,
   type BatchQueueItem,
   type ScreenWakeLockController,
 } from './utils/batchQueue'
@@ -215,6 +217,7 @@ export default function App() {
   const [selectedVideo, setSelectedVideo] = useState<SelectedVideo | null>(null)
   const [pipelineSteps, setPipelineSteps] = useState<EditPipelineStep[]>([])
   const [batchItems, setBatchItems] = useState<BatchQueueItem[]>([])
+  const [batchAppliedHistory, setBatchAppliedHistory] = useState<BatchAppliedHistoryEntry[]>([])
   const [batchPreviewItemId, setBatchPreviewItemId] = useState<string | null>(null)
   const [isBatchRunning, setIsBatchRunning] = useState(false)
   const [isBatchTransitioning, setIsBatchTransitioning] = useState(false)
@@ -901,6 +904,7 @@ export default function App() {
     batchMetadataReqRef.current += 1
     revokeAllBatchResultUrls()
     setBatchItems([])
+    setBatchAppliedHistory([])
     setBatchPreviewItemId(null)
     setBatchResultMeta(null)
     setBatchActiveItemIndex(-1)
@@ -952,6 +956,7 @@ export default function App() {
     setExpectedDuration(null)
     setBatchResultMeta(null)
     setBatchActiveItemIndex(-1)
+    setBatchAppliedHistory([])
     await clearCurrentResult()
 
     const createdItems = validated.acceptedFiles.map((file, idx) =>
@@ -1060,6 +1065,7 @@ export default function App() {
       revokeAllBatchResultUrls()
       const singleItem = remaining[0]
       setBatchItems([])
+      setBatchAppliedHistory([])
       setBatchPreviewItemId(null)
       setBatchResultMeta(null)
       setBatchActiveItemIndex(-1)
@@ -1105,17 +1111,22 @@ export default function App() {
 
   const handleContinueBatchWithOutputs = async () => {
     if (isBusy) return
-    const completedVideoFiles = batchItems
-      .filter(
-        (item) =>
-          item.status === 'done' &&
-          item.outputFile !== null &&
-          item.result !== null &&
-          !isAudioOnlyResultFile(item.result),
-      )
-      .map((item) => item.outputFile!)
+    const completedVideoItems = batchItems.filter(
+      (item) =>
+        item.status === 'done' &&
+        item.outputFile !== null &&
+        item.result !== null &&
+        !isAudioOnlyResultFile(item.result),
+    )
+    const completedVideoFiles = completedVideoItems.map((item) => item.outputFile!)
 
     if (completedVideoFiles.length === 0) return
+
+    const completedTabId: FeatureTabId =
+      batchResultMeta?.feature ?? completedVideoItems[0].result!.feature
+    const completedTabLabel = FEATURE_TAB_LABELS[completedTabId]
+    const completedSummary =
+      getChainStepSummary(completedVideoItems[0].result!) || completedTabLabel
 
     revokeAllBatchResultUrls()
     setBatchResultMeta(null)
@@ -1126,21 +1137,31 @@ export default function App() {
     if (completedVideoFiles.length === 1) {
       await handleSelectFile(completedVideoFiles[0])
       showChainNotice(
-        '1 video hasil dimuat sebagai input baru. Pilih tab fitur di atas untuk lanjut edit.',
+        `1 video hasil ${completedTabLabel} siap dilanjutkan. Pilih fitur berikutnya di atas.`,
         4500,
       )
       featureCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       return
     }
 
+    // Simpan HANYA metadata teks ringan ke riwayat batch (tanpa snapshot File/Blob agar RAM HP hemat)
+    const historyEntry: BatchAppliedHistoryEntry = {
+      id: `batch-hist-${Date.now()}-${completedTabId}`,
+      tabId: completedTabId,
+      tabLabel: completedTabLabel,
+      summary: completedSummary,
+      timestamp: Date.now(),
+    }
+    setBatchAppliedHistory((prev) => [...prev, historyEntry])
+
     const nextItems = completedVideoFiles.map((file, idx) => createBatchQueueItem(file, idx + 1))
     setBatchItems(nextItems)
     setBatchPreviewItemId(nextItems[0]?.id ?? null)
     addLog(
-      `[LocalVid Batch] ${nextItems.length} video hasil dimuat ke antrean baru untuk tahap edit berikutnya.`,
+      `[LocalVid Batch] Riwayat tahap "${completedTabLabel}" (${completedSummary}) dicatat. ${nextItems.length} video hasil siap dilanjutkan ke fitur berikutnya.`,
     )
     showChainNotice(
-      `${nextItems.length} video hasil siap dilanjutkan ke fitur lain. Pilih tab fitur di atas.`,
+      `${nextItems.length} video hasil ${completedTabLabel} siap dilanjutkan. Pilih fitur berikutnya di atas.`,
       4500,
     )
     void readMetadataForBatchItems(nextItems, true)
@@ -1156,6 +1177,7 @@ export default function App() {
     lastProcessedWasAudioOnlyRef.current = false
     revokeAllBatchResultUrls()
     setBatchItems([])
+    setBatchAppliedHistory([])
     setBatchPreviewItemId(null)
     setBatchResultMeta(null)
     setBatchActiveItemIndex(-1)
@@ -3030,6 +3052,48 @@ export default function App() {
     () => batchItems.filter((item) => item.status === 'done').length,
     [batchItems],
   )
+
+  // Peta fitur yang sudah diterapkan pada antrean batch (metadata teks ringan saja)
+  const batchAppliedFeatureMap = useMemo<BatchAppliedFeatureMap>(() => {
+    const map: BatchAppliedFeatureMap = {}
+    batchAppliedHistory.forEach((entry, idx) => {
+      const stepNum = idx + 1
+      const existing = map[entry.tabId]
+      if (existing) {
+        map[entry.tabId] = {
+          count: existing.count + 1,
+          lastSummary: entry.summary,
+          stepNumbers: [...existing.stepNumbers, stepNum],
+        }
+      } else {
+        map[entry.tabId] = {
+          count: 1,
+          lastSummary: entry.summary,
+          stepNumbers: [stepNum],
+        }
+      }
+    })
+    return map
+  }, [batchAppliedHistory])
+
+  // Rekap kumulatif untuk BatchResultView: riwayat sebelumnya + tahap yang baru saja selesai
+  const batchCumulativeSteps = useMemo<BatchAppliedHistoryEntry[]>(() => {
+    if (!batchResultMeta) return batchAppliedHistory
+    const sampleDone = batchItems.find((item) => item.status === 'done' && item.result !== null)
+    if (!sampleDone?.result) return batchAppliedHistory
+    const currentSummary =
+      getChainStepSummary(sampleDone.result) || FEATURE_TAB_LABELS[batchResultMeta.feature]
+    return [
+      ...batchAppliedHistory,
+      {
+        id: `batch-current-${batchResultMeta.feature}`,
+        tabId: batchResultMeta.feature,
+        tabLabel: FEATURE_TAB_LABELS[batchResultMeta.feature],
+        summary: currentSummary,
+        timestamp: sampleDone.result.elapsedMs,
+      },
+    ]
+  }, [batchAppliedHistory, batchResultMeta, batchItems])
   const savedBatchResultBanner =
     isBatchMode &&
     batchResultMeta &&
@@ -3274,6 +3338,7 @@ export default function App() {
             isBatchMode={isBatchMode}
             isBatchRunning={isBatchRunning}
             batchPreValidationMap={batchPreValidation.invalidReasonMap}
+            batchAppliedHistory={batchAppliedHistory}
             pipelineSteps={pipelineSteps}
             isMobile={isMobile}
             disabled={isBusy}
@@ -3463,12 +3528,14 @@ export default function App() {
                     }
                   : null
               }
+              batchAppliedFeatureMap={isBatchMode ? batchAppliedFeatureMap : null}
               savedBatchResultBanner={savedBatchResultBanner}
               resultView={
                 hasBatchResultView && batchResultMeta ? (
                   <BatchResultView
                     items={batchItems}
                     feature={batchResultMeta.feature}
+                    cumulativeSteps={batchCumulativeSteps}
                     totalElapsedMs={batchResultMeta.totalElapsedMs}
                     isMobile={isMobile}
                     deviceType={deviceType}

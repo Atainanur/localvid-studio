@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   ArrowRight,
+  Check,
   CheckCircle2,
+  ChevronRight,
   Clock,
   Download,
   Eye,
@@ -23,6 +25,7 @@ import {
   runStaggeredMultiDownload,
   shareBatchFiles,
   triggerSingleFileDownload,
+  type BatchAppliedHistoryEntry,
   type BatchQueueItem,
 } from '../utils/batchQueue'
 import {
@@ -37,6 +40,7 @@ import { AudioBeforeAfterPlayer } from './AudioBeforeAfterPlayer'
 interface BatchResultViewProps {
   items: readonly BatchQueueItem[]
   feature: FeatureTabId
+  cumulativeSteps?: readonly BatchAppliedHistoryEntry[]
   totalElapsedMs: number
   isMobile: boolean
   deviceType: 'Desktop' | 'iOS' | 'Android'
@@ -60,6 +64,7 @@ function splitFileNameAndExt(fileName: string): { baseName: string; extLabel: st
 export function BatchResultView({
   items,
   feature,
+  cumulativeSteps = [],
   totalElapsedMs,
   isMobile,
   deviceType,
@@ -232,6 +237,36 @@ export function BatchResultView({
             </div>
           </div>
         </div>
+
+        {/* Rekap kumulatif fitur terpasang di semua video (hanya tampil jika lebih dari 1 tahap berantai) */}
+        {cumulativeSteps.length > 1 && (
+          <div className="rounded-xl border border-emerald-200/80 bg-white/90 px-3.5 py-2.5">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin] [scrollbar-color:#a7f3d0_transparent]">
+              <span className="mr-0.5 shrink-0 whitespace-nowrap text-[11px] font-bold text-emerald-900">
+                Fitur terpasang di semua video ({cumulativeSteps.length} tahap):
+              </span>
+              {cumulativeSteps.map((step, idx) => (
+                <div key={step.id} className="inline-flex shrink-0 items-center gap-1.5">
+                  {idx > 0 && (
+                    <ChevronRight
+                      aria-hidden="true"
+                      className="h-3.5 w-3.5 shrink-0 text-emerald-500"
+                    />
+                  )}
+                  <span
+                    title={step.summary}
+                    className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-emerald-200 bg-emerald-50/80 px-2.5 py-1 text-[11px] font-bold text-emerald-900"
+                  >
+                    <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
+                      <Check aria-hidden="true" className="h-2.5 w-2.5 stroke-[2.75]" />
+                    </span>
+                    <span>{step.tabLabel}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* [BUG-4R-15a] Ringkasan Ukuran Gabungan dengan badge Hemat / Naik + konteks jelas */}
         {completedItems.length > 0 && (
@@ -589,6 +624,17 @@ export function BatchResultView({
             <span>Ganti Semua Video</span>
           </button>
         </div>
+
+        {/* Catatan konsisten untuk alur edit berantai atau audio-only */}
+        {completedVideoItems.length > 0 && !allCompletedAreAudio && (
+          <p className="flex items-center gap-1.5 text-xs text-slate-600">
+            <Info aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+            <span>
+              Klik &ldquo;Lanjut Edit {completedVideoItems.length} Hasil ke Fitur Lain&rdquo; untuk
+              meneruskan seluruh video ini ke tahap fitur berikutnya sambil mencatat riwayat efeknya.
+            </span>
+          </p>
+        )}
 
         {/* [BUG-4R-18] Penjelasan tenang bila seluruh hasil batch berupa audio (.MP3) */}
         {allCompletedAreAudio && completedItems.length > 0 && (

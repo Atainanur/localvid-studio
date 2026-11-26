@@ -22,6 +22,7 @@ import {
   getBatchSoftWarning,
   getBatchUploadBadgeText,
   getMaxBatchCount,
+  type BatchAppliedHistoryEntry,
   type BatchItemStatus,
   type BatchQueueItem,
 } from '../utils/batchQueue'
@@ -41,6 +42,7 @@ interface UploadZoneProps {
   selectedVideo: SelectedVideo | null
   batchItems: readonly BatchQueueItem[]
   batchPreValidationMap?: ReadonlyMap<string, string>
+  batchAppliedHistory?: readonly BatchAppliedHistoryEntry[]
   isBatchMode: boolean
   isBatchRunning: boolean
   pipelineSteps: readonly EditPipelineStep[]
@@ -91,6 +93,7 @@ export function UploadZone({
   selectedVideo,
   batchItems,
   batchPreValidationMap,
+  batchAppliedHistory = [],
   isBatchMode,
   isBatchRunning,
   pipelineSteps,
@@ -335,6 +338,37 @@ export function UploadZone({
               </button>
             </div>
           </div>
+
+          {/* Bar Alur Edit Antrean (metadata teks ringan, 0 snapshot Blob, scroll horizontal mulus di mobile) */}
+          {batchAppliedHistory.length > 0 && (
+            <div className="mt-3 rounded-2xl border border-emerald-200/80 bg-emerald-50/55 px-3 py-2.5">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin] [scrollbar-color:#a7f3d0_transparent]">
+                <span className="mr-0.5 shrink-0 whitespace-nowrap text-[11px] font-bold text-emerald-900">
+                  Efek terpasang ({batchAppliedHistory.length} tahap):
+                </span>
+                <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                  Video Asli
+                </span>
+                {batchAppliedHistory.map((step) => (
+                  <div key={step.id} className="inline-flex shrink-0 items-center gap-1.5">
+                    <ChevronRight
+                      aria-hidden="true"
+                      className="h-3.5 w-3.5 shrink-0 text-emerald-500"
+                    />
+                    <span
+                      title={step.summary}
+                      className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-[11px] font-bold text-emerald-900"
+                    >
+                      <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
+                        <Check aria-hidden="true" className="h-2.5 w-2.5 stroke-[2.75]" />
+                      </span>
+                      <span>{step.tabLabel}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Daftar Baris Antrean (Ringan, 0 <video>, area sentuh tombol hapus >= 44x44px) */}
           <ul className="mt-3.5 flex flex-col gap-2" aria-label="Daftar antrean video">
