@@ -24,7 +24,6 @@ import {
   UserSquare2,
   Video,
   Wand2,
-  X,
   Zap,
 } from 'lucide-react'
 import {
@@ -125,9 +124,16 @@ interface FeatureTabsProps {
   // Mode Antrean Multi-Video (2+ video)
   batchModeInfo?: {
     totalCount: number
-    previewIndex: number
+    previewItemId: string
     items: ReadonlyArray<{ id: string; index: number; name: string }>
-    onPreviewIndexChange: (index: number) => void
+    onPreviewItemIdChange: (id: string) => void
+  } | null
+
+  // [BUG-4R-04a] Banner pengembalian cepat hasil batch sebelumnya saat pengguna sempat pindah tab
+  savedBatchResultBanner?: {
+    count: number
+    featureLabel: string
+    onRestore: () => void
   } | null
 
   // Clean Result View: bila hasil ekspor tersedia, ganti form pengaturan dengan tampilan hasil bersih
@@ -231,6 +237,7 @@ export function FeatureTabs({
   onViewStepResult,
   onRemoveStep,
   batchModeInfo,
+  savedBatchResultBanner,
   resultView,
 }: FeatureTabsProps) {
   const [compareOriginal, setCompareOriginal] = useState(false)
@@ -338,12 +345,12 @@ export function FeatureTabs({
       aria-label="Pengaturan fitur video"
       className="bento-card overflow-hidden rounded-3xl bg-white"
     >
-      {/* Baris Navigasi 7 Tab - Wajib 1 Baris Horizontal Scroll rapi di Desktop & Mobile tanpa overflow halaman */}
+      {/* Baris Navigasi 7 Tab - 1 baris rapi di Desktop (7 kolom pas tanpa terpotong) dan horizontal scroll di Mobile */}
       <div className="border-b border-slate-200/80 bg-slate-50/90 p-2 sm:p-2.5">
         <div
           role="tablist"
           aria-label="Fitur pengolah video"
-          className="flex flex-nowrap gap-2 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1.5 [scrollbar-width:thin] [scrollbar-color:#cbd5e1_transparent] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/80 hover:[&::-webkit-scrollbar-thumb]:bg-slate-400"
+          className="flex flex-nowrap gap-2 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1.5 [scrollbar-width:thin] [scrollbar-color:#cbd5e1_transparent] lg:grid lg:grid-cols-7 lg:gap-1 lg:overflow-visible lg:pb-0 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/80 hover:[&::-webkit-scrollbar-thumb]:bg-slate-400"
         >
           {TABS.map(({ id, label, badge, activeAccent, iconBg, Icon }) => {
             const isActive = activeTab === id
@@ -352,79 +359,54 @@ export function FeatureTabs({
             const activeTextClass = activeAccent.split(' ')[0]
 
             return (
-              <div
+              <button
                 key={id}
-                className={`inline-flex min-h-11 shrink-0 snap-start items-center rounded-2xl transition-[background-color,color,box-shadow,border-color] duration-150 ${
-                  isActive
-                    ? `bg-white shadow-sm ring-1 ${installedStep ? 'ring-emerald-400' : activeAccent}`
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                disabled={disabled}
+                title={
+                  disabled
+                    ? 'Proses sedang berjalan, tunggu selesai atau klik Batalkan untuk pindah tab'
                     : installedStep
-                      ? 'bg-emerald-50/80 ring-1 ring-emerald-300/80 hover:bg-emerald-50'
-                      : 'hover:bg-white/75'
+                      ? `${label} sudah terpasang (Tahap ke-${stepIndex + 1}: ${installedStep.summary}). Klik untuk ubah setelan.`
+                      : label
+                }
+                onClick={() => onTabChange(id)}
+                className={`flex min-h-11 shrink-0 snap-start cursor-pointer touch-manipulation items-center justify-center gap-1.5 whitespace-nowrap rounded-2xl px-3 py-2 text-xs font-bold transition-[background-color,color,box-shadow,border-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 lg:w-full lg:min-w-0 lg:gap-1.5 lg:px-2 lg:text-[11px] xl:px-2.5 xl:text-xs ${
+                  isActive
+                    ? `bg-white shadow-sm ring-1 ${installedStep ? 'ring-emerald-400' : activeAccent} ${activeTextClass}`
+                    : installedStep
+                      ? 'bg-emerald-50/80 text-emerald-900 ring-1 ring-emerald-300/80 hover:bg-emerald-50'
+                      : 'text-slate-600 hover:bg-white/75 hover:text-slate-900'
                 }`}
               >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={isActive}
-                  disabled={disabled}
-                  title={
-                    disabled
-                      ? 'Proses sedang berjalan, tunggu selesai atau klik Batalkan untuk pindah tab'
-                      : installedStep
-                        ? `${label} sudah terpasang (Tahap ke-${stepIndex + 1}: ${installedStep.summary}). Klik untuk ubah setelan.`
-                        : undefined
-                  }
-                  onClick={() => onTabChange(id)}
-                  className={`flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 whitespace-nowrap rounded-2xl py-2 pl-3 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                    installedStep ? 'pr-1.5' : 'pr-3 lg:px-3.5'
-                  } ${
-                    isActive
-                      ? activeTextClass
-                      : installedStep
-                        ? 'text-emerald-900'
-                        : 'text-slate-600 hover:text-slate-900'
+                <span
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors lg:h-6 lg:w-6 ${
+                    isActive || installedStep ? iconBg : 'bg-slate-200/70 text-slate-500'
                   }`}
                 >
+                  <Icon aria-hidden="true" className="h-4 w-4 lg:h-3.5 lg:w-3.5" />
+                </span>
+                <span className="truncate">{label}</span>
+                {badge && !installedStep && (
                   <span
-                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors ${
-                      isActive || installedStep ? iconBg : 'bg-slate-200/70 text-slate-500'
+                    className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                      isActive ? 'bg-violet-600 text-white' : 'bg-violet-100 text-violet-700'
                     }`}
                   >
-                    <Icon aria-hidden="true" className="h-4 w-4" />
+                    {badge}
                   </span>
-                  <span>{label}</span>
-                  {badge && !installedStep && (
-                    <span
-                      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                        isActive ? 'bg-violet-600 text-white' : 'bg-violet-100 text-violet-700'
-                      }`}
-                    >
-                      {badge}
-                    </span>
-                  )}
-                  {installedStep && (
-                    <span
-                      aria-label="Efek terpasang"
-                      className="inline-flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
-                    >
-                      <Check aria-hidden="true" className="h-3 w-3 stroke-[2.75]" />
-                    </span>
-                  )}
-                </button>
-
-                {installedStep && (
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => onRemoveStep(installedStep.id)}
-                    aria-label={`Hapus efek ${label}`}
-                    title={`Hapus efek ${label}`}
-                    className="mr-1.5 inline-flex h-6 w-6 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full text-emerald-700/80 transition-colors hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <X aria-hidden="true" className="h-3.5 w-3.5" />
-                  </button>
                 )}
-              </div>
+                {installedStep && (
+                  <span
+                    aria-label="Efek terpasang"
+                    className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
+                  >
+                    <Check aria-hidden="true" className="h-2.5 w-2.5 stroke-[2.75]" />
+                  </span>
+                )}
+              </button>
             )
           })}
         </div>
@@ -436,6 +418,32 @@ export function FeatureTabs({
           resultView
         ) : (
           <>
+            {/* [BUG-4R-04a] Banner ringan untuk kembali ke hasil batch sebelumnya yang tetap tersimpan */}
+            {savedBatchResultBanner && (
+              <div
+                role="status"
+                className="animate-lv-fade-up mb-5 flex flex-col gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/75 px-4 py-3 text-xs text-emerald-950 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0 text-emerald-600" />
+                  <span>
+                    <strong className="font-bold">
+                      {savedBatchResultBanner.count} hasil batch ({savedBatchResultBanner.featureLabel})
+                    </strong>{' '}
+                    masih tersimpan dan siap diunduh kapan saja.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={savedBatchResultBanner.onRestore}
+                  className="inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3.5 py-2 text-xs font-bold text-emerald-900 transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:opacity-50"
+                >
+                  <Eye aria-hidden="true" className="h-3.5 w-3.5" />
+                  <span>Lihat Hasil Batch</span>
+                </button>
+              </div>
+            )}
             {/* Banner Mode Antrean Multi-Video (hanya tampil saat 2+ video aktif) */}
             {batchModeInfo && batchModeInfo.totalCount > 1 && (
               <div
@@ -476,7 +484,7 @@ export function FeatureTabs({
                       type="button"
                       disabled={disabled}
                       onClick={() => onViewStepResult(activeStep.id)}
-                      className="inline-flex min-h-9 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3 py-1.5 text-xs font-bold text-emerald-900 shadow-2xs transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3.5 py-2 text-xs font-bold text-emerald-900 transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Eye aria-hidden="true" className="h-3.5 w-3.5" />
                       <span>Lihat Hasil</span>
@@ -485,7 +493,7 @@ export function FeatureTabs({
                       type="button"
                       disabled={disabled}
                       onClick={() => onRemoveStep(activeStep.id)}
-                      className="inline-flex min-h-9 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3.5 py-2 text-xs font-bold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
                       <span>Hapus Efek</span>
@@ -519,7 +527,7 @@ export function FeatureTabs({
                         type="button"
                         disabled={disabled}
                         onClick={() => onRemoveStep(convertStep.id)}
-                        className="inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold text-amber-950 shadow-2xs transition-colors hover:bg-amber-100 disabled:opacity-50"
+                        className="inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-amber-400 bg-white px-3.5 py-2 text-xs font-bold text-amber-950 transition-colors hover:bg-amber-100 disabled:opacity-50"
                       >
                         <Trash2 aria-hidden="true" className="h-3.5 w-3.5 text-rose-600" />
                         <span>Hapus Tahap Ubah Ekstensi</span>
@@ -531,7 +539,7 @@ export function FeatureTabs({
                       type="button"
                       disabled={disabled}
                       onClick={() => onTabChange('convert')}
-                      className="inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold text-amber-950 shadow-2xs transition-colors hover:bg-amber-100 disabled:opacity-50"
+                      className="inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-amber-400 bg-white px-3.5 py-2 text-xs font-bold text-amber-950 transition-colors hover:bg-amber-100 disabled:opacity-50"
                     >
                       <ArrowLeftRight aria-hidden="true" className="h-3.5 w-3.5 text-blue-600" />
                       <span>Buka Tab Ubah Ekstensi</span>
@@ -621,9 +629,13 @@ export function FeatureTabs({
                       </span>
                     </div>
                     <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
-                      Mengubah MOV (termasuk rekaman iPhone) ke MP4 dalam hitungan detik tanpa
-                      menurunkan kualitas asli. Jika codec tidak cocok dengan wadah target,
-                      otomatis fallback ke re-encode H.264/AAC (preset{' '}
+                      {selectedVideoExtension
+                        ? `Mengubah .${selectedVideoExtension.toUpperCase()} ke .${outputFormat.toUpperCase()}`
+                        : `Mengubah format video ke .${outputFormat.toUpperCase()}`}{' '}
+                      tanpa re-encode (Mode Kilat) dalam hitungan detik tanpa menurunkan kualitas
+                      asli. Jika codec tidak cocok dengan wadah .{outputFormat.toUpperCase()},
+                      otomatis fallback ke re-encode{' '}
+                      {outputFormat === 'webm' ? 'VP8/Vorbis' : 'H.264/AAC'} (preset{' '}
                       <code className="rounded bg-white/80 px-1.5 py-0.5 font-mono font-semibold text-slate-800">
                         {isMobile ? 'ultrafast' : 'fast'}
                       </code>
@@ -780,7 +792,7 @@ export function FeatureTabs({
                     </span>
                     <span className="font-mono text-[11px] font-semibold text-orange-800">
                       CRF {enhanceOptions.upscale1080p ? '23' : '22'} • preset{' '}
-                      {isMobile ? 'veryfast' : 'fast'} • tune fastdecode
+                      {isMobile ? 'veryfast' : 'fast'}
                     </span>
                   </div>
                   <div className="mt-2.5 grid grid-cols-3 gap-2">
@@ -845,14 +857,14 @@ export function FeatureTabs({
                           <select
                             aria-label="Pilih video referensi pratinjau warna"
                             disabled={disabled}
-                            value={batchModeInfo.previewIndex}
+                            value={batchModeInfo.previewItemId}
                             onChange={(e) =>
-                              batchModeInfo.onPreviewIndexChange(Number(e.target.value))
+                              batchModeInfo.onPreviewItemIdChange(e.target.value)
                             }
                             className="cursor-pointer rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[11px] font-bold text-white focus:outline-none focus:ring-1 focus:ring-sky-400 disabled:opacity-50"
                           >
-                            {batchModeInfo.items.map((bItem, idx) => (
-                              <option key={bItem.id} value={idx}>
+                            {batchModeInfo.items.map((bItem) => (
+                              <option key={bItem.id} value={bItem.id}>
                                 Video #{bItem.index}
                               </option>
                             ))}
@@ -1017,6 +1029,12 @@ export function FeatureTabs({
                         ? ` • Cap ≤ ${enhanceSizeEstimate.maxRateKbps}k`
                         : ' • Tanpa Cap'}
                     </p>
+                    {enhanceSizeEstimate.calibrationSamples !== undefined &&
+                      enhanceSizeEstimate.calibrationSamples > 0 && (
+                        <p className="mt-0.5 text-[10px] font-medium text-orange-700">
+                          Dikalibrasi dari {enhanceSizeEstimate.calibrationSamples} proses sebelumnya
+                        </p>
+                      )}
                   </div>
                 </div>
               )}
@@ -1042,12 +1060,19 @@ export function FeatureTabs({
             </div>
 
             {enhanceFilterChain.length > 0 ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600">
-                <span className="font-bold text-slate-800">Rantai filter aktif (-vf): </span>
-                <code className="font-mono font-medium text-orange-700 [overflow-wrap:anywhere]">
-                  {enhanceFilterChain.join(',')}
-                </code>
-              </div>
+              <details className="rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-600">
+                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-3.5 py-2.5 font-semibold text-slate-700 transition-colors hover:text-slate-900">
+                  <span>Lihat Detail Filter Teknis (-vf)</span>
+                  <span className="font-mono text-[11px] text-slate-500">
+                    {enhanceFilterChain.length} filter
+                  </span>
+                </summary>
+                <div className="border-t border-slate-200/80 px-3.5 py-2.5">
+                  <code className="font-mono font-medium text-orange-700 [overflow-wrap:anywhere]">
+                    {enhanceFilterChain.join(',')}
+                  </code>
+                </div>
+              </details>
             ) : (
               <p className="text-xs font-semibold text-amber-800">
                 Pilih minimal satu opsi (Penjernihan, Upscale 1080p, atau Filter Warna) untuk
@@ -1158,6 +1183,12 @@ export function FeatureTabs({
                       ? ` • Cap ≤ ${stabilizerSizeEstimate.maxRateKbps}k`
                       : ''}
                   </p>
+                  {stabilizerSizeEstimate.calibrationSamples !== undefined &&
+                    stabilizerSizeEstimate.calibrationSamples > 0 && (
+                      <p className="mt-0.5 text-[10px] font-medium text-cyan-800">
+                        Dikalibrasi dari {stabilizerSizeEstimate.calibrationSamples} proses sebelumnya
+                      </p>
+                    )}
                 </div>
               </div>
             )}
@@ -1172,12 +1203,17 @@ export function FeatureTabs({
               </span>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600">
-              <span className="font-bold text-slate-800">Rantai filter aktif (-vf): </span>
-              <code className="font-mono font-medium text-cyan-800 [overflow-wrap:anywhere]">
-                {stabilizerFilterChain.join(',')}
-              </code>
-            </div>
+            <details className="rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-600">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-3.5 py-2.5 font-semibold text-slate-700 transition-colors hover:text-slate-900">
+                <span>Lihat Detail Filter Teknis (-vf)</span>
+                <span className="font-mono text-[11px] text-slate-500">deshake</span>
+              </summary>
+              <div className="border-t border-slate-200/80 px-3.5 py-2.5">
+                <code className="font-mono font-medium text-cyan-800 [overflow-wrap:anywhere]">
+                  {stabilizerFilterChain.join(',')}
+                </code>
+              </div>
+            </details>
           </div>
         )}
 
@@ -1324,7 +1360,7 @@ export function FeatureTabs({
                     <button
                       type="button"
                       onClick={() => onTabChange('enhance')}
-                      className="inline-flex min-h-10 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-3.5 py-2 text-xs font-bold text-white transition-colors hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2"
+                      className="inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-3.5 py-2 text-xs font-bold text-white transition-colors hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2"
                     >
                       <span>Ke Jernihkan &amp; HD</span>
                       <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
@@ -1332,8 +1368,28 @@ export function FeatureTabs({
                   </div>
                 )}
 
-                <div>
-                  <span className="text-sm font-bold text-slate-900">Mode Mesin GPU</span>
+                <details
+                  open={!modelUrlValid || undefined}
+                  className="rounded-2xl border border-slate-200 bg-slate-50/70"
+                >
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-xs font-bold text-slate-800 transition-colors hover:text-slate-950">
+                    <span className="inline-flex items-center gap-2">
+                      <SlidersHorizontal aria-hidden="true" className="h-4 w-4 text-violet-600" />
+                      <span>Pengaturan Teknis AI</span>
+                    </span>
+                    <span className="rounded-full bg-white px-2.5 py-0.5 font-mono text-[11px] font-semibold text-violet-800 ring-1 ring-slate-200">
+                      {!aiWebGpuAvailable
+                        ? 'WebGL2 Shader'
+                        : aiSettings.enginePreference === 'webgpu-shader'
+                          ? 'WebGPU Shader'
+                          : aiSettings.enginePreference === 'webgl2-shader'
+                            ? 'WebGL2 Shader'
+                            : 'ONNX AI + Auto Fallback'}
+                    </span>
+                  </summary>
+                  <div className="flex flex-col gap-4 border-t border-slate-200/80 p-4">
+                    <div>
+                      <span className="text-sm font-bold text-slate-900">Mode Mesin GPU</span>
                   <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
                     {[
                       {
@@ -1520,6 +1576,8 @@ export function FeatureTabs({
                     </div>
                   </>
                 )}
+                  </div>
+                </details>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
@@ -1673,6 +1731,12 @@ export function FeatureTabs({
                             ? ` • Cap ≤ ${aiSizeEstimate.maxRateKbps}k`
                             : ' • Tanpa Cap'}
                         </p>
+                        {aiSizeEstimate.calibrationSamples !== undefined &&
+                          aiSizeEstimate.calibrationSamples > 0 && (
+                            <p className="mt-0.5 text-[10px] font-medium text-violet-700">
+                              Dikalibrasi dari {aiSizeEstimate.calibrationSamples} proses sebelumnya
+                            </p>
+                          )}
                       </div>
                     </div>
                   )}
@@ -1729,9 +1793,9 @@ export function FeatureTabs({
             batchPreviewControl={
               batchModeInfo && batchModeInfo.items.length > 1
                 ? {
-                    previewIndex: batchModeInfo.previewIndex,
+                    previewItemId: batchModeInfo.previewItemId,
                     items: batchModeInfo.items,
-                    onPreviewIndexChange: batchModeInfo.onPreviewIndexChange,
+                    onPreviewItemIdChange: batchModeInfo.onPreviewItemIdChange,
                   }
                 : null
             }

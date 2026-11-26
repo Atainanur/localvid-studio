@@ -11,7 +11,7 @@ import {
   type ChromaKeyOptions,
   type ChromaSpeedProfile,
 } from './chromaKeyConfig'
-import { toEvenDimension } from './videoProcessing'
+import { safeErrorMessage, safeStartsWith, toEvenDimension } from './videoProcessing'
 
 import type { WebCodecsFrameReader } from './webCodecsFrameReader'
 
@@ -57,8 +57,8 @@ function buildRmbgProcessorConfig(inferSize: number) {
 const MODEL_FETCH_TIMEOUT_MS = 15000
 const SEEK_TIMEOUT_MS = 3500
 const PREVIEW_MAX_SIDE_PX = 640
-/** Resolusi kerja mask maksimal 384px sisi terpanjang (< 1 ms cleanup & minim GPU-CPU readback) */
-const MASK_WORK_MAX_SIDE_PX = 384
+/** [BUG-4R-05c] Resolusi kerja mask maksimal 320px sisi terpanjang (< 1 ms cleanup + closing & minim readback) */
+const MASK_WORK_MAX_SIDE_PX = 320
 /** Ambang benchmark WebGPU (ms): jika lebih lambat, uji Multi-Thread WASM SIMD q8 */
 const WEBGPU_SLOW_BENCHMARK_MS = 2500
 
@@ -1611,12 +1611,35 @@ function compositeProbBufferToOutput(
     }
   }
 
-  // 2. Morphological Cleanup (Opening 3x3: Erode lalu Dilate) + Hole-Fill interior (khusus Semua Objek)
+  // 2. [BUG-4R-05] Morphological Cleanup (Opening 3x3) + Morphological Closing 5x5 + Interior Hole-Fill
   if (options.maskCleanup && workW >= 4 && workH >= 4) {
+    // 2a. Opening 3x3 (erode -> dilate) melenyapkan bercak noise latar belakang
     erode3x3(activeAlpha, scratch.alphaTemp, spareAlpha, workW, workH)
     dilate3x3(spareAlpha, scratch.alphaTemp, activeAlpha, workW, workH)
+
     if (options.subjectMode === 'all-objects') {
+      // 2b. Morphological Closing 5x5 (2-pass dilate3x3 -> 2-pass erode3x3) menutup celah sempit / cekungan ukiran gelap
+      dilate3x3(activeAlpha, scratch.alphaTemp, spareAlpha, workW, workH)
+      dilate3x3(spareAlpha, scratch.alphaTemp, activeAlpha, workW, workH)
+      erode3x3(activeAlpha, scratch.alphaTemp, spareAlpha, workW, workH)
+      erode3x3(spareAlpha, scratch.alphaTemp, activeAlpha, workW, workH)
+
+      // 2c. 4-way edge flood-fill hole-fill pada mask utama yang sudah ditutup celahnya
       fillMaskHoles(activeAlpha, scratch.holeVisited, scratch.holeQueue, workW, workH)
+
+      // 2d. Pass hole-fill tambahan dengan ambang probabilitas lebih rendah (prob >= 0.22)
+      // khusus area interior yang dikelilingi foreground kuat agar cekungan ukiran pilar tidak bolong hijau
+      for (let i = 0; i < totalPixels; i += 1) {
+        spareAlpha[i] = activeAlpha[i] >= 128 || probBuffer[i] >= 0.22 ? 255 : 0
+      }
+      dilate3x3(spareAlpha, scratch.alphaTemp, scratch.holeVisited, workW, workH)
+      erode3x3(scratch.holeVisited, scratch.alphaTemp, spareAlpha, workW, workH)
+      fillMaskHoles(spareAlpha, scratch.holeVisited, scratch.holeQueue, workW, workH)
+      for (let i = 0; i < totalPixels; i += 1) {
+        if (scratch.holeVisited[i] === 0 && activeAlpha[i] < 255) {
+          activeAlpha[i] = 255
+        }
+      }
     }
   }
 
@@ -2100,23 +2123,26 @@ async function canvasToJpegUint8Array(canvas: HTMLCanvasElement): Promise<Uint8A
 }
 
 /**
- * [BUG-26NOV-05] Menghitung FPS & ETA memakai rolling average 5 frame terakhir,
- * mengabaikan 3 frame pertama (fase warmup) agar estimasi tidak melonjak 4-6x lipat di awal.
+ * [BUG-4R-09] Menghitung FPS & ETA akurat menggunakan MEDIAN dari 5 interval frame terakhir
+ * (tahan terhadap distorsi frame interpolasi cepat), lalu mulai frame ke-10 dipadukan dengan
+ * laju rata-rata aktual (elapsed / doneFrames * remaining) agar estimasi jujur dan stabil.
  */
 function formatLiveSpeedProgress(
   doneFrames: number,
   totalFrames: number,
-  recentFrameTimesMs: number[],
+  recentIntervalsMs: number[],
+  segStartedAtMs: number,
   modeTag: string,
   engineBadge: ChromaEngineBadge,
+  decoderNotice?: string,
 ): ChromaFrameProgress {
   const framePercent = Math.min(86, Math.round(12 + (doneFrames / totalFrames) * 74))
   const remaining = Math.max(0, totalFrames - doneFrames)
 
-  if (doneFrames < 3 || recentFrameTimesMs.length < 3) {
+  if (doneFrames < 3 || recentIntervalsMs.length < 2) {
     return {
       phase: 'segmenting',
-      label: `Frame ${doneFrames} / ${totalFrames} • Menghitung estimasi... (${modeTag})`,
+      label: `Segmentasi: menghitung estimasi... (Frame ${doneFrames} / ${totalFrames})`,
       currentFrame: doneFrames,
       totalFrames,
       percent: framePercent,
@@ -2124,31 +2150,46 @@ function formatLiveSpeedProgress(
       fpsSpeed: undefined,
       etaSeconds: null,
       modeTag,
+      decoderNotice,
     }
   }
 
-  const windowIntervals = recentFrameTimesMs.length - 1
-  const windowSec = Math.max(
-    0.05,
-    (recentFrameTimesMs[recentFrameTimesMs.length - 1] - recentFrameTimesMs[0]) / 1000,
-  )
-  const rollingFps = windowIntervals / windowSec
-  const etaSeconds =
-    remaining > 0 ? Math.max(1, Math.round(remaining / Math.max(0.05, rollingFps))) : 0
+  // Median dari 5 interval frame terakhir (ms)
+  const sorted = [...recentIntervalsMs].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  const medianMs =
+    sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+  const medianSecPerFrame = Math.max(0.01, medianMs / 1000)
 
-  const etaText = etaSeconds > 0 ? ` • Sisa ~${etaSeconds} detik` : ''
-  const speedText = ` • ${rollingFps.toFixed(1)} fps`
+  const elapsedSec = Math.max(0.05, (performance.now() - segStartedAtMs) / 1000)
+  const actualAvgSecPerFrame = elapsedSec / Math.max(1, doneFrames)
+
+  // Mulai frame ke-10 kombinasikan median interval dengan laju rata-rata aktual agar tidak optimistis 40%
+  const effectiveSecPerFrame =
+    doneFrames >= 10
+      ? Math.max(medianSecPerFrame * 0.45 + actualAvgSecPerFrame * 0.55, actualAvgSecPerFrame * 0.9)
+      : Math.max(medianSecPerFrame, actualAvgSecPerFrame * 0.85)
+
+  const effectiveFps = 1 / Math.max(0.01, effectiveSecPerFrame)
+  const etaSeconds =
+    remaining > 0 ? Math.max(1, Math.round(remaining * effectiveSecPerFrame)) : 0
+
+  const label =
+    etaSeconds > 0
+      ? `Segmentasi: sisa ~${etaSeconds} dtk (Frame ${doneFrames} / ${totalFrames})`
+      : `Segmentasi selesai (${doneFrames} / ${totalFrames} frame)`
 
   return {
     phase: 'segmenting',
-    label: `Frame ${doneFrames} / ${totalFrames}${speedText}${etaText} (${modeTag})`,
+    label,
     currentFrame: doneFrames,
     totalFrames,
     percent: framePercent,
     engineLabel: engineBadge,
-    fpsSpeed: Number(rollingFps.toFixed(1)),
+    fpsSpeed: Number(effectiveFps.toFixed(1)),
     etaSeconds,
     modeTag,
+    decoderNotice,
   }
 }
 
@@ -2171,7 +2212,7 @@ export async function runChromaKeyPipeline({
   onLog,
 }: RunChromaKeyParams): Promise<RunChromaKeyResult> {
   const tempFiles = new Set<string>([inputFileName, outputFileName])
-  const safeThreads = String(Math.max(1, Math.min(6, threads)))
+  const safeThreads = String(Math.max(1, Math.min(2, Math.floor(threads) || 1)))
   const maxDurationSec = getChromaMaxDurationSec(isMobile, options.subjectMode)
   const speedDef = getChromaSpeedProfileDef(options.speedProfile)
 
@@ -2318,8 +2359,12 @@ export async function runChromaKeyPipeline({
     scratch = createCompositorScratch(targetDims.width, targetDims.height)
     let loggedMaskInfo = false
     const segStartedAtMs = performance.now()
-    const recentFrameTimesMs: number[] = []
+    let lastFrameDoneMs = segStartedAtMs
+    const recentIntervalsMs: number[] = []
     let writtenFrames = 0
+    let decoderFallbackNotice: string | undefined = webCodecsReader
+      ? undefined
+      : 'Menggunakan decoder video bawaan browser (fallback otomatis)'
 
     const captureFrameToCanvas = async (
       frameIdx: number,
@@ -2341,10 +2386,11 @@ export async function runChromaKeyPipeline({
           if (signal.aborted || (wcErr instanceof DOMException && wcErr.name === 'AbortError')) {
             throw wcErr
           }
-          const reason = wcErr instanceof Error ? wcErr.message : String(wcErr)
+          const reason = safeErrorMessage(wcErr, 'Error decode WebCodecs')
           onLog(
             `[LocalVid Chroma] WebCodecs dialihkan otomatis ke decoder native <video> (${reason}).`,
           )
+          decoderFallbackNotice = 'Menggunakan decoder video bawaan browser (fallback otomatis)'
           webCodecsReader.dispose()
           webCodecsReader = null
         }
@@ -2374,12 +2420,23 @@ export async function runChromaKeyPipeline({
       tempFiles.add(outFrameName)
       await ffmpeg.writeFile(outFrameName, jpegBytes)
       writtenFrames += 1
-      recentFrameTimesMs.push(performance.now())
-      if (recentFrameTimesMs.length > 6) {
-        recentFrameTimesMs.shift()
+      const nowMs = performance.now()
+      const intervalMs = Math.max(1, nowMs - lastFrameDoneMs)
+      lastFrameDoneMs = nowMs
+      recentIntervalsMs.push(intervalMs)
+      if (recentIntervalsMs.length > 5) {
+        recentIntervalsMs.shift()
       }
       onProgress(
-        formatLiveSpeedProgress(writtenFrames, totalFrames, recentFrameTimesMs, modeTag, engineBadge),
+        formatLiveSpeedProgress(
+          writtenFrames,
+          totalFrames,
+          recentIntervalsMs,
+          segStartedAtMs,
+          modeTag,
+          engineBadge,
+          decoderFallbackNotice,
+        ),
       )
     }
 
@@ -2613,11 +2670,12 @@ export async function runChromaKeyPipeline({
 
     onProgress({
       phase: 'assembling',
-      label: `Merakit ulang ${totalFrames} frame menjadi MP4 (${targetDims.width}x${targetDims.height})...`,
+      label: 'Merakit video MP4...',
       currentFrame: totalFrames,
       totalFrames,
       percent: 88,
       engineLabel: engineBadge,
+      decoderNotice: decoderFallbackNotice,
     })
 
     onLog('[LocalVid Chroma] Menyalin trek audio asli & merakit video MP4 cepat...')
@@ -2652,8 +2710,6 @@ export async function runChromaKeyPipeline({
       'libx264',
       '-preset',
       assemblePreset,
-      '-tune',
-      'fastdecode',
       '-crf',
       assembleCrf,
     ]
@@ -2662,7 +2718,7 @@ export async function runChromaKeyPipeline({
       baseAssembleArgs.push('-maxrate', `${smartMaxRateKbps}k`, '-bufsize', `${smartMaxRateKbps * 2}k`)
     }
 
-    baseAssembleArgs.push('-pix_fmt', 'yuv420p', '-threads', safeThreads, '-filter_threads', safeThreads)
+    baseAssembleArgs.push('-pix_fmt', 'yuv420p', '-threads', safeThreads)
 
     let assembleExit = await ffmpeg.exec(
       [...baseAssembleArgs, '-c:a', 'copy', '-shortest', '-movflags', '+faststart', outputFileName],
@@ -2772,7 +2828,7 @@ export async function runChromaKeyPipeline({
       try {
         const entries = await ffmpeg.listDir('.')
         for (const entry of entries) {
-          if (!entry.isDir && entry.name.startsWith('chroma_out_') && entry.name.endsWith('.jpg')) {
+          if (!entry.isDir && safeStartsWith(entry.name, 'chroma_out_') && entry.name.endsWith('.jpg')) {
             tempFiles.add(entry.name)
           }
         }

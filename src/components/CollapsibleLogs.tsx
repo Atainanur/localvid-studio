@@ -10,26 +10,32 @@ import {
   Trash2,
 } from 'lucide-react'
 import type { PinnedLogSummary } from '../hooks/useFFmpeg'
-import { buildBrandedFilename } from '../utils/videoProcessing'
+import { buildBrandedFilename, safeStartsWith } from '../utils/videoProcessing'
 
 interface CollapsibleLogsProps {
   logs: string[]
   pinnedSummary: PinnedLogSummary
   isActive: boolean
   onClear: () => void
+  /** Increment angka ini untuk membuka & menggulir ke panel log secara terprogram */
+  openTrigger?: number
 }
 
+const ERROR_HIGHLIGHT_REGEX =
+  /(\bAborted\b|RuntimeError|worker sent an error|memory access out of bounds|function signature mismatch|\bError\b|Conversion failed|Invalid argument|No such filter|Cannot open|Failed to)/i
+
 /**
- * [BUG-05, NEW-03, NEW-09] Saring noise teknis bawaan FFmpeg.wasm / Emscripten di tampilan default:
- * 1. `[stderr] Aborted()` pasca-sukses Emscripten.
- * 2. Peringatan non-error `[swscaler ...]` (termasuk `deprecated pixel format used` dan
+ * [BUG-05, NEW-03, NEW-09, BUG-4R-12] Saring noise teknis bawaan FFmpeg.wasm di tampilan default:
+ * - Baris `Aborted` TIDAK lagi disembunyikan agar error WASM selalu terlihat & di-highlight merah.
+ * 1. Peringatan non-error `[swscaler ...]` (termasuk `deprecated pixel format used` dan
  *    `No accelerated colorspace conversion`), tanpa pernah membuang error asli.
- * 3. Baris progress yang diawali `frame=` (atau `[stderr] frame=`) dengan timestamp negatif (`time=-...`),
+ * 2. Baris progress yang diawali `frame=` (atau `[stderr] frame=`) dengan timestamp negatif (`time=-...`),
  *    tanpa pernah menyembunyikan baris error asli.
  */
 export function isNoisyTechnicalLogLine(line: string): boolean {
+  if (typeof line !== 'string') return false
   const trimmed = line.trim()
-  if (/^(\[stderr\]\s*)?Aborted\(\)$/i.test(trimmed)) return true
+  if (/\bAborted\b/i.test(trimmed)) return false
   if (
     /\[swscaler\b[^\]]*\]/i.test(trimmed) &&
     !/\b(error|failed|invalid|cannot|fatal)\b/i.test(trimmed)
@@ -47,10 +53,21 @@ export function CollapsibleLogs({
   pinnedSummary,
   isActive,
   onClear,
+  openTrigger = 0,
 }: CollapsibleLogsProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [showRawLogs, setShowRawLogs] = useState(false)
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const sectionRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (openTrigger > 0) {
+      setIsOpen(true)
+      window.setTimeout(() => {
+        sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }, 60)
+    }
+  }, [openTrigger])
 
   const { displayedLogs, hiddenNoiseCount } = useMemo(() => {
     if (showRawLogs) {
@@ -67,6 +84,22 @@ export function CollapsibleLogs({
     }
     return { displayedLogs: filtered, hiddenNoiseCount: hidden }
   }, [logs, showRawLogs])
+
+  const hasFailure = Boolean(
+    pinnedSummary.firstError || safeStartsWith(pinnedSummary.finalSummary, 'Gagal:'),
+  )
+
+  // [BUG-4R-12] Jika proses gagal, tampilkan otomatis 3 baris stderr terakhir sebagai konteks
+  const lastStderrContext = useMemo(() => {
+    if (!hasFailure) return []
+    const stderrLines = logs.filter(
+      (line) =>
+        typeof line === 'string' &&
+        (safeStartsWith(line.trim(), '[stderr]') || ERROR_HIGHLIGHT_REGEX.test(line)) &&
+        !isNoisyTechnicalLogLine(line),
+    )
+    return stderrLines.slice(-3)
+  }, [hasFailure, logs])
 
   const hasPinnedSummary = Boolean(
     pinnedSummary.command ||
@@ -117,6 +150,7 @@ export function CollapsibleLogs({
 
   return (
     <section
+      ref={sectionRef}
       aria-label="Log teknis FFmpeg"
       className="bento-card overflow-hidden rounded-2xl bg-white"
     >
@@ -237,14 +271,26 @@ export function CollapsibleLogs({
                 <span className="font-bold text-slate-400">Status / Ringkasan Akhir: </span>
                 <span>{resolvedPinned.finalSummary}</span>
               </div>
+              {hasFailure && lastStderrContext.length > 0 && (
+                <div className="mt-1 rounded-lg border border-rose-800/70 bg-rose-950/60 p-2 text-rose-200">
+                  <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-rose-300">
+                    Konteks {lastStderrContext.length} Baris Stderr Terakhir
+                  </div>
+                  {lastStderrContext.map((ctxLine, idx) => (
+                    <div key={`ctx-${idx}`} className="py-0.5 text-[11px] [overflow-wrap:anywhere]">
+                      {ctxLine}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
           {!showRawLogs && hiddenNoiseCount > 0 && (
             <div className="border-b border-slate-800/80 bg-slate-900/60 px-4 py-1.5 text-[11px] text-slate-400">
-              Menyembunyikan {hiddenNoiseCount} baris noise teknis (Aborted, swscaler, timestamp
-              negatif). Aktifkan <strong className="text-slate-200">Tampilkan Log Mentah</strong>{' '}
-              untuk melihat seluruh output.
+              Menyembunyikan {hiddenNoiseCount} baris noise teknis (swscaler, timestamp negatif).
+              Aktifkan <strong className="text-slate-200">Tampilkan Log Mentah</strong> untuk
+              melihat seluruh output.
             </div>
           )}
 
@@ -258,14 +304,21 @@ export function CollapsibleLogs({
                 FFmpeg secara real-time.
               </p>
             ) : (
-              displayedLogs.map((line, index) => (
-                <div
-                  key={`${index}-${line.slice(0, 12)}`}
-                  className="py-0.5 [overflow-wrap:anywhere]"
-                >
-                  {line}
-                </div>
-              ))
+              displayedLogs.map((line, index) => {
+                const isErrorLine = ERROR_HIGHLIGHT_REGEX.test(line)
+                return (
+                  <div
+                    key={`${index}-${line.slice(0, 12)}`}
+                    className={`py-0.5 [overflow-wrap:anywhere] ${
+                      isErrorLine
+                        ? 'my-0.5 rounded bg-rose-950/75 px-1.5 font-semibold text-rose-300 ring-1 ring-rose-800/70'
+                        : ''
+                    }`}
+                  >
+                    {line}
+                  </div>
+                )
+              })
             )}
           </div>
         </div>

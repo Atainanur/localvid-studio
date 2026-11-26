@@ -41,6 +41,45 @@ export interface SimpleSizeEstimate {
   maxEstimatedMB: number
   maxRateKbps?: number
   isOver3x: boolean
+  /** Jumlah sampel kalibrasi adaptif localStorage (0 bila belum dikalibrasi) */
+  calibrationSamples?: number
+  /** Catatan singkat jujur bila ukuran bisa sedikit naik (misal audio 192 kbps) */
+  note?: string
+}
+
+/**
+ * Helper aman membaca pesan error dari tipe error apa pun (Error, DOMException, ErrorEvent, string, unknown)
+ * tanpa risiko TypeError saat mengakses properti string seperti `.startsWith()`.
+ */
+export function safeErrorMessage(
+  err: unknown,
+  fallback = 'Terjadi kesalahan saat memproses video.',
+): string {
+  if (typeof err === 'string') {
+    const trimmed = err.trim()
+    return trimmed || fallback
+  }
+  if (err instanceof Error) {
+    const msg = typeof err.message === 'string' ? err.message.trim() : ''
+    return msg || fallback
+  }
+  if (err && typeof err === 'object') {
+    const record = err as Record<string, unknown>
+    if (typeof record.message === 'string' && record.message.trim()) {
+      return record.message.trim()
+    }
+    if (typeof record.reason === 'string' && record.reason.trim()) {
+      return record.reason.trim()
+    }
+    if (record.error instanceof Error && typeof record.error.message === 'string' && record.error.message.trim()) {
+      return record.error.message.trim()
+    }
+  }
+  return fallback
+}
+
+export function safeStartsWith(value: unknown, prefix: string): boolean {
+  return typeof value === 'string' && value.startsWith(prefix)
 }
 
 export interface VideoMetadata {
@@ -165,8 +204,13 @@ export function isAudioOnlyResultFile(
   if (result.details.kind === 'audio-denoise' && result.details.outputMode === 'audio-mp3') {
     return true
   }
-  const mime = (result.mimeType || result.blob.type || '').toLowerCase()
-  return mime.startsWith('audio/') || result.fileName.toLowerCase().endsWith('.mp3')
+  const mime = typeof result.mimeType === 'string'
+    ? result.mimeType.toLowerCase()
+    : typeof result.blob?.type === 'string'
+      ? result.blob.type.toLowerCase()
+      : ''
+  const name = typeof result.fileName === 'string' ? result.fileName.toLowerCase() : ''
+  return safeStartsWith(mime, 'audio/') || name.endsWith('.mp3')
 }
 
 export function getChainStepSummary(result: Pick<ProcessedVideoResult, 'details'>): string {
@@ -439,18 +483,28 @@ function readSizeCalibrationStore(): Record<string, SizeCalibrationEntry> {
   }
 }
 
+export function getAdaptiveSizeCalibrationInfo(calibrationKey: string): {
+  factor: number
+  samples: number
+} {
+  if (!calibrationKey) return { factor: 1, samples: 0 }
+  const store = readSizeCalibrationStore()
+  const entry = store[calibrationKey]
+  if (!entry || typeof entry.factor !== 'number' || !Number.isFinite(entry.factor)) {
+    return { factor: 1, samples: 0 }
+  }
+  return {
+    factor: Math.min(SIZE_CALIBRATION_MAX, Math.max(SIZE_CALIBRATION_MIN, entry.factor)),
+    samples: typeof entry.samples === 'number' && entry.samples > 0 ? Math.floor(entry.samples) : 0,
+  }
+}
+
 /**
  * Mengambil faktor koreksi adaptif hasil kalibrasi localStorage per kunci tab/template.
  * Nilai selalu di-clamp aman pada rentang 0.55 - 1.75 (default 1.0).
  */
 export function getAdaptiveSizeFactor(calibrationKey: string): number {
-  if (!calibrationKey) return 1
-  const store = readSizeCalibrationStore()
-  const entry = store[calibrationKey]
-  if (!entry || typeof entry.factor !== 'number' || !Number.isFinite(entry.factor)) {
-    return 1
-  }
-  return Math.min(SIZE_CALIBRATION_MAX, Math.max(SIZE_CALIBRATION_MIN, entry.factor))
+  return getAdaptiveSizeCalibrationInfo(calibrationKey).factor
 }
 
 /**
@@ -737,7 +791,7 @@ export function buildConvertReencodeArgs(
   isMobile: boolean,
   threads = 2,
 ): string[] {
-  const safeThreads = String(Math.max(1, Math.min(6, threads)))
+  const safeThreads = String(Math.max(1, Math.min(2, Math.floor(threads) || 1)))
 
   if (targetFormat === 'webm') {
     return [
@@ -759,8 +813,6 @@ export function buildConvertReencodeArgs(
       isMobile ? '6' : '4',
       '-threads',
       safeThreads,
-      '-filter_threads',
-      safeThreads,
       '-c:a',
       'libvorbis',
       '-b:a',
@@ -781,15 +833,11 @@ export function buildConvertReencodeArgs(
     'libx264',
     '-preset',
     preset,
-    '-tune',
-    'fastdecode',
     '-crf',
     '23',
     '-pix_fmt',
     'yuv420p',
     '-threads',
-    safeThreads,
-    '-filter_threads',
     safeThreads,
     '-c:a',
     'aac',
@@ -814,7 +862,7 @@ export function buildCompressArgs(
 ): string[] {
   const selected =
     COMPRESSION_PRESETS.find((preset) => preset.id === presetId) ?? COMPRESSION_PRESETS[1]
-  const safeThreads = String(Math.max(1, Math.min(6, threads)))
+  const safeThreads = String(Math.max(1, Math.min(2, Math.floor(threads) || 1)))
 
   return [
     '-i',
@@ -827,15 +875,11 @@ export function buildCompressArgs(
     'libx264',
     '-preset',
     isMobile ? 'ultrafast' : 'veryfast',
-    '-tune',
-    'fastdecode',
     '-crf',
     String(selected.crf),
     '-pix_fmt',
     'yuv420p',
     '-threads',
-    safeThreads,
-    '-filter_threads',
     safeThreads,
     '-c:a',
     'aac',
@@ -855,13 +899,19 @@ export function buildEnhanceFilterChain(
   const srcW = videoDimensions?.width ?? null
   const srcH = videoDimensions?.height ?? null
 
-  // 1. Bersihkan noise terlebih dahulu sebelum upscale & sharpen
+  // 1. Bersihkan noise terlebih dahulu sebelum upscale & sharpen (lebih cepat pada resolusi asli)
   if (options.denoise) {
     filters.push('hqdn3d=1.5:1.5:6:6')
   }
 
   // 2. Upscale ke 1080p HD dengan angka lebar:tinggi genap yang dihitung di JavaScript
-  const scaleFlags = options.scaleAlgorithm || 'bicubic'
+  // Gunakan fast_bilinear saat Smart Cap ON & algoritma standar untuk percepatan ekstra 10-20%
+  const scaleFlags =
+    options.smartSizeCap && options.scaleAlgorithm === 'bilinear'
+      ? 'fast_bilinear'
+      : options.smartSizeCap && options.scaleAlgorithm === 'bicubic'
+        ? 'fast_bilinear'
+        : options.scaleAlgorithm || 'bicubic'
   if (options.upscale1080p) {
     const target = computeTarget1080pResolution(srcW, srcH)
     if (target) {
@@ -938,9 +988,30 @@ export function estimateEnhanceOutputSize(
 ): SimpleSizeEstimate | null {
   if (!sizeBytes || sizeBytes <= 0) return null
   const originalMB = sizeBytes / (1024 * 1024)
+  const hasAnyEnhanceFilter =
+    options.denoise ||
+    options.sharpen ||
+    options.colorFix ||
+    options.upscale1080p ||
+    options.colorFilter !== 'none'
+
+  // [BUG-4R-14a] Jika belum ada filter/upscale yang aktif, estimasi harus mendekati ukuran asli
+  if (!hasAnyEnhanceFilter) {
+    const nearMin = Number(Math.max(0.05, originalMB * 0.95).toFixed(2))
+    const nearMax = Number(Math.max(nearMin, originalMB * 1.05).toFixed(2))
+    return {
+      originalMB,
+      minEstimatedMB: nearMin,
+      maxEstimatedMB: nearMax,
+      isOver3x: false,
+      calibrationSamples: 0,
+    }
+  }
+
   const sourceTotalKbps = computeSourceKbps(sizeBytes, durationSec)
   const calibrationKey = `enhance:${options.upscale1080p ? '1080p' : 'native'}`
-  const adaptiveFactor = getAdaptiveSizeFactor(calibrationKey)
+  const calibration = getAdaptiveSizeCalibrationInfo(calibrationKey)
+  const adaptiveFactor = calibration.factor
   const isShortClip = Boolean(durationSec && durationSec > 0 && durationSec < 10)
 
   let pixelRatio = 1
@@ -969,7 +1040,7 @@ export function estimateEnhanceOutputSize(
     const estAudioKbps = sourceTotalKbps <= 600 ? 96 : 128
     const sourceVideoKbps = Math.max(150, sourceTotalKbps - estAudioKbps)
     // Upscale 1080p pada video pendek sering menyentuh burst VBV 1-pass (~1.2x maxrate)
-    const baseCrfFactor = options.upscale1080p ? 1.48 : 1.12
+    const baseCrfFactor = options.upscale1080p ? 1.48 : 1.08
     const shortVbvBurst = isShortClip && options.upscale1080p ? 1.24 : 1.06
     const rawProjectedVideoKbps = sourceVideoKbps * baseCrfFactor * pixelRatio * filterMultiplier
     const effectiveVideoKbps = maxRateKbps
@@ -979,9 +1050,13 @@ export function estimateEnhanceOutputSize(
     const audioOutKbps = 128
     const midMB =
       ((((effectiveVideoKbps + audioOutKbps) * durationSec) / 8192) * 1.05) * adaptiveFactor
-    const spread = isShortClip ? 0.32 : 0.22
+    const spread = isShortClip ? 0.28 : 0.2
     const minEst = Number(Math.max(0.1, midMB * (1 - spread)).toFixed(2))
-    const maxEst = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
+    const rawMax = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
+    const maxEst =
+      !options.upscale1080p && options.smartSizeCap
+        ? Number(Math.max(minEst, Math.min(rawMax, originalMB * 1.25)).toFixed(2))
+        : rawMax
 
     return {
       originalMB,
@@ -989,14 +1064,15 @@ export function estimateEnhanceOutputSize(
       maxEstimatedMB: maxEst,
       maxRateKbps,
       isOver3x: maxEst > originalMB * 3,
+      calibrationSamples: calibration.samples,
     }
   }
 
   const midMB = Math.max(
     0.1,
-    originalMB * pixelRatio * filterMultiplier * (options.upscale1080p ? 1.42 : 1.12) * adaptiveFactor,
+    originalMB * pixelRatio * filterMultiplier * (options.upscale1080p ? 1.42 : 1.08) * adaptiveFactor,
   )
-  const spread = isShortClip ? 0.32 : 0.22
+  const spread = isShortClip ? 0.28 : 0.2
   const minEst = Number(Math.max(0.1, midMB * (1 - spread)).toFixed(2))
   const maxEst = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
   return {
@@ -1005,6 +1081,7 @@ export function estimateEnhanceOutputSize(
     maxEstimatedMB: maxEst,
     maxRateKbps,
     isOver3x: maxEst > originalMB * 3,
+    calibrationSamples: calibration.samples,
   }
 }
 
@@ -1018,14 +1095,14 @@ export function buildEnhanceArgs(
   sourceInfo?: { sizeBytes: number | null; durationSec: number | null },
 ): string[] {
   const filterChain = buildEnhanceFilterChain(options, videoDimensions)
-  const safeThreads = String(Math.max(1, Math.min(6, threads)))
+  const safeThreads = String(Math.max(1, Math.min(2, Math.floor(threads) || 1)))
   const args = ['-i', inputName, '-map', '0:v:0', '-map', '0:a?']
 
   if (filterChain.length > 0) {
-    args.push('-filter_threads', safeThreads, '-vf', filterChain.join(','))
+    args.push('-vf', filterChain.join(','))
   }
 
-  // [BUG-10] Optimalkan encoder: CRF 22/23 + preset fast di Desktop (veryfast di Mobile) + opsional Smart Cap
+  // [BUG-10 & BUG-4R-01] Stabil di @ffmpeg/core-mt@0.12.6: tanpa flag filter-thread dan tanpa tune tambahan
   const crfValue = options.upscale1080p ? '23' : '22'
   const maxRateKbps = computeEnhanceSmartMaxRateKbps(
     options,
@@ -1038,8 +1115,6 @@ export function buildEnhanceArgs(
     'libx264',
     '-preset',
     isMobile ? 'veryfast' : 'fast',
-    '-tune',
-    'fastdecode',
     '-crf',
     crfValue,
   )
@@ -1130,7 +1205,8 @@ export function estimateStabilizerOutputSize(
   const originalMB = sizeBytes / (1024 * 1024)
   const sourceTotalKbps = computeSourceKbps(sizeBytes, durationSec)
   const maxRateKbps = computeStabilizerMaxRateKbps(sizeBytes, durationSec)
-  const adaptiveFactor = getAdaptiveSizeFactor(`stabilize:${level}`)
+  const calibration = getAdaptiveSizeCalibrationInfo(`stabilize:${level}`)
+  const adaptiveFactor = calibration.factor
   const isShortClip = Boolean(durationSec && durationSec > 0 && durationSec < 10)
 
   const shortSide =
@@ -1149,15 +1225,19 @@ export function estimateStabilizerOutputSize(
 
     const midMB =
       ((((cappedVideo + 128) * durationSec) / 8192) * 1.04) * adaptiveFactor
-    const spread = isShortClip ? 0.32 : 0.22
-    const minEst = Number(Math.max(0.1, midMB * (1 - spread)).toFixed(2))
-    const maxEst = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
+    const spread = isShortClip ? 0.25 : 0.18
+    const minEst = Number(Math.max(0.1, Math.min(originalMB, midMB * (1 - spread))).toFixed(2))
+    // [BUG-4R-14b] Non-upscale: clamp batas atas agar masuk akal terhadap ukuran asli
+    const maxEst = Number(
+      Math.max(minEst, Math.min(originalMB * 1.15, midMB * (1 + spread))).toFixed(2),
+    )
     return {
       originalMB,
       minEstimatedMB: minEst,
       maxEstimatedMB: maxEst,
       maxRateKbps,
       isOver3x: maxEst > originalMB * 3,
+      calibrationSamples: calibration.samples,
     }
   }
 
@@ -1165,15 +1245,18 @@ export function estimateStabilizerOutputSize(
     0.1,
     originalMB * levelFactor * lowResFactor * shortClipFactor * adaptiveFactor,
   )
-  const spread = isShortClip ? 0.32 : 0.22
-  const minEst = Number(Math.max(0.1, midMB * (1 - spread)).toFixed(2))
-  const maxEst = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
+  const spread = isShortClip ? 0.25 : 0.18
+  const minEst = Number(Math.max(0.1, Math.min(originalMB, midMB * (1 - spread))).toFixed(2))
+  const maxEst = Number(
+    Math.max(minEst, Math.min(originalMB * 1.15, midMB * (1 + spread))).toFixed(2),
+  )
   return {
     originalMB,
     minEstimatedMB: minEst,
     maxEstimatedMB: maxEst,
     maxRateKbps,
     isOver3x: maxEst > originalMB * 3,
+    calibrationSamples: calibration.samples,
   }
 }
 
@@ -1187,7 +1270,7 @@ export function buildStabilizerArgs(
   sourceInfo?: { sizeBytes: number | null; durationSec: number | null },
 ): string[] {
   const filterChain = buildStabilizerFilterChain(level, videoDimensions)
-  const safeThreads = String(Math.max(1, Math.min(6, threads)))
+  const safeThreads = String(Math.max(1, Math.min(2, Math.floor(threads) || 1)))
   const maxRateKbps = computeStabilizerMaxRateKbps(
     sourceInfo?.sizeBytes,
     sourceInfo?.durationSec,
@@ -1200,16 +1283,12 @@ export function buildStabilizerArgs(
     '0:v:0',
     '-map',
     '0:a?',
-    '-filter_threads',
-    safeThreads,
     '-vf',
     filterChain.join(','),
     '-c:v',
     'libx264',
     '-preset',
     isMobile ? 'veryfast' : 'fast',
-    '-tune',
-    'fastdecode',
     '-crf',
     '22',
   ]

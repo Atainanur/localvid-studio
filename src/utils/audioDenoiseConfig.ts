@@ -113,16 +113,16 @@ export const AUDIO_DENOISE_PRESETS: ReadonlyArray<AudioDenoisePresetDef> = [
     id: 'strong',
     title: 'Kuat (Angin & Tiupan Mic)',
     shortLabel: 'Kuat',
-    badge: '2-Tahap • nr=42+24 dB • Anti-Angin',
+    badge: 'nr=32 dB • Anti-Angin Aman Vokal',
     description:
-      'Reduksi agresif 2-tahap + pemotong angin curam untuk tiupan langsung ke mikrofon, angin outdoor, atau bising berat.',
+      'Reduksi kuat 1-tahap cepat + pemotong gemuruh angin dengan Noise Gate lembut agar suara utama tetap jernih tanpa menjadi senyap.',
     params: {
-      nr: 42,
-      nf: -20,
-      highpassHz: 220,
-      lowpassHz: 7000,
+      nr: 32,
+      nf: -25,
+      highpassHz: 180,
+      lowpassHz: 9500,
       noiseGate: true,
-      twoStageWindReduction: true,
+      twoStageWindReduction: false,
       voiceClarity: true,
       autoLeveling: true,
       volumePercent: 100,
@@ -214,22 +214,23 @@ export function sanitizeAudioDenoiseOptions(options: AudioDenoiseOptions): Audio
 
 function resolveAgateFilter(opts: AudioDenoiseOptions): string {
   if (opts.preset === 'light') {
-    return 'agate=threshold=0.010:ratio=3:attack=15:release=200:range=0.1'
+    return 'agate=threshold=0.008:ratio=3:attack=15:release=200:range=0.12'
   }
   if (opts.preset === 'medium') {
-    return 'agate=threshold=0.018:ratio=5:attack=12:release=180:range=0.04'
+    return 'agate=threshold=0.012:ratio=4:attack=12:release=180:range=0.08'
   }
   if (opts.preset === 'strong') {
-    return 'agate=threshold=0.030:ratio=8:attack=10:release=160:range=0.01'
+    // [BUG-4R-25a] Ambang agate lebih lembut (0.008) agar suara manusia pelan tidak pernah terbungkam datar
+    return 'agate=threshold=0.008:ratio=4:attack=12:release=180:range=0.08'
   }
-  // Custom: sesuaikan agresivitas gate dengan kekuatan nr / mode 2-tahap
+  // Custom: sesuaikan agresivitas gate dengan kekuatan nr / mode 2-tahap tanpa membungkam vokal pelan
   if (opts.twoStageWindReduction || opts.nr >= 36) {
-    return 'agate=threshold=0.030:ratio=8:attack=10:release=160:range=0.01'
+    return 'agate=threshold=0.012:ratio=5:attack=10:release=170:range=0.06'
   }
   if (opts.nr <= 20) {
-    return 'agate=threshold=0.010:ratio=3:attack=15:release=200:range=0.1'
+    return 'agate=threshold=0.008:ratio=3:attack=15:release=200:range=0.12'
   }
-  return 'agate=threshold=0.018:ratio=5:attack=12:release=180:range=0.04'
+  return 'agate=threshold=0.012:ratio=4:attack=12:release=180:range=0.08'
 }
 
 /**
@@ -337,18 +338,15 @@ export function buildAudioDenoiseArgs(
   outputName: string,
   options: AudioDenoiseOptions,
   inputExt?: string | null,
-  threads = 2,
+  _threads = 2,
 ): string[] {
+  void _threads
   const afChain = buildAudioDenoiseFilterChain(options)
   const target = resolveAudioDenoiseOutputTarget(options.outputMode, inputExt)
-  const safeThreads = String(Math.max(1, Math.min(6, threads)))
 
+  // [BUG-4R-01] Tanpa flag thread sebelum -i dan tanpa filter-thread ekstra (aman 100% di @ffmpeg/core-mt@0.12.6)
   if (options.outputMode === 'audio-mp3') {
     return [
-      '-threads',
-      safeThreads,
-      '-filter_threads',
-      safeThreads,
       '-i',
       inputName,
       '-vn',
@@ -365,10 +363,6 @@ export function buildAudioDenoiseArgs(
   }
 
   const args = [
-    '-threads',
-    safeThreads,
-    '-filter_threads',
-    safeThreads,
     '-i',
     inputName,
     '-map',
@@ -405,13 +399,9 @@ export function buildAudioDenoiseFallbackArgs(
   threads = 2,
 ): string[] {
   const afChain = buildAudioDenoiseFilterChain(options)
-  const safeThreads = String(Math.max(1, Math.min(6, threads)))
+  const safeThreads = String(Math.max(1, Math.min(2, Math.floor(threads) || 1)))
 
   return [
-    '-threads',
-    safeThreads,
-    '-filter_threads',
-    safeThreads,
     '-i',
     inputName,
     '-map',
@@ -422,8 +412,6 @@ export function buildAudioDenoiseFallbackArgs(
     'libx264',
     '-preset',
     isMobile ? 'veryfast' : 'fast',
-    '-tune',
-    'fastdecode',
     '-crf',
     '22',
     '-pix_fmt',
@@ -481,13 +469,14 @@ export function estimateAudioDenoiseSize(
     }
   }
 
-  const minEst = Number(Math.max(0.05, originalMB * 0.95).toFixed(2))
-  const maxEst = Number(Math.max(minEst, originalMB * 1.08).toFixed(2))
+  const minEst = Number(Math.max(0.05, originalMB * 0.98).toFixed(2))
+  const maxEst = Number(Math.max(minEst, originalMB * 1.12).toFixed(2))
   return {
     originalMB,
     minEstimatedMB: minEst,
     maxEstimatedMB: maxEst,
     isOver3x: false,
+    note: 'Ukuran dapat sedikit naik karena audio diekspor ke 192 kbps.',
   }
 }
 

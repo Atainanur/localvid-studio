@@ -40,6 +40,7 @@ import {
 interface UploadZoneProps {
   selectedVideo: SelectedVideo | null
   batchItems: readonly BatchQueueItem[]
+  batchPreValidationMap?: ReadonlyMap<string, string>
   isBatchMode: boolean
   isBatchRunning: boolean
   pipelineSteps: readonly EditPipelineStep[]
@@ -89,6 +90,7 @@ function getBatchStatusBadge(status: BatchItemStatus, progress: number) {
 export function UploadZone({
   selectedVideo,
   batchItems,
+  batchPreValidationMap,
   isBatchMode,
   isBatchRunning,
   pipelineSteps,
@@ -257,8 +259,8 @@ export function UploadZone({
             </h2>
             <p className="mt-1.5 max-w-md text-sm leading-relaxed text-slate-600">
               {isMobile
-                ? 'Langsung diolah 100% lokal di perangkat Anda, cepat, ringan, dan bebas unggah ke server.'
-                : 'Pilih 1 video untuk mode edit berantai atau hingga 5 video sekaligus untuk antrean render otomatis 1 per 1.'}
+                ? `Langsung diolah 100% lokal di perangkat Anda, cepat, ringan, dan bisa hingga ${maxBatchCount} video sekaligus.`
+                : `Pilih 1 video untuk Mode Tunggal atau hingga ${maxBatchCount} video sekaligus untuk Mode Antrean otomatis 1 per 1.`}
             </p>
 
             <button
@@ -298,21 +300,15 @@ export function UploadZone({
               : 'border-slate-200/90 bg-white'
           }`}
         >
-          {/* Header Antrean */}
+          {/* [UX #24 & BUG-4R-16] Header Antrean 1 Baris Ringkas & Tenang */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white shadow-2xs">
-                <Layers aria-hidden="true" className="h-3.5 w-3.5" />
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50/90 px-3 py-1.5 text-xs font-bold text-blue-900 tabular-nums">
+                <Layers aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-blue-600" />
                 <span>
-                  Antrean {batchItems.length} / {maxBatchCount} Video
+                  Antrean {batchItems.length}/{maxBatchCount} • Total{' '}
+                  {formatFileSizeMB(totalBatchBytes)} • Render 1 per 1
                 </span>
-              </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 font-mono text-xs font-semibold text-slate-700 ring-1 ring-slate-200 tabular-nums">
-                <HardDrive aria-hidden="true" className="h-3.5 w-3.5 text-blue-600" />
-                <span>Total {formatFileSizeMB(totalBatchBytes)}</span>
-              </span>
-              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-200">
-                Render 1 per 1 Hemat RAM
               </span>
             </div>
 
@@ -322,7 +318,7 @@ export function UploadZone({
                   type="button"
                   onClick={openAddMorePicker}
                   disabled={disabled || isBatchRunning}
-                  className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-xs font-bold text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                  className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 transition-colors hover:border-blue-300 hover:bg-blue-50/70 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
                 >
                   <Plus aria-hidden="true" className="h-4 w-4" />
                   <span>Tambah Video</span>
@@ -343,7 +339,16 @@ export function UploadZone({
           {/* Daftar Baris Antrean (Ringan, 0 <video>, area sentuh tombol hapus >= 44x44px) */}
           <ul className="mt-3.5 flex flex-col gap-2" aria-label="Daftar antrean video">
             {batchItems.map((item) => {
-              const badge = getBatchStatusBadge(item.status, item.progress)
+              const preSkipReason =
+                item.status === 'pending' && !isBatchRunning
+                  ? batchPreValidationMap?.get(item.id)
+                  : undefined
+              const badge = preSkipReason
+                ? {
+                    label: 'Akan dilewati',
+                    className: 'bg-amber-50 text-amber-800 ring-amber-200',
+                  }
+                : getBatchStatusBadge(item.status, item.progress)
               return (
                 <li
                   key={item.id}
@@ -354,7 +359,7 @@ export function UploadZone({
                         ? 'border-emerald-200 bg-emerald-50/40'
                         : item.status === 'error'
                           ? 'border-rose-200 bg-rose-50/50'
-                          : item.status === 'skipped'
+                          : item.status === 'skipped' || preSkipReason
                             ? 'border-amber-200 bg-amber-50/50'
                             : 'border-slate-200/90 bg-slate-50/70'
                   }`}
@@ -413,13 +418,13 @@ export function UploadZone({
                         )}
                       </div>
 
-                      {item.errorMessage && (
+                      {(item.errorMessage || preSkipReason) && (
                         <p
                           className={`mt-1 text-[11px] font-medium leading-snug ${
                             item.status === 'error' ? 'text-rose-700' : 'text-amber-800'
                           }`}
                         >
-                          {item.errorMessage}
+                          {item.errorMessage || preSkipReason}
                         </p>
                       )}
                     </div>
@@ -519,8 +524,8 @@ export function UploadZone({
                 type="button"
                 onClick={openAddMorePicker}
                 disabled={disabled}
-                title={`Tambah video ke-2 atau lebih untuk antrean (maks ${maxBatchCount} video)`}
-                className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-xs font-bold text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                title={`Tambah video ke-2 atau lebih untuk Mode Antrean (maks ${maxBatchCount} video)`}
+                className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 transition-colors hover:border-blue-300 hover:bg-blue-50/70 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
               >
                 <Plus aria-hidden="true" className="h-4 w-4" />
                 <span>Tambah Video</span>
@@ -529,7 +534,7 @@ export function UploadZone({
                 type="button"
                 onClick={openFilePicker}
                 disabled={disabled}
-                className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-700 transition-[background-color,border-color,color] duration-150 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-[background-color,border-color,color] duration-150 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
               >
                 <Replace aria-hidden="true" className="h-4 w-4" />
                 <span>Ganti Video</span>
@@ -547,11 +552,11 @@ export function UploadZone({
             </div>
           </div>
 
-          {/* Bar Alur Edit Ringkas (klik chip pindah ke tab, klik X hapus efek) */}
+          {/* Bar Langkah Edit Ringkas (klik chip pindah ke tab, klik X hapus efek dengan target sentuh 44px) */}
           {pipelineSteps.length > 0 && (
             <div className="animate-lv-fade-up mt-3.5 flex flex-col gap-2.5 border-t border-slate-200/80 pt-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
-                <span className="font-bold text-slate-700">Alur Edit:</span>
+                <span className="font-bold text-slate-700">Langkah Edit:</span>
                 <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-700 ring-1 ring-slate-200/80">
                   Video Asli
                 </span>
@@ -571,8 +576,8 @@ export function UploadZone({
                           type="button"
                           disabled={disabled}
                           onClick={() => onSelectStepTab(step.tabId)}
-                          title={`Buka tab ${step.tabLabel} (Tahap ke-${idx + 1}: ${step.summary})`}
-                          className="inline-flex cursor-pointer touch-manipulation items-center gap-1 rounded-l-full py-1 pl-2.5 pr-1.5 font-semibold transition-colors hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                          title={`Buka tab ${step.tabLabel} (Langkah ke-${idx + 1}: ${step.summary})`}
+                          className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1 rounded-l-full py-1 pl-3 pr-1.5 font-semibold transition-colors hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           <Check
                             aria-hidden="true"
@@ -586,9 +591,9 @@ export function UploadZone({
                           onClick={() => onRemoveStep(step.id)}
                           aria-label={`Hapus efek ${step.tabLabel}`}
                           title={`Hapus efek ${step.tabLabel}`}
-                          className="inline-flex h-6 w-6 cursor-pointer touch-manipulation items-center justify-center rounded-r-full pr-1 text-slate-400 transition-colors hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex min-h-11 min-w-11 -mr-1 cursor-pointer touch-manipulation items-center justify-center rounded-r-full text-slate-400 transition-colors hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          <X aria-hidden="true" className="h-3 w-3" />
+                          <X aria-hidden="true" className="h-3.5 w-3.5" />
                         </button>
                       </span>
                     </span>
@@ -600,7 +605,7 @@ export function UploadZone({
                 type="button"
                 onClick={onRevertToOriginal}
                 disabled={disabled}
-                className="inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 self-start rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 transition-colors hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
+                className="inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 self-start rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 transition-colors hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
               >
                 <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
                 <span>Reset ke Video Asli</span>

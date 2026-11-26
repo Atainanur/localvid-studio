@@ -472,6 +472,12 @@ export function CompressTabPanel({
                     Target bitrate otomatis: {sizeEstimate.targetVideoBitrateKbps} kbps
                   </p>
                 )}
+                {sizeEstimate.calibrationSamples !== undefined &&
+                  sizeEstimate.calibrationSamples > 0 && (
+                    <p className="mt-0.5 text-[10px] font-medium text-emerald-700">
+                      Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
+                    </p>
+                  )}
               </div>
             </div>
           ) : (
@@ -882,6 +888,12 @@ export function CompressTabPanel({
                     ? ` • Trim ${trim.effectiveDurationSec.toFixed(1)} dtk`
                     : ''}
                 </p>
+                {sizeEstimate.calibrationSamples !== undefined &&
+                  sizeEstimate.calibrationSamples > 0 && (
+                    <p className="mt-0.5 text-[10px] font-medium text-emerald-700">
+                      Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
+                    </p>
+                  )}
               </div>
             </div>
           )}

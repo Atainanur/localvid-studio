@@ -593,36 +593,50 @@ export function AudioDenoiseTabPanel({
                   ? 'MP3 192 kbps (Audio Saja)'
                   : `Video Copy (-c:v copy) • ${outputTarget.codecLabel}`}
               </p>
+              {sizeEstimate.note && (
+                <p className="mt-1 text-[11px] text-slate-500">{sizeEstimate.note}</p>
+              )}
             </div>
           </div>
         )}
 
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-bold text-slate-800">Rantai filter audio aktif (-af)</span>
-            <button
-              type="button"
-              onClick={() => void handleCopyFilterChain()}
-              aria-label="Salin rantai filter audio"
-              className="inline-flex min-h-7 shrink-0 cursor-pointer touch-manipulation items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 transition-colors hover:border-fuchsia-300 hover:bg-fuchsia-50 hover:text-fuchsia-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-600"
-            >
-              {copiedChain ? (
-                <>
-                  <Check aria-hidden="true" className="h-3 w-3 text-emerald-600" />
-                  <span className="text-emerald-700">Tersalin</span>
-                </>
-              ) : (
-                <>
-                  <Copy aria-hidden="true" className="h-3 w-3" />
-                  <span>Salin</span>
-                </>
-              )}
-            </button>
+        <p className="text-xs text-slate-500">
+          Grafik perbandingan audio Before &amp; After akan muncul otomatis setelah proses selesai.
+        </p>
+
+        {/* [UX #23] Lipat detail filter teknis ke accordion default tertutup agar tampilan tenang */}
+        <details className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600">
+          <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 font-semibold text-slate-700 select-none hover:text-slate-950">
+            <span>Lihat Detail Filter Teknis</span>
+            <span className="font-mono text-[11px] text-slate-400">({afChain.length} filter)</span>
+          </summary>
+          <div className="mt-2.5 border-t border-slate-200/80 pt-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-800">Rantai filter audio aktif (-af)</span>
+              <button
+                type="button"
+                onClick={() => void handleCopyFilterChain()}
+                aria-label="Salin rantai filter audio"
+                className="inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition-colors hover:border-fuchsia-300 hover:bg-fuchsia-50 hover:text-fuchsia-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-600"
+              >
+                {copiedChain ? (
+                  <>
+                    <Check aria-hidden="true" className="h-3 w-3 text-emerald-600" />
+                    <span className="text-emerald-700">Tersalin</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy aria-hidden="true" className="h-3 w-3" />
+                    <span>Salin</span>
+                  </>
+                )}
+              </button>
+            </div>
+            <div className="mt-1.5 overflow-x-auto whitespace-nowrap rounded-lg border border-slate-200/80 bg-white px-2.5 py-1.5 font-mono text-xs font-medium text-fuchsia-800">
+              <code>{afChainString}</code>
+            </div>
           </div>
-          <div className="mt-1.5 overflow-x-auto whitespace-nowrap rounded-lg border border-slate-200/80 bg-white px-2.5 py-1.5 font-mono text-xs font-medium text-fuchsia-800">
-            <code>{afChainString}</code>
-          </div>
-        </div>
+        </details>
       </div>
     </div>
   )

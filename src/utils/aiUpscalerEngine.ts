@@ -1444,7 +1444,7 @@ export async function runAiUpscalePipeline({
   onLog,
 }: RunAiUpscaleParams): Promise<RunAiUpscaleResult> {
   const tempFiles = new Set<string>([inputFileName, outputFileName])
-  const safeThreads = String(Math.max(1, Math.min(6, threads)))
+  const safeThreads = String(Math.max(1, Math.min(2, Math.floor(threads) || 1)))
   const maxDurationSec = getAiMaxDurationSec(isMobile)
 
   let videoElement: HTMLVideoElement | null = null
@@ -1596,6 +1596,10 @@ export async function runAiUpscalePipeline({
       throw new Error('Tidak dapat membuat Canvas 2D untuk pembacaan frame.')
     }
 
+    let decoderFallbackNotice: string | undefined = webCodecsReader
+      ? undefined
+      : 'Menggunakan decoder video bawaan browser (fallback otomatis)'
+
     for (let index = 0; index < totalFrames; index += 1) {
       checkAborted(signal)
 
@@ -1610,6 +1614,7 @@ export async function runAiUpscalePipeline({
         totalFrames,
         percent: framePercent,
         fallbackNotice: enhancer.fallbackReason,
+        decoderNotice: decoderFallbackNotice,
       })
 
       let decodedByWebCodecs = false
@@ -1625,6 +1630,7 @@ export async function runAiUpscalePipeline({
           onLog(
             `[LocalVid AI] WebCodecs dialihkan otomatis ke decoder native <video> (${reason}).`,
           )
+          decoderFallbackNotice = 'Menggunakan decoder video bawaan browser (fallback otomatis)'
           webCodecsReader.dispose()
           webCodecsReader = null
         }
@@ -1711,8 +1717,6 @@ export async function runAiUpscalePipeline({
       'libx264',
       '-preset',
       assemblePreset,
-      '-tune',
-      'fastdecode',
       '-crf',
       assembleCrf,
     ]
@@ -1721,7 +1725,7 @@ export async function runAiUpscalePipeline({
       baseAssembleArgs.push('-maxrate', `${smartMaxRateKbps}k`, '-bufsize', `${smartMaxRateKbps * 2}k`)
     }
 
-    baseAssembleArgs.push('-pix_fmt', 'yuv420p', '-threads', safeThreads, '-filter_threads', safeThreads)
+    baseAssembleArgs.push('-pix_fmt', 'yuv420p', '-threads', safeThreads)
 
     let assembleExit = await ffmpeg.exec(
       [...baseAssembleArgs, '-c:a', 'copy', '-shortest', '-movflags', '+faststart', outputFileName],
@@ -1812,7 +1816,12 @@ export async function runAiUpscalePipeline({
       try {
         const entries = await ffmpeg.listDir('.')
         for (const entry of entries) {
-          if (!entry.isDir && entry.name.startsWith('ai_out_') && entry.name.endsWith('.jpg')) {
+          if (
+            !entry.isDir &&
+            typeof entry.name === 'string' &&
+            entry.name.startsWith('ai_out_') &&
+            entry.name.endsWith('.jpg')
+          ) {
             tempFiles.add(entry.name)
           }
         }

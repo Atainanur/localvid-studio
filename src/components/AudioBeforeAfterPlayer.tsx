@@ -6,6 +6,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react'
 import {
+  AlertTriangle,
   AudioLines,
   Info,
   Loader2,
@@ -33,6 +34,8 @@ interface DecodedWaveforms {
   beforeSkippedLarge: boolean
   afterSkippedLarge: boolean
   globalPeak: number
+  beforeMaxPeak: number
+  afterMaxPeak: number
 }
 
 interface EnvelopeDecodeOutcome {
@@ -234,6 +237,8 @@ export function AudioBeforeAfterPlayer({
     beforeSkippedLarge: false,
     afterSkippedLarge: false,
     globalPeak: 0.001,
+    beforeMaxPeak: 0,
+    afterMaxPeak: 0,
   })
   const [canvasResizeTick, setCanvasResizeTick] = useState(0)
 
@@ -280,6 +285,8 @@ export function AudioBeforeAfterPlayer({
             beforeSkippedLarge: false,
             afterSkippedLarge: false,
             globalPeak: 0.001,
+            beforeMaxPeak: 0,
+            afterMaxPeak: 0,
           })
           setIsDecodingWaveform(false)
         }
@@ -310,11 +317,9 @@ export function AudioBeforeAfterPlayer({
           setBeforeLoadError(true)
         }
 
-        const globalPeak = Math.max(
-          beforeDecoded?.maxPeak ?? 0,
-          afterDecoded.maxPeak ?? 0,
-          0.001,
-        )
+        const beforePeak = beforeDecoded?.maxPeak ?? 0
+        const afterPeak = afterDecoded.maxPeak ?? 0
+        const globalPeak = Math.max(beforePeak, afterPeak, 0.001)
 
         setWaveforms({
           beforeRaw: beforeDecoded?.bars ?? null,
@@ -322,6 +327,8 @@ export function AudioBeforeAfterPlayer({
           beforeSkippedLarge: Boolean(beforeDecoded?.skippedLarge),
           afterSkippedLarge: Boolean(afterDecoded.skippedLarge),
           globalPeak,
+          beforeMaxPeak: beforePeak,
+          afterMaxPeak: afterPeak,
         })
       } finally {
         try {
@@ -569,6 +576,16 @@ export function AudioBeforeAfterPlayer({
 
   const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0
 
+  // [BUG-4R-25b] Deteksi waveform After sangat pelan (< -55 dB ~ 0.00178) sementara Before normal (> -30 dB ~ 0.0316)
+  const beforeDb = waveforms.beforeMaxPeak > 0 ? 20 * Math.log10(waveforms.beforeMaxPeak) : -Infinity
+  const afterDb = waveforms.afterMaxPeak > 0 ? 20 * Math.log10(waveforms.afterMaxPeak) : -Infinity
+  const isAfterAudioTooQuiet =
+    !isDecodingWaveform &&
+    waveforms.beforeRaw !== null &&
+    waveforms.afterRaw !== null &&
+    beforeDb > -30 &&
+    afterDb < -55
+
   return (
     <div ref={stageWrapperRef} className="flex flex-col gap-3.5">
       {/* Media Audio Asli (Before) tersembunyi memakai elemen <audio> hemat CPU/RAM */}
@@ -659,6 +676,19 @@ export function AudioBeforeAfterPlayer({
             </span>
           </div>
         </>
+      )}
+
+      {isAfterAudioTooQuiet && (
+        <div
+          role="status"
+          className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-xs leading-relaxed text-amber-950"
+        >
+          <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <span>
+            Hasil audio terdengar sangat pelan. Coba preset Sedang atau Ringan agar suara utama
+            tetap jernih.
+          </span>
+        </div>
       )}
 
       {beforeLoadError && (

@@ -1,5 +1,5 @@
 import {
-  getAdaptiveSizeFactor,
+  getAdaptiveSizeCalibrationInfo,
   toEvenDimension,
   type SimpleSizeEstimate,
 } from './videoProcessing'
@@ -61,6 +61,8 @@ export interface ChromaFrameProgress {
   fpsSpeed?: number
   etaSeconds?: number | null
   modeTag?: string
+  /** [BUG-4R-13c] Catatan jujur bila menggunakan decoder native <video> (fallback otomatis) */
+  decoderNotice?: string
 }
 
 export interface ChromaTemplateDefinition {
@@ -94,7 +96,7 @@ export const CHROMA_SPEED_PROFILES: readonly ChromaSpeedProfileDef[] = [
     shortTag: 'AI Keyframe 3x',
     hint: '3x lebih cepat, interpolasi halus antar keyframe',
     keyframeStep: 3,
-    targetInferenceSize: 384,
+    targetInferenceSize: 512,
   },
   {
     id: 'balanced',
@@ -550,7 +552,8 @@ export function estimateChromaOutputSize(
 ): SimpleSizeEstimate | null {
   if (!sizeBytes || sizeBytes <= 0) return null
   const originalMB = sizeBytes / (1024 * 1024)
-  const adaptiveFactor = getAdaptiveSizeFactor(`auto-chroma:${options.bgMode}`)
+  const calibration = getAdaptiveSizeCalibrationInfo(`auto-chroma:${options.bgMode}`)
+  const adaptiveFactor = calibration.factor
 
   let pixelRatio = 1
   if (sourceDims?.width && sourceDims?.height) {
@@ -601,6 +604,7 @@ export function estimateChromaOutputSize(
       maxEstimatedMB: maxEst,
       maxRateKbps,
       isOver3x: maxEst > originalMB * 3,
+      calibrationSamples: calibration.samples,
     }
   }
 
@@ -616,6 +620,7 @@ export function estimateChromaOutputSize(
     maxEstimatedMB: maxEst,
     maxRateKbps,
     isOver3x: maxEst > originalMB * 3,
+    calibrationSamples: calibration.samples,
   }
 }
 

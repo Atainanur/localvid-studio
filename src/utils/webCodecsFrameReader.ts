@@ -155,9 +155,10 @@ function parseStsdCodec(
 
   if (entryType === 'avc1' || entryType === 'avc3') {
     const avcC = findBox(view, childStart, entry.end, 'avcC')
-    if (!avcC || avcC.dataStart + 4 > avcC.end) return null
+    if (!avcC || avcC.dataStart + 7 > avcC.end) return null
     const desc = bytes.slice(avcC.dataStart, avcC.end)
-    if (desc.byteLength < 4) return null
+    // Validasi header AVCDecoderConfigurationRecord (configurationVersion === 1, min 7 byte)
+    if (desc.byteLength < 7 || desc[0] !== 1) return null
     const profile = toHex2(desc[1])
     const compat = toHex2(desc[2])
     const level = toHex2(desc[3])
@@ -487,6 +488,9 @@ export async function tryCreateWebCodecsFrameReader(
 
     const support = await VideoDecoder.isConfigSupported(decoderConfig)
     if (signal.aborted || !support.supported) {
+      onLog?.(
+        `[LocalVid WebCodecs] Konfigurasi tidak didukung (${track.codec}, ${track.codedWidth}x${track.codedHeight}, desc=${track.description?.byteLength ?? 0}B). Menggunakan decoder video bawaan browser.`,
+      )
       return null
     }
 
@@ -495,6 +499,9 @@ export async function tryCreateWebCodecsFrameReader(
     let decoder: VideoDecoder | null = null
     let decoderError: Error | null = null
     let disposed = false
+    let hasLoggedActive = false
+    // [BUG-4R-13] VideoDecoder WAJIB menerima keyframe setelah configure() maupun setelah flush()
+    let needsKeyframe = true
 
     // Buffer kecil frame hasil decode yang belum dikonsumsi (selalu di-close saat diganti/dispose)
     const decodedQueue: VideoFrame[] = []
@@ -545,6 +552,7 @@ export async function tryCreateWebCodecsFrameReader(
         },
       })
       decoder.configure(decoderConfig)
+      needsKeyframe = true
       return decoder
     }
 
@@ -580,13 +588,20 @@ export async function tryCreateWebCodecsFrameReader(
 
     const feedSample = (dec: VideoDecoder, idx: number) => {
       const s = samples[idx]
+      const chunkType: EncodedVideoChunkType = s.isKey ? 'key' : 'delta'
+      if (needsKeyframe && chunkType !== 'key') {
+        throw new Error(
+          `Chunk pertama harus berupa keyframe (sample #${idx}, codec=${track.codec}).`,
+        )
+      }
       const chunk = new EncodedVideoChunk({
-        type: s.isKey ? 'key' : 'delta',
+        type: chunkType,
         timestamp: s.ptsUs,
         duration: s.durationUs,
         data: fileBytes.subarray(s.offset, s.offset + s.size),
       })
       dec.decode(chunk)
+      needsKeyframe = false
       lastFedSampleIdx = idx
     }
 
@@ -635,9 +650,10 @@ export async function tryCreateWebCodecsFrameReader(
       const targetSampleIdx = findBestSampleIndexForPts(targetUs)
       const targetPtsUs = samples[targetSampleIdx].ptsUs
 
-      let dec = ensureDecoder()
+      const dec = ensureDecoder()
       const keyIdx = findNearestPrecedingKeyframe(targetSampleIdx)
       const mustReset =
+        needsKeyframe ||
         lastFedSampleIdx < 0 ||
         targetSampleIdx <= lastFedSampleIdx ||
         keyIdx > lastFedSampleIdx
@@ -646,6 +662,7 @@ export async function tryCreateWebCodecsFrameReader(
         clearDecodedQueue()
         dec.reset()
         dec.configure(decoderConfig)
+        needsKeyframe = true
         lastFedSampleIdx = keyIdx - 1
       }
 
@@ -663,6 +680,7 @@ export async function tryCreateWebCodecsFrameReader(
       const needFlush = track.hasCtts || lookaheadEnd >= samples.length - 1
       if (needFlush) {
         await dec.flush()
+        needsKeyframe = true
       }
 
       let matchedFrame: VideoFrame | null = null
@@ -679,6 +697,7 @@ export async function tryCreateWebCodecsFrameReader(
         if (decodedQueue.length === 0) {
           if (dec.decodeQueueSize === 0 && !needFlush) {
             await dec.flush()
+            needsKeyframe = true
           }
           if (decodedQueue.length === 0) {
             if (dec.decodeQueueSize === 0) {
@@ -721,6 +740,13 @@ export async function tryCreateWebCodecsFrameReader(
       // WAJIB tutup setiap VideoFrame di blok finally agar 100% bebas kebocoran memori GPU/RAM
       try {
         ctx.drawImage(matchedFrame, 0, 0, dstW, dstH)
+        // [BUG-4R-13b] Hanya log status aktif SETELAH minimal 1 frame benar-benar sukses di-decode!
+        if (!hasLoggedActive) {
+          hasLoggedActive = true
+          onLog?.(
+            `[LocalVid WebCodecs] Decoder akselerasi aktif (${track.codec}, ${track.codedWidth}x${track.codedHeight}, ${samples.length} sample).`,
+          )
+        }
       } finally {
         matchedFrame.close()
       }
@@ -740,10 +766,6 @@ export async function tryCreateWebCodecsFrameReader(
       }
     }
 
-    onLog?.(
-      `[LocalVid WebCodecs] Decoder akselerasi aktif (${track.codec}, ${track.codedWidth}x${track.codedHeight}, ${samples.length} sample).`,
-    )
-
     return {
       codec: track.codec,
       width: track.codedWidth,
@@ -752,7 +774,11 @@ export async function tryCreateWebCodecsFrameReader(
       drawFrameAtTime,
       dispose,
     }
-  } catch {
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    onLog?.(
+      `[LocalVid WebCodecs] Gagal inisialisasi (${reason}). Menggunakan decoder video bawaan browser.`,
+    )
     return null
   }
 }

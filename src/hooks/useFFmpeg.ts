@@ -7,6 +7,7 @@ import {
   getRecommendedFFmpegThreads,
   type DeviceType,
 } from '../utils/environment'
+import { safeErrorMessage, safeStartsWith } from '../utils/videoProcessing'
 
 export type EngineMode = 'Multi-Thread' | 'Single-Thread Hemat RAM'
 
@@ -143,7 +144,31 @@ const DURATION_REGEX = /Duration:\s*(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/
 const TIME_REGEX = /time=(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/
 const FRAME_REGEX = /frame=\s*(\d+)/
 const FFMPEG_ERROR_LINE_REGEX =
-  /\b(Error\b|Invalid argument|Conversion failed|No such filter|Could not|Cannot open|Failed to|Unknown encoder|Unrecognized option)/i
+  /(RuntimeError|worker sent an error|memory access out of bounds|function signature mismatch|\bAborted\b|\bError\b|Invalid\b|Conversion failed|No such filter|Could not|Cannot open|Failed to|Unknown encoder|Unrecognized option)/i
+const WASM_FATAL_ERROR_REGEX =
+  /(RuntimeError|worker sent an error|memory access out of bounds|function signature mismatch|unreachable|out of memory|table index is out of bounds|\bAborted\(.+\))/i
+
+export function extractBestStderrError(logLines: readonly string[]): string | null {
+  for (const line of logLines) {
+    if (typeof line !== 'string') continue
+    if (WASM_FATAL_ERROR_REGEX.test(line)) {
+      return line.replace(/^\[stderr\]\s*/i, '').trim()
+    }
+  }
+  for (const line of logLines) {
+    if (typeof line !== 'string') continue
+    if (FFMPEG_ERROR_LINE_REGEX.test(line) && !/^(\[stderr\]\s*)?Aborted\(\)$/i.test(line.trim())) {
+      return line.replace(/^\[stderr\]\s*/i, '').trim()
+    }
+  }
+  for (const line of logLines) {
+    if (typeof line !== 'string') continue
+    if (/\bAborted\b/i.test(line)) {
+      return line.replace(/^\[stderr\]\s*/i, '').trim()
+    }
+  }
+  return null
+}
 
 const EMPTY_PINNED_SUMMARY: PinnedLogSummary = {
   command: null,
@@ -206,7 +231,7 @@ function clampProgress(rawProgress: number): number {
 function revokeBlobUrls(urls: Iterable<string>): number {
   let count = 0
   for (const url of urls) {
-    if (typeof url === 'string' && url.startsWith('blob:')) {
+    if (safeStartsWith(url, 'blob:')) {
       try {
         URL.revokeObjectURL(url)
         count += 1
@@ -241,6 +266,7 @@ export function useFFmpeg(): UseFFmpegReturn {
   const loadSessionIdRef = useRef(0)
   const abortControllerRef = useRef<AbortController | null>(null)
   const isMountedRef = useRef(true)
+  const workerCorruptedRef = useRef(false)
 
   // Pelacakan durasi & progres aktif untuk parser regex `time=HH:MM:SS.ms` dan `frame=N`
   const uploadedDurationRef = useRef<number | null>(null)
@@ -351,7 +377,7 @@ export function useFFmpeg(): UseFFmpegReturn {
   }, [])
 
   const registerBlobURL = useCallback((url: string) => {
-    if (url.startsWith('blob:')) {
+    if (safeStartsWith(url, 'blob:')) {
       trackedBlobUrlsRef.current.add(url)
     }
   }, [])
@@ -456,6 +482,12 @@ export function useFFmpeg(): UseFFmpegReturn {
   )
 
   const loadEngine = useCallback(async (): Promise<FFmpeg> => {
+    // [BUG-4R-01c] Auto-recovery: bila worker sebelumnya ditandai crash/korup, terminate & buat baru
+    if (workerCorruptedRef.current) {
+      workerCorruptedRef.current = false
+      terminateInternal('[LocalVid] Worker FFmpeg dipulihkan otomatis setelah error sebelumnya.')
+    }
+
     if (ffmpegRef.current && ffmpegRef.current.loaded) {
       return ffmpegRef.current
     }
@@ -483,13 +515,18 @@ export function useFFmpeg(): UseFFmpegReturn {
 
       ffmpeg.on('log', ({ type, message }) => {
         if (loadSessionIdRef.current !== sessionId) return
-        const formatted = type ? `[${type}] ${message}` : message
+        const rawMessage = typeof message === 'string' ? message : String(message ?? '')
+        const formatted = type ? `[${type}] ${rawMessage}` : rawMessage
         appendLog(formatted)
+
+        if (WASM_FATAL_ERROR_REGEX.test(rawMessage)) {
+          workerCorruptedRef.current = true
+        }
 
         if (!isExecutingRef.current) return
 
         // Tangkap baris Duration: untuk perhitungan progres & ringkasan log tersemat (BUG-04 & BUG-06)
-        const durationMatch = DURATION_REGEX.exec(message)
+        const durationMatch = DURATION_REGEX.exec(rawMessage)
         if (durationMatch) {
           const parsedDuration = parseTimestampToSeconds(
             durationMatch[1],
@@ -503,27 +540,27 @@ export function useFFmpeg(): UseFFmpegReturn {
             }
           }
           if (isMountedRef.current) {
-            const cleanDurationLine = message.trim()
+            const cleanDurationLine = rawMessage.trim()
             setPinnedLogSummary((prev) =>
-              prev.durationLine && !prev.durationLine.startsWith('Durasi sumber:')
+              prev.durationLine && !safeStartsWith(prev.durationLine, 'Durasi sumber:')
                 ? prev
                 : { ...prev, durationLine: cleanDurationLine },
             )
           }
         }
 
-        // Tangkap error pertama FFmpeg (abaikan "Aborted()" pasca-selesai Emscripten)
+        // [BUG-4R-03 & BUG-4R-12] Tangkap error pertama FFmpeg/WASM dari stderr secara prioritas
         if (
           isMountedRef.current &&
-          !/^Aborted\(\)$/i.test(message.trim()) &&
-          FFMPEG_ERROR_LINE_REGEX.test(message)
+          !/^Aborted\(\)$/i.test(rawMessage.trim()) &&
+          FFMPEG_ERROR_LINE_REGEX.test(rawMessage)
         ) {
-          const cleanErr = message.trim()
+          const cleanErr = rawMessage.trim()
           setPinnedLogSummary((prev) => (prev.firstError ? prev : { ...prev, firstError: cleanErr }))
         }
 
         // Tangkap nomor frame aktif & perbarui lastActivityAt hanya saat kemajuan nyata (BUG-04 & NEW-07)
-        const frameMatch = FRAME_REGEX.exec(message)
+        const frameMatch = FRAME_REGEX.exec(rawMessage)
         if (frameMatch && isMountedRef.current) {
           const parsedFrame = Number.parseInt(frameMatch[1], 10)
           if (Number.isFinite(parsedFrame) && parsedFrame > 0) {
@@ -533,7 +570,7 @@ export function useFFmpeg(): UseFFmpegReturn {
         }
 
         // Parser regex real-time `time=HH:MM:SS.ms` (abaikan timestamp negatif time=-577014:...)
-        const timeMatch = TIME_REGEX.exec(message)
+        const timeMatch = TIME_REGEX.exec(rawMessage)
         if (timeMatch) {
           const currentSec = parseTimestampToSeconds(timeMatch[1], timeMatch[2], timeMatch[3])
           if (currentSec >= 0) {
@@ -635,7 +672,7 @@ export function useFFmpeg(): UseFFmpegReturn {
             throw err
           }
 
-          const errMsg = err instanceof Error ? err.message : String(err)
+          const errMsg = safeErrorMessage(err, 'Gagal mengunduh file core FFmpeg.')
           appendLog(`[LocalVid] Gagal memuat dari ${cdn.name}: ${errMsg}`)
         }
       }
@@ -650,10 +687,10 @@ export function useFFmpeg(): UseFFmpegReturn {
         // Abaikan error
       }
 
-      const finalMessage =
-        lastError instanceof Error
-          ? lastError.message
-          : 'Gagal memuat engine FFmpeg dari seluruh CDN.'
+      const finalMessage = safeErrorMessage(
+        lastError,
+        'Gagal memuat engine FFmpeg dari seluruh CDN.',
+      )
 
       if (isMountedRef.current) {
         setIsLoaded(false)
@@ -672,7 +709,7 @@ export function useFFmpeg(): UseFFmpegReturn {
     })
 
     return loadTask
-  }, [appendLog, profile, updateProgressMonotonic])
+  }, [appendLog, profile, terminateInternal, updateProgressMonotonic])
 
   const terminate = useCallback(() => {
     terminateInternal('[LocalVid] Engine FFmpeg dihentikan (terminated) dan memori dibebaskan.')
@@ -787,10 +824,18 @@ export function useFFmpeg(): UseFFmpegReturn {
         })
       }
 
+      const logStartIndex = logsRef.current.length
+
       try {
         const exitCode = await ffmpeg.exec(args, timeoutMs, {
           signal: controller.signal,
         })
+
+        const runLogs = logsRef.current.slice(logStartIndex)
+        const stderrErr = exitCode !== 0 ? extractBestStderrError(runLogs) : null
+        const hitFatalWasm =
+          workerCorruptedRef.current ||
+          runLogs.some((line) => typeof line === 'string' && WASM_FATAL_ERROR_REGEX.test(line))
 
         if (isMountedRef.current) {
           if (exitCode === 0) {
@@ -799,6 +844,7 @@ export function useFFmpeg(): UseFFmpegReturn {
           }
           setPinnedLogSummary((prev) => ({
             ...prev,
+            firstError: prev.firstError ?? stderrErr,
             finalSummary:
               exitCode === 0
                 ? 'FFmpeg selesai sukses (kode keluar 0).'
@@ -806,18 +852,43 @@ export function useFFmpeg(): UseFFmpegReturn {
           }))
         }
 
+        // [BUG-4R-01c] Auto-recovery bila terjadi error WASM / exit tak terduga agar worker berikutnya selalu bersih
+        if (exitCode !== 0 && hitFatalWasm && !controller.signal.aborted) {
+          workerCorruptedRef.current = false
+          terminateInternal('[LocalVid] Worker FFmpeg dipulihkan otomatis setelah error sebelumnya.')
+        } else if (exitCode !== 0 && !controller.signal.aborted) {
+          // Tandai untuk dicek/dipulihkan bila terjadi Aborted pada akhir run
+          if (runLogs.some((line) => typeof line === 'string' && /\bAborted\b/i.test(line))) {
+            workerCorruptedRef.current = true
+          }
+        } else {
+          workerCorruptedRef.current = false
+        }
+
         return exitCode
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err)
-        if (isMountedRef.current && !controller.signal.aborted) {
-          setError(errMsg)
+        const runLogs = logsRef.current.slice(logStartIndex)
+        const stderrErr = extractBestStderrError(runLogs)
+        const errMsg = safeErrorMessage(err, 'Worker FFmpeg mengalami error runtime.')
+        const bestError = stderrErr ?? errMsg
+        const isAbort =
+          controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')
+
+        if (!isAbort) {
+          // [BUG-4R-01c] Auto-recovery: terminate worker rusak segera agar tidak memicu efek kaskade
+          workerCorruptedRef.current = false
+          terminateInternal('[LocalVid] Worker FFmpeg dipulihkan otomatis setelah error sebelumnya.')
+        }
+
+        if (isMountedRef.current && !isAbort) {
+          setError(bestError)
           setPinnedLogSummary((prev) => ({
             ...prev,
-            firstError: prev.firstError ?? errMsg,
-            finalSummary: `Gagal: ${errMsg}`,
+            firstError: prev.firstError ?? bestError,
+            finalSummary: `Gagal: ${bestError}`,
           }))
         }
-        throw err
+        throw new Error(bestError)
       } finally {
         isExecutingRef.current = false
         if (abortControllerRef.current === controller) {
@@ -828,7 +899,7 @@ export function useFFmpeg(): UseFFmpegReturn {
         }
       }
     },
-    [loadEngine],
+    [loadEngine, terminateInternal],
   )
 
   const getFFmpegInstance = useCallback(() => ffmpegRef.current, [])

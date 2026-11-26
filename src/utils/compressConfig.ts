@@ -1,6 +1,6 @@
 import {
   COMPRESSION_PRESETS,
-  getAdaptiveSizeFactor,
+  getAdaptiveSizeCalibrationInfo,
   toEvenDimension,
   type CompressionPresetId,
   type OutputFormat,
@@ -160,6 +160,7 @@ export interface SizeEstimate {
   sourceTotalKbps?: number
   savingsPercentMin: number
   savingsPercentMax: number
+  calibrationSamples?: number
 }
 
 export interface TrimValidation {
@@ -200,15 +201,15 @@ export const SOCIAL_TEMPLATES: ReadonlyArray<SocialTemplateDef> = [
     id: 'tiktok-reels',
     name: 'TikTok & Reels HD',
     shortLabel: 'TikTok / Reels',
-    badge: 'Maks 1080p • 30fps • CRF 20 • Anti-Burik',
-    description: 'MP4 H.264 maks 1080p (tanpa upscale), CRF 20 + Smart Bitrate Cap, +faststart.',
+    badge: 'Maks 1080p • FPS Asli • CRF 20 • Anti-Burik',
+    description: 'MP4 H.264 maks 1080p (tanpa upscale), FPS asli, CRF 20 + Smart Bitrate Cap, +faststart.',
   },
   {
     id: 'whatsapp',
     name: 'WhatsApp Status & Chat HD',
     shortLabel: 'WhatsApp HD',
-    badge: 'Maks 720p • 30fps • Target < 15 MB',
-    description: 'MP4 H.264 maks 720p, 30 fps, ukuran otomatis di bawah 15 MB agar tidak diburikkan WA.',
+    badge: 'Maks 720p • FPS Asli • Target < 15 MB',
+    description: 'MP4 H.264 maks 720p, FPS asli, ukuran otomatis di bawah 15 MB agar tidak diburikkan WA.',
   },
   {
     id: 'youtube',
@@ -221,14 +222,14 @@ export const SOCIAL_TEMPLATES: ReadonlyArray<SocialTemplateDef> = [
     id: 'instagram',
     name: 'Instagram Feed / Story',
     shortLabel: 'Instagram',
-    badge: 'Maks 1080p • 30fps • CRF 21 • H.264',
-    description: 'MP4 H.264 maks 1080p, 30 fps, CRF 21 + Smart Bitrate Cap, siap upload Feed & Story.',
+    badge: 'Maks 1080p • FPS Asli • CRF 21 • H.264',
+    description: 'MP4 H.264 maks 1080p, FPS asli, CRF 21 + Smart Bitrate Cap, siap upload Feed & Story.',
   },
   {
     id: 'discord',
     name: 'Discord Free (< 10 MB)',
     shortLabel: 'Discord <10MB',
-    badge: 'Maks 720p • 30fps • Target 9.5 MB',
+    badge: 'Maks 720p • FPS Asli • Target 9.5 MB',
     description: 'MP4 H.264 maks 720p dengan Custom Target Size otomatis ≤ 9.5 MB untuk upload gratis.',
   },
   {
@@ -1080,7 +1081,8 @@ export function estimateCompressedSize(
   const isShortClip = trim.effectiveDurationSec < 10
   const isAlreadyTightSource = Boolean(sourceProfile && sourceProfile.sourceTotalKbps < 1800)
   const calibrationKey = `compress:${options.socialTemplate}`
-  const adaptiveFactor = getAdaptiveSizeFactor(calibrationKey)
+  const calibration = getAdaptiveSizeCalibrationInfo(calibrationKey)
+  const adaptiveFactor = calibration.factor
 
   const crfBitrateScale = isAlreadyTightSource
     ? crf <= 18
@@ -1166,10 +1168,11 @@ export function estimateCompressedSize(
         8192) *
       containerOverhead
 
-    const minEst = Number(Math.max(0.1, rawMidMB * (1 - spread)).toFixed(2))
-    const maxEst = Number(
-      Math.max(minEst, Math.min(vbvMaxMB * 1.05, rawMidMB * (1 + spread))).toFixed(2),
-    )
+    const minEst = Number(Math.max(0.1, Math.min(originalMB, rawMidMB * (1 - spread))).toFixed(2))
+    const rawMaxEst = Math.min(vbvMaxMB * 1.05, rawMidMB * (1 + spread))
+    // [BUG-4R-14b] Non-upscale compress: clamp batas atas agar masuk akal terhadap ukuran input
+    const cappedMaxEst = pixelFactor <= 1.01 ? Math.min(originalMB, rawMaxEst) : rawMaxEst
+    const maxEst = Number(Math.max(minEst, cappedMaxEst).toFixed(2))
 
     return {
       mode: 'crf',
@@ -1180,6 +1183,7 @@ export function estimateCompressedSize(
       sourceTotalKbps: sourceProfile.sourceTotalKbps,
       savingsPercentMin: originalMB > 0 ? ((originalMB - maxEst) / originalMB) * 100 : 0,
       savingsPercentMax: originalMB > 0 ? ((originalMB - minEst) / originalMB) * 100 : 0,
+      calibrationSamples: calibration.samples,
     }
   }
 
@@ -1197,8 +1201,11 @@ export function estimateCompressedSize(
       audioFactor *
       adaptiveFactor,
   )
-  const minEst = Number(Math.max(0.1, midMB * (1 - spread)).toFixed(2))
-  const maxEst = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
+  const minEst = Number(Math.max(0.1, Math.min(originalMB, midMB * (1 - spread))).toFixed(2))
+  const rawMax = midMB * (1 + spread)
+  const maxEst = Number(
+    Math.max(minEst, pixelFactor <= 1.01 ? Math.min(originalMB, rawMax) : rawMax).toFixed(2),
+  )
 
   return {
     mode: 'crf',
@@ -1207,6 +1214,7 @@ export function estimateCompressedSize(
     maxEstimatedMB: maxEst,
     savingsPercentMin: originalMB > 0 ? ((originalMB - maxEst) / originalMB) * 100 : 0,
     savingsPercentMax: originalMB > 0 ? ((originalMB - minEst) / originalMB) * 100 : 0,
+    calibrationSamples: calibration.samples,
   }
 }
 
@@ -1321,6 +1329,8 @@ export function applySocialTemplate(
     aspectRatio: 'no-change',
   }
 
+  // [BUG-4R-02] Hindari memaksa filter `fps=30` pada seluruh template media sosial
+  // agar sumber <= 30 fps tidak memicu crash filter/encode di @ffmpeg/core-mt@0.12.6
   switch (templateId) {
     case 'tiktok-reels':
       return {
@@ -1331,7 +1341,7 @@ export function applySocialTemplate(
         resizeMode: 'resolution',
         resolutionPreset: '1080p',
         maxResolutionOnly: true,
-        frameRate: '30',
+        frameRate: 'no-change',
         audioBitrateKbps: 128,
       }
 
@@ -1344,7 +1354,7 @@ export function applySocialTemplate(
         resizeMode: 'resolution',
         resolutionPreset: '720p',
         maxResolutionOnly: true,
-        frameRate: '30',
+        frameRate: 'no-change',
         audioBitrateKbps: 128,
       }
     }
@@ -1371,7 +1381,7 @@ export function applySocialTemplate(
         resizeMode: 'resolution',
         resolutionPreset: '1080p',
         maxResolutionOnly: true,
-        frameRate: '30',
+        frameRate: 'no-change',
         audioBitrateKbps: 128,
       }
 
@@ -1384,7 +1394,7 @@ export function applySocialTemplate(
         resizeMode: 'resolution',
         resolutionPreset: '720p',
         maxResolutionOnly: true,
-        frameRate: '30',
+        frameRate: 'no-change',
         audioBitrateKbps: 128,
       }
     }
@@ -1421,6 +1431,39 @@ export interface BuildAdvancedCompressResult {
   usedSmartAudioCopy: boolean
 }
 
+/**
+ * [BUG-4R-02] Normalisasi tunggal CompressOptions untuk 1 video (dipakai 100% identik
+ * oleh mode Tunggal dan mode Antrean Batch agar argumen perintah selalu konsisten).
+ */
+export function resolveCompressOptionsForVideo(
+  options: CompressOptions,
+  originalSizeBytes: number,
+  sourceDurationSec: number | null,
+): CompressOptions {
+  if (options.socialTemplate !== 'custom') {
+    return applySocialTemplate(
+      options.socialTemplate,
+      options,
+      originalSizeBytes,
+      sourceDurationSec,
+    )
+  }
+  if (options.compressionMode === 'target-size') {
+    const trimCheck = validateTrimSettings(options.trimStart, options.trimEnd, sourceDurationSec)
+    const bounds = computeTargetSizeBounds(
+      originalSizeBytes,
+      trimCheck.effectiveDurationSec,
+      options.removeAudio,
+      sourceDurationSec !== null && sourceDurationSec > 0,
+    )
+    const clampedTarget = Number(
+      Math.min(bounds.maxMB, Math.max(bounds.minMB, options.targetSizeMB)).toFixed(1),
+    )
+    return { ...options, targetSizeMB: clampedTarget }
+  }
+  return options
+}
+
 export function buildAdvancedCompressArgs(
   inputName: string,
   outputName: string,
@@ -1432,7 +1475,8 @@ export function buildAdvancedCompressArgs(
   sourceDims: { width: number | null; height: number | null },
   sourceExtension?: string | null,
 ): BuildAdvancedCompressResult {
-  const safeThreads = Math.max(1, Math.min(6, threads))
+  // [BUG-4R-01] Batas aman encoder WASM MT: maks 2 thread tanpa flag filter-thread atau tune tambahan
+  const safeThreads = Math.max(1, Math.min(2, Math.floor(threads) || 1))
   const { videoCodec, audioCodec } = resolveCodecPair(options)
   const trim = validateTrimSettings(options.trimStart, options.trimEnd, sourceDurationSec)
   const crop = validateCropSettings(options, sourceDims.width, sourceDims.height)
@@ -1527,7 +1571,7 @@ export function buildAdvancedCompressArgs(
     // 6. format=yuv420p (wajib di akhir jika bukan mode Copy)
     vfChain.push('format=yuv420p')
 
-    args.push('-filter_threads', String(safeThreads), '-vf', vfChain.join(','))
+    args.push('-vf', vfChain.join(','))
 
     const audioKbps = getEffectiveAudioBitrateKbps(
       options,
@@ -1560,7 +1604,7 @@ export function buildAdvancedCompressArgs(
         : undefined
 
     if (videoCodec === 'libx264') {
-      args.push('-c:v', 'libx264', '-preset', x264Preset, '-tune', 'fastdecode')
+      args.push('-c:v', 'libx264', '-preset', x264Preset)
       if (isTargetSize && targetVideoBitrateKbps !== undefined && targetMaxRateKbps !== undefined) {
         args.push(
           '-b:v',

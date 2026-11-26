@@ -11,6 +11,7 @@ import {
   Info,
   Layers,
   Loader2,
+  RotateCcw,
   Share2,
   SlidersHorizontal,
   Sparkles,
@@ -40,6 +41,8 @@ interface BatchResultViewProps {
   isMobile: boolean
   deviceType: 'Desktop' | 'iOS' | 'Android'
   wasCancelledEarly: boolean
+  retryingItemId?: string | null
+  onRetryItem?: (itemId: string) => void
   onContinueBatchWithOutputs: () => void
   onEditSettings: () => void
   onChangeAllVideos: () => void
@@ -61,6 +64,8 @@ export function BatchResultView({
   isMobile,
   deviceType,
   wasCancelledEarly,
+  retryingItemId = null,
+  onRetryItem,
   onContinueBatchWithOutputs,
   onEditSettings,
   onChangeAllVideos,
@@ -182,7 +187,9 @@ export function BatchResultView({
         controller.signal,
       )
       if (!controller.signal.aborted) {
-        setDownloadAllStatus(`Selesai memicu ${triggered} unduhan!`)
+        setDownloadAllStatus(
+          `${triggered} unduhan telah dipicu, periksa folder Unduhan Anda (atau gunakan tombol unduh di tiap video bila ada yang terblokir)`,
+        )
       }
     } finally {
       setIsDownloadingAll(false)
@@ -226,35 +233,42 @@ export function BatchResultView({
           </div>
         </div>
 
-        {/* Ringkasan Ukuran Gabungan */}
+        {/* [BUG-4R-15a] Ringkasan Ukuran Gabungan dengan badge Hemat / Naik + konteks jelas */}
         {completedItems.length > 0 && (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white/90 px-3.5 py-2.5 text-xs ring-1 ring-emerald-200/80">
-            <div className="flex flex-wrap items-center gap-1.5 font-mono font-bold text-slate-800 tabular-nums">
-              <span className="font-sans text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Total Ukuran:
+          <div className="flex flex-col gap-1.5 rounded-xl bg-white/90 px-3.5 py-2.5 text-xs ring-1 ring-emerald-200/80">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1.5 font-mono font-bold text-slate-800 tabular-nums">
+                <span className="font-sans text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Total Ukuran:
+                </span>
+                <span className="text-slate-600">{formatFileSizeMB(totalOriginalBytes)}</span>
+                <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" />
+                <span className="text-slate-900">{formatFileSizeMB(totalOutputBytes)}</span>
+              </div>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-mono text-[11px] font-bold tabular-nums ${
+                  combinedIsSmaller
+                    ? 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200'
+                    : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200'
+                }`}
+              >
+                {combinedIsSmaller ? (
+                  <TrendingDown aria-hidden="true" className="h-3.5 w-3.5" />
+                ) : (
+                  <TrendingUp aria-hidden="true" className="h-3.5 w-3.5" />
+                )}
+                {combinedIsSmaller
+                  ? `Hemat ${Math.abs(combinedSavingsPercent).toFixed(1)}%`
+                  : combinedSavingsBytes < 0 && Math.abs(combinedSavingsPercent) >= 0.5
+                    ? `Naik ${Math.abs(combinedSavingsPercent).toFixed(1)}%`
+                    : 'Ukuran Hampir Sama'}
               </span>
-              <span className="text-slate-600">{formatFileSizeMB(totalOriginalBytes)}</span>
-              <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" />
-              <span className="text-slate-900">{formatFileSizeMB(totalOutputBytes)}</span>
             </div>
-            <span
-              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-mono text-[11px] font-bold tabular-nums ${
-                combinedIsSmaller
-                  ? 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200'
-                  : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200'
-              }`}
-            >
-              {combinedIsSmaller ? (
-                <TrendingDown aria-hidden="true" className="h-3.5 w-3.5" />
-              ) : (
-                <TrendingUp aria-hidden="true" className="h-3.5 w-3.5" />
-              )}
-              {combinedIsSmaller
-                ? `Hemat ${Math.abs(combinedSavingsPercent).toFixed(1)}%`
-                : combinedSavingsBytes < 0
-                  ? `+${Math.abs(combinedSavingsPercent).toFixed(1)}%`
-                  : 'Ukuran 0%'}
-            </span>
+            {!combinedIsSmaller && combinedSavingsBytes < 0 && Math.abs(combinedSavingsPercent) >= 0.5 && (
+              <p className="text-[11px] text-slate-500">
+                Ukuran naik karena peningkatan kualitas, resolusi, atau bitrate output.
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -414,15 +428,23 @@ export function BatchResultView({
                           <ArrowRight aria-hidden="true" className="h-3 w-3 text-slate-400" />
                           <span>{formatFileSizeMB(res.outputSizeBytes)}</span>
                         </span>
-                        {showItemSavings && (
+                        {showItemSavings ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-800 ring-1 ring-emerald-200 tabular-nums">
                             <TrendingDown aria-hidden="true" className="h-3 w-3" />
                             Hemat {itemSavingsPct.toFixed(1)}%
                           </span>
-                        )}
+                        ) : itemSavingsPct < -0.5 ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-700 ring-1 ring-slate-200 tabular-nums">
+                            <TrendingUp aria-hidden="true" className="h-3 w-3" />
+                            Naik {Math.abs(itemSavingsPct).toFixed(1)}%
+                          </span>
+                        ) : null}
                         <span className="inline-flex items-center gap-1 font-mono text-[11px] text-slate-500 tabular-nums">
                           <Clock aria-hidden="true" className="h-3 w-3 text-orange-500" />
                           {itemDuration}
+                        </span>
+                        <span className="font-mono text-[11px] text-slate-500 tabular-nums">
+                          • Selesai dalam {(res.elapsedMs / 1000).toFixed(1)} dtk
                         </span>
                       </div>
                     ) : (
@@ -441,8 +463,8 @@ export function BatchResultView({
                   </div>
                 </div>
 
-                {/* Tombol Aksi Per Video (Area Sentuh >= 44px) */}
-                {isDone && (
+                {/* Tombol Aksi Per Video (Area Sentuh >= 44px, gaya outline tenang agar 1 Aksi Primer terjaga) */}
+                {isDone ? (
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
                     <button
                       type="button"
@@ -452,7 +474,7 @@ export function BatchResultView({
                       className={`inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 sm:flex-initial ${
                         isPreviewOpen
                           ? 'border-blue-500 bg-blue-50 text-blue-800'
-                          : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-blue-300 hover:bg-blue-50/70'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50/70'
                       }`}
                     >
                       {isPreviewOpen ? (
@@ -471,7 +493,7 @@ export function BatchResultView({
                     <button
                       type="button"
                       onClick={() => triggerSingleFileDownload(res.url, res.fileName)}
-                      className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-2xs transition-colors hover:bg-emerald-700 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-1 sm:flex-initial"
+                      className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50/80 px-4 py-2 text-xs font-bold text-emerald-800 transition-colors hover:border-emerald-400 hover:bg-emerald-100 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-1 sm:flex-initial"
                     >
                       <Download aria-hidden="true" className="h-4 w-4" />
                       <span>
@@ -481,6 +503,25 @@ export function BatchResultView({
                       </span>
                     </button>
                   </div>
+                ) : (
+                  item.status === 'error' &&
+                  onRetryItem && (
+                    <div className="flex shrink-0 items-center">
+                      <button
+                        type="button"
+                        disabled={retryingItemId !== null}
+                        onClick={() => onRetryItem(item.id)}
+                        className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-300 bg-white px-4 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-50 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {retryingItemId === item.id ? (
+                          <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RotateCcw aria-hidden="true" className="h-4 w-4" />
+                        )}
+                        <span>{retryingItemId === item.id ? 'Mencoba ulang...' : 'Coba Lagi'}</span>
+                      </button>
+                    </div>
+                  )
                 )}
               </div>
 
@@ -514,38 +555,48 @@ export function BatchResultView({
         })}
       </div>
 
-      {/* 4. Aksi Lanjutan di Bagian Bawah */}
-      <div className="flex flex-col gap-2.5 border-t border-slate-200/80 pt-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          {completedVideoItems.length > 0 && !allCompletedAreAudio && (
+      {/* 4. Aksi Lanjutan di Bagian Bawah (Hierarki Tenang: Tombol Outline Sekunder) */}
+      <div className="flex flex-col gap-3 border-t border-slate-200/80 pt-4">
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            {completedVideoItems.length > 0 && !allCompletedAreAudio && (
+              <button
+                type="button"
+                onClick={onContinueBatchWithOutputs}
+                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-blue-300 bg-blue-50/80 px-4 py-2.5 text-xs font-bold text-blue-800 transition-colors hover:border-blue-400 hover:bg-blue-100 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 sm:text-sm"
+              >
+                <Layers aria-hidden="true" className="h-4 w-4" />
+                <span>Lanjut Edit {completedVideoItems.length} Hasil ke Fitur Lain</span>
+              </button>
+            )}
+
             <button
               type="button"
-              onClick={onContinueBatchWithOutputs}
-              className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-xs transition-colors hover:bg-blue-700 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 sm:text-sm"
+              onClick={onEditSettings}
+              className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-800 transition-colors hover:border-blue-300 hover:bg-blue-50/70 hover:text-blue-700 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 sm:text-sm"
             >
-              <Layers aria-hidden="true" className="h-4 w-4" />
-              <span>Lanjut Edit {completedVideoItems.length} Hasil ke Fitur Lain</span>
+              <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />
+              <span>Proses Ulang / Ubah Setelan</span>
             </button>
-          )}
+          </div>
 
           <button
             type="button"
-            onClick={onEditSettings}
-            className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-800 shadow-2xs transition-colors hover:border-blue-300 hover:bg-blue-50/70 hover:text-blue-700 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 sm:text-sm"
+            onClick={onChangeAllVideos}
+            className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 sm:text-sm"
           >
-            <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />
-            <span>Proses Ulang / Ubah Setelan</span>
+            <FolderSync aria-hidden="true" className="h-4 w-4" />
+            <span>Ganti Semua Video</span>
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={onChangeAllVideos}
-          className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-transparent bg-slate-100/90 px-4 py-2.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-200/80 hover:text-slate-900 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 sm:text-sm"
-        >
-          <FolderSync aria-hidden="true" className="h-4 w-4" />
-          <span>Ganti Semua Video</span>
-        </button>
+        {/* [BUG-4R-18] Penjelasan tenang bila seluruh hasil batch berupa audio (.MP3) */}
+        {allCompletedAreAudio && completedItems.length > 0 && (
+          <p className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
+            <Info aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-fuchsia-600" />
+            <span>Hasil berupa audio (.MP3) tidak dapat dilanjutkan ke fitur edit video.</span>
+          </p>
+        )}
       </div>
     </div>
   )

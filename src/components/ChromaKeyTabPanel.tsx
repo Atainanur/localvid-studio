@@ -46,9 +46,9 @@ import type { ChromaEngineBadge } from '../utils/chromaKeyEngine'
 import { formatDuration, formatFileSizeMB } from '../utils/videoProcessing'
 
 interface ChromaBatchPreviewControl {
-  previewIndex: number
+  previewItemId: string
   items: ReadonlyArray<{ id: string; index: number; name: string }>
-  onPreviewIndexChange: (index: number) => void
+  onPreviewItemIdChange: (id: string) => void
 }
 
 interface ChromaKeyTabPanelProps {
@@ -419,17 +419,17 @@ export function ChromaKeyTabPanel({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {batchPreviewControl && batchPreviewControl.items.length > 1 && (
-            <label className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+            <label className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
               <span className="shrink-0">Pratinjau dari:</span>
               <select
                 aria-label="Pilih video referensi pratinjau Auto Green Screen"
                 disabled={disabled}
-                value={batchPreviewControl.previewIndex}
-                onChange={(e) => batchPreviewControl.onPreviewIndexChange(Number(e.target.value))}
+                value={batchPreviewControl.previewItemId}
+                onChange={(e) => batchPreviewControl.onPreviewItemIdChange(e.target.value)}
                 className="max-w-[160px] cursor-pointer rounded-md bg-white px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-900 ring-1 ring-slate-200 focus:outline-none focus:ring-2 focus:ring-green-600 disabled:opacity-50"
               >
-                {batchPreviewControl.items.map((bItem, idx) => (
-                  <option key={bItem.id} value={idx}>
+                {batchPreviewControl.items.map((bItem) => (
+                  <option key={bItem.id} value={bItem.id}>
                     Video #{bItem.index}
                   </option>
                 ))}
@@ -882,9 +882,136 @@ export function ChromaKeyTabPanel({
                     CRF 22 • {options.targetFps} fps
                     {sizeEstimate.maxRateKbps ? ` • Cap <= ${sizeEstimate.maxRateKbps}k` : ''}
                   </p>
+                  {sizeEstimate.calibrationSamples && sizeEstimate.calibrationSamples > 0 ? (
+                    <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                      Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
+                    </p>
+                  ) : null}
                 </div>
               </div>
             )}
+
+            {/* [UX #23] Accordion Opsi Lanjutan Tepian (Default Tertutup pada Mode Template 1-Klik) */}
+            <details className="rounded-xl border border-green-200/80 bg-white/90 px-3.5 py-2.5 text-xs text-slate-700">
+              <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 font-bold text-slate-800 select-none hover:text-green-800">
+                <span className="inline-flex items-center gap-1.5">
+                  <SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5 text-green-600" />
+                  <span>Sesuaikan Detail Tepian (Opsional)</span>
+                </span>
+                <span className="font-mono text-[11px] font-normal text-slate-500">
+                  Feather {options.edgeFeather.toFixed(1)}px • Thr {options.threshold.toFixed(2)}
+                </span>
+              </summary>
+              <div className="mt-3 flex flex-col gap-3 border-t border-slate-200/80 pt-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-slate-900">
+                      Bersihkan Bercak &amp; Isi Lubang Mask (Mask Cleanup)
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Menghapus bercak latar dan menutup lubang interior pada objek.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={options.maskCleanup}
+                    aria-label="Aktifkan Mask Cleanup"
+                    disabled={disabled}
+                    onClick={() => onChange({ ...options, maskCleanup: !options.maskCleanup })}
+                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 disabled:opacity-50 ${
+                      options.maskCleanup ? 'bg-green-600' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                        options.maskCleanup ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2.5 md:grid-cols-3">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <label htmlFor="tpl-chroma-feather" className="text-[11px] font-bold text-slate-800">
+                        Edge Feather
+                      </label>
+                      <span className="font-mono text-[11px] font-bold text-green-800 tabular-nums">
+                        {options.edgeFeather.toFixed(1)} px
+                      </span>
+                    </div>
+                    <input
+                      id="tpl-chroma-feather"
+                      type="range"
+                      min={0}
+                      max={8}
+                      step={0.5}
+                      disabled={disabled}
+                      value={options.edgeFeather}
+                      onChange={(e) => onChange({ ...options, edgeFeather: Number(e.target.value) })}
+                      className="mt-2 h-2 w-full cursor-pointer accent-green-600 disabled:opacity-50"
+                    />
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <label htmlFor="tpl-chroma-threshold" className="text-[11px] font-bold text-slate-800">
+                        Threshold
+                      </label>
+                      <span className="font-mono text-[11px] font-bold text-green-800 tabular-nums">
+                        {options.threshold.toFixed(2)}
+                      </span>
+                    </div>
+                    <input
+                      id="tpl-chroma-threshold"
+                      type="range"
+                      min={0.2}
+                      max={0.8}
+                      step={0.05}
+                      disabled={disabled}
+                      value={options.threshold}
+                      onChange={(e) => onChange({ ...options, threshold: Number(e.target.value) })}
+                      className="mt-2 h-2 w-full cursor-pointer accent-green-600 disabled:opacity-50"
+                    />
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <label htmlFor="tpl-chroma-shift" className="text-[11px] font-bold text-slate-800">
+                        Edge Shift
+                      </label>
+                      <span className="font-mono text-[11px] font-bold text-green-800 tabular-nums">
+                        {options.edgeShift > 0 ? `+${options.edgeShift}` : String(options.edgeShift)}
+                      </span>
+                    </div>
+                    <input
+                      id="tpl-chroma-shift"
+                      type="range"
+                      min={-3}
+                      max={3}
+                      step={1}
+                      disabled={disabled}
+                      value={options.edgeShift}
+                      onChange={(e) => onChange({ ...options, edgeShift: Number(e.target.value) })}
+                      className="mt-2 h-2 w-full cursor-pointer accent-green-600 disabled:opacity-50"
+                    />
+                  </div>
+                </div>
+
+                {edgeSettingsChanged && (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={resetEdgeSettings}
+                      className="inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 disabled:opacity-50"
+                    >
+                      <RotateCcw aria-hidden="true" className="h-3 w-3" />
+                      <span>Reset Tepi</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </details>
 
             {sizeEstimate?.isOver3x && (
               <div
@@ -1471,6 +1598,11 @@ export function ChromaKeyTabPanel({
                       ? ` • Cap <= ${sizeEstimate.maxRateKbps}k`
                       : ' • Tanpa Cap'}
                   </p>
+                  {sizeEstimate.calibrationSamples && sizeEstimate.calibrationSamples > 0 ? (
+                    <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                      Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
+                    </p>
+                  ) : null}
                 </div>
               </div>
             )}

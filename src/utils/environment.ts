@@ -41,13 +41,14 @@ interface NavigatorGPU {
   requestAdapter: () => Promise<LegacyGPUAdapter | null>
 }
 
-export const MAX_SAFE_FFMPEG_THREADS = 6
+export const MAX_SAFE_FFMPEG_THREADS = 4
 
 /**
  * Menghitung jumlah thread aman FFmpeg.wasm:
  * - Single-Thread (Mobile / non-COI): selalu 1 thread.
- * - Multi-Thread (Desktop + COI): dibatasi hingga Math.min(hardwareConcurrency || 4, 6)
- *   agar proses lebih cepat sekaligus mencegah risiko pthread deadlock di WASM.
+ * - Multi-Thread (Desktop + COI): dibatasi aman 2 sampai 4 thread
+ *   (Math.min(Math.max(2, Math.floor(cores / 2)), 4)) untuk mencegah crash pthread WASM
+ *   (function signature mismatch / memory access out of bounds) pada @ffmpeg/core-mt@0.12.6.
  */
 export function getRecommendedFFmpegThreads(
   useMultiThread: boolean,
@@ -62,7 +63,17 @@ export function getRecommendedFFmpegThreads(
       : typeof navigator !== 'undefined' && typeof navigator.hardwareConcurrency === 'number'
         ? navigator.hardwareConcurrency
         : 4
-  return Math.max(2, Math.min(Math.floor(cores), MAX_SAFE_FFMPEG_THREADS))
+  if (cores <= 4) return 2
+  return Math.min(Math.max(2, Math.floor(cores / 2)), MAX_SAFE_FFMPEG_THREADS)
+}
+
+/**
+ * Batas thread encoder aman khusus untuk argumen `-threads` libx264/libvpx di @ffmpeg/core-mt@0.12.6
+ * (maksimal 2 thread di WASM MT agar 100% bebas crash pthread/memory out of bounds).
+ */
+export function getSafeWasmEncoderThreads(threads: number): number {
+  if (!Number.isFinite(threads) || threads <= 1) return 1
+  return Math.min(2, Math.max(1, Math.floor(threads)))
 }
 
 export function detectDeviceInfo(): DeviceInfo {

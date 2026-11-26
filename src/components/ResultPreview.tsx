@@ -802,14 +802,20 @@ export function ResultPreview({
               <span>Ubah Setelan</span>
             </button>
 
-            {isAudioOnlyResult && pipelineSteps.length > 0 && onReturnToVideoEditor && (
+            {isAudioOnlyResult && (
               <button
                 type="button"
-                onClick={onReturnToVideoEditor}
-                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/80 px-4 py-2.5 text-xs font-bold text-emerald-800 transition-[background-color,border-color,color,transform] duration-150 hover:border-emerald-300 hover:bg-emerald-100 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 sm:text-sm"
+                onClick={
+                  pipelineSteps.length > 0 && onReturnToVideoEditor
+                    ? onReturnToVideoEditor
+                    : onEditSettings
+                }
+                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-white px-4 py-2.5 text-xs font-bold text-emerald-800 transition-[background-color,border-color,color,transform] duration-150 hover:bg-emerald-50 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 sm:text-sm"
               >
                 <Film aria-hidden="true" className="h-4 w-4" />
-                <span>Kembali ke Editor Video</span>
+                <span>
+                  {pipelineSteps.length > 0 ? 'Kembali ke Editor Video' : 'Tutup Hasil MP3'}
+                </span>
               </button>
             )}
 
@@ -817,10 +823,10 @@ export function ResultPreview({
               <button
                 type="button"
                 onClick={onRemoveCurrentStep}
-                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-2.5 text-xs font-bold text-rose-700 transition-[background-color,border-color,color,transform] duration-150 hover:border-rose-300 hover:bg-rose-100 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2 sm:text-sm"
+                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-xs font-bold text-rose-700 transition-[background-color,border-color,color,transform] duration-150 hover:border-rose-300 hover:bg-rose-50 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2 sm:text-sm"
               >
                 <Trash2 aria-hidden="true" className="h-4 w-4" />
-                <span>Hapus Efek Ini</span>
+                <span>Hapus Efek</span>
               </button>
             )}
           </div>
@@ -828,18 +834,24 @@ export function ResultPreview({
           <button
             type="button"
             onClick={onChangeVideo}
-            className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-transparent bg-slate-100/90 px-4 py-2.5 text-xs font-semibold text-slate-600 transition-[background-color,color,transform] duration-150 hover:bg-slate-200/80 hover:text-slate-900 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 sm:text-sm"
+            className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 transition-[background-color,color,transform] duration-150 hover:bg-slate-100 hover:text-slate-900 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 sm:text-sm"
           >
             <FolderSync aria-hidden="true" className="h-4 w-4" />
-            <span>Ganti Video Lain</span>
+            <span>Ganti Video</span>
           </button>
         </div>
 
-        {/* Petunjuk 1 baris bersih mengarahkan ke bar tab atas */}
-        <p className="text-center text-xs text-slate-500">
-          Ingin menambah efek lain, mengubah setelan, atau menghapus efek? Klik langsung tombol tab
-          fitur di bagian atas.
-        </p>
+        {/* [BUG-4R-11] Catatan jelas untuk hasil MP3 terpisah, atau petunjuk 1 baris bersih ke bar tab atas */}
+        {isAudioOnlyResult ? (
+          <p className="text-center text-xs font-medium text-fuchsia-800">
+            Ekspor MP3 dibuat terpisah dan tidak masuk ke rantai edit video.
+          </p>
+        ) : (
+          <p className="text-center text-xs text-slate-500">
+            Ingin menambah langkah edit lain, mengubah setelan, atau menghapus efek? Klik langsung
+            tombol tab fitur di bagian atas.
+          </p>
+        )}
 
         {canShare && deviceType === 'iOS' && (
           <p className="rounded-xl bg-blue-50/70 px-3.5 py-2.5 text-center text-xs text-slate-700">

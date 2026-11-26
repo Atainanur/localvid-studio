@@ -1,7 +1,7 @@
 import type { WebGPUState } from './environment'
 import {
   computeTarget1080pResolution,
-  getAdaptiveSizeFactor,
+  getAdaptiveSizeCalibrationInfo,
   toEvenDimension,
   type SimpleSizeEstimate,
 } from './videoProcessing'
@@ -47,6 +47,8 @@ export interface AiFrameProgress {
   percent: number
   /** Catatan diagnostik jika terjadi fallback otomatis dari model ONNX eksternal ke WebGPU Shader */
   fallbackNotice?: string
+  /** [BUG-4R-13c] Catatan jujur bila jatuh ke fallback decoder native <video> */
+  decoderNotice?: string
 }
 
 export const AI_MODEL_PRESETS: ReadonlyArray<AiModelPreset> = [
@@ -173,9 +175,10 @@ export function estimateAiOutputSize(
 ): SimpleSizeEstimate | null {
   if (!sizeBytes || sizeBytes <= 0) return null
   const originalMB = sizeBytes / (1024 * 1024)
-  const adaptiveFactor = getAdaptiveSizeFactor(
+  const calibration = getAdaptiveSizeCalibrationInfo(
     `ai-upscale:${settings.smartSizeCap ? 'cap' : 'uncapped'}`,
   )
+  const adaptiveFactor = calibration.factor
 
   let pixelRatio = 2.1
   if (videoDimensions?.width && videoDimensions?.height) {
@@ -226,6 +229,7 @@ export function estimateAiOutputSize(
       maxEstimatedMB: maxEst,
       maxRateKbps,
       isOver3x: maxEst > originalMB * 3,
+      calibrationSamples: calibration.samples,
     }
   }
 
@@ -241,5 +245,6 @@ export function estimateAiOutputSize(
     maxEstimatedMB: maxEst,
     maxRateKbps,
     isOver3x: maxEst > originalMB * 3,
+    calibrationSamples: calibration.samples,
   }
 }
