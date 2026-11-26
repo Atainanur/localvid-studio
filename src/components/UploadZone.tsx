@@ -515,18 +515,16 @@ export function UploadZone({
             </div>
 
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              {pipelineSteps.length === 0 && (
-                <button
-                  type="button"
-                  onClick={openAddMorePicker}
-                  disabled={disabled}
-                  title={`Tambah video lain untuk mode antrean (maks ${maxBatchCount} video)`}
-                  className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-xs font-bold text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
-                >
-                  <Plus aria-hidden="true" className="h-4 w-4" />
-                  <span>Tambah Antrean</span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={openAddMorePicker}
+                disabled={disabled}
+                title={`Tambah video ke-2 atau lebih untuk antrean (maks ${maxBatchCount} video)`}
+                className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-xs font-bold text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+              >
+                <Plus aria-hidden="true" className="h-4 w-4" />
+                <span>Tambah Video</span>
+              </button>
               <button
                 type="button"
                 onClick={openFilePicker}
