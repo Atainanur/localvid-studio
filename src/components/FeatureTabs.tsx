@@ -12,6 +12,7 @@ import {
   Globe,
   HardDrive,
   Info,
+  Layers,
   Minimize2,
   Palette,
   ShieldAlert,
@@ -121,6 +122,14 @@ interface FeatureTabsProps {
   onViewStepResult: (stepId: string) => void
   onRemoveStep: (stepId: string) => void
 
+  // Mode Antrean Multi-Video (2+ video)
+  batchModeInfo?: {
+    totalCount: number
+    previewIndex: number
+    items: ReadonlyArray<{ id: string; index: number; name: string }>
+    onPreviewIndexChange: (index: number) => void
+  } | null
+
   // Clean Result View: bila hasil ekspor tersedia, ganti form pengaturan dengan tampilan hasil bersih
   resultView?: ReactNode
 }
@@ -221,6 +230,7 @@ export function FeatureTabs({
   nativeFormatWarning,
   onViewStepResult,
   onRemoveStep,
+  batchModeInfo,
   resultView,
 }: FeatureTabsProps) {
   const [compareOriginal, setCompareOriginal] = useState(false)
@@ -426,6 +436,23 @@ export function FeatureTabs({
           resultView
         ) : (
           <>
+            {/* Banner Mode Antrean Multi-Video (hanya tampil saat 2+ video aktif) */}
+            {batchModeInfo && batchModeInfo.totalCount > 1 && (
+              <div
+                role="status"
+                className="animate-lv-fade-up mb-5 flex items-start gap-2.5 rounded-2xl border border-blue-200 bg-blue-50/90 px-4 py-3 text-xs leading-relaxed text-blue-950"
+              >
+                <Layers aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+                <span>
+                  <strong className="font-bold">
+                    Mode Antrean Aktif ({batchModeInfo.totalCount} Video):
+                  </strong>{' '}
+                  Pengaturan yang kamu pilih di bawah akan diterapkan otomatis ke semua video
+                  secara berurutan 1 per 1.
+                </span>
+              </div>
+            )}
+
             {/* Bar Kontrol Efek Aktif saat Tab yang Sudah Terpasang dibuka di mode ubah setelan */}
             {(() => {
               const activeStepIdx = pipelineSteps.findIndex((s) => s.tabId === activeTab)
@@ -804,13 +831,35 @@ export function FeatureTabs({
               {sourcePreviewUrl && (
                 <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/90 px-3.5 py-2 text-xs">
-                    <span className="inline-flex items-center gap-1.5 font-semibold text-slate-200">
-                      <Eye aria-hidden="true" className="h-3.5 w-3.5 text-sky-400" />
-                      Pratinjau Langsung:{' '}
-                      <strong className="text-white">
-                        {compareOriginal ? 'Original (Tanpa Filter)' : activeColorPreset.name}
-                      </strong>
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 font-semibold text-slate-200">
+                        <Eye aria-hidden="true" className="h-3.5 w-3.5 text-sky-400" />
+                        Pratinjau Langsung:{' '}
+                        <strong className="text-white">
+                          {compareOriginal ? 'Original (Tanpa Filter)' : activeColorPreset.name}
+                        </strong>
+                      </span>
+                      {batchModeInfo && batchModeInfo.items.length > 1 && (
+                        <label className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2 py-0.5 text-[11px] font-semibold text-slate-200">
+                          <span>Pratinjau dari:</span>
+                          <select
+                            aria-label="Pilih video referensi pratinjau warna"
+                            disabled={disabled}
+                            value={batchModeInfo.previewIndex}
+                            onChange={(e) =>
+                              batchModeInfo.onPreviewIndexChange(Number(e.target.value))
+                            }
+                            className="cursor-pointer rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[11px] font-bold text-white focus:outline-none focus:ring-1 focus:ring-sky-400 disabled:opacity-50"
+                          >
+                            {batchModeInfo.items.map((bItem, idx) => (
+                              <option key={bItem.id} value={idx}>
+                                Video #{bItem.index}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                    </div>
                     {livePreviewCssFilter !== 'none' || compareOriginal ? (
                       <button
                         type="button"
@@ -1677,6 +1726,15 @@ export function FeatureTabs({
             sourceDurationSec={selectedVideoDuration}
             sourceDimensions={selectedVideoDimensions}
             sourcePreviewUrl={sourcePreviewUrl}
+            batchPreviewControl={
+              batchModeInfo && batchModeInfo.items.length > 1
+                ? {
+                    previewIndex: batchModeInfo.previewIndex,
+                    items: batchModeInfo.items,
+                    onPreviewIndexChange: batchModeInfo.onPreviewIndexChange,
+                  }
+                : null
+            }
             onSwitchToCompress={() => onTabChange('compress')}
             onLog={onLog}
           />

@@ -8,6 +8,7 @@ import {
   Cpu,
   Film,
   Info,
+  Layers,
   Loader2,
   Lock,
   Monitor,
@@ -15,18 +16,29 @@ import {
   RotateCcw,
   ShieldAlert,
   ShieldCheck,
+  SkipForward,
   Smartphone,
   Sparkles,
   Square,
+  SunMedium,
   Trash2,
   X,
   Zap,
 } from 'lucide-react'
+import { BatchResultView } from './components/BatchResultView'
 import { CollapsibleLogs } from './components/CollapsibleLogs'
 import { FeatureTabs } from './components/FeatureTabs'
 import { ResultPreview } from './components/ResultPreview'
 import { UploadZone } from './components/UploadZone'
 import { useFFmpeg } from './hooks/useFFmpeg'
+import {
+  createBatchQueueItem,
+  createScreenWakeLockController,
+  reindexBatchItems,
+  validateIncomingBatchFiles,
+  type BatchQueueItem,
+  type ScreenWakeLockController,
+} from './utils/batchQueue'
 import {
   DEFAULT_AI_UPSCALE_SETTINGS,
   estimateAiOutputSize,
@@ -193,10 +205,20 @@ export default function App() {
   })
   const [showSystemInfo, setShowSystemInfo] = useState(false)
 
-  // State file, snapshot pipeline non-destruktif, & tab fitur
+  // State file, snapshot pipeline non-destruktif, antrean multi-video (Batch Queue), & tab fitur
   const [originalSourceFile, setOriginalSourceFile] = useState<File | null>(null)
   const [selectedVideo, setSelectedVideo] = useState<SelectedVideo | null>(null)
   const [pipelineSteps, setPipelineSteps] = useState<EditPipelineStep[]>([])
+  const [batchItems, setBatchItems] = useState<BatchQueueItem[]>([])
+  const [batchPreviewIndex, setBatchPreviewIndex] = useState(0)
+  const [isBatchRunning, setIsBatchRunning] = useState(false)
+  const [batchActiveItemIndex, setBatchActiveItemIndex] = useState(-1)
+  const [batchResultMeta, setBatchResultMeta] = useState<{
+    feature: FeatureTabId
+    totalElapsedMs: number
+    wasCancelledEarly: boolean
+  } | null>(null)
+  const [isWakeLockActive, setIsWakeLockActive] = useState(false)
   const [activeResultStepId, setActiveResultStepId] = useState<string | null>(null)
   const [viewedResultBeforeUrl, setViewedResultBeforeUrl] = useState<string | null>(null)
   const [pendingRemoveStepId, setPendingRemoveStepId] = useState<string | null>(null)
@@ -249,6 +271,13 @@ export default function App() {
   const [result, setResult] = useState<ProcessedVideoResult | null>(null)
 
   const metadataReqIdRef = useRef(0)
+  const batchMetadataReqRef = useRef(0)
+  const batchResultUrlsRef = useRef<Set<string>>(new Set())
+  const batchControlRef = useRef<{ skipCurrent: boolean; cancelAll: boolean }>({
+    skipCurrent: false,
+    cancelAll: false,
+  })
+  const wakeLockRef = useRef<ScreenWakeLockController | null>(null)
   const chainNoticeTimerRef = useRef<number | null>(null)
   const cancelledByUserRef = useRef(false)
   const lastProcessedWasAudioOnlyRef = useRef(false)
@@ -262,11 +291,18 @@ export default function App() {
   const lastWatchdogActivityRef = useRef<number>(Date.now())
   const [idleSeconds, setIdleSeconds] = useState(0)
 
+  const revokeAllBatchResultUrls = () => {
+    for (const url of batchResultUrlsRef.current) {
+      URL.revokeObjectURL(url)
+    }
+    batchResultUrlsRef.current.clear()
+  }
+
   useEffect(() => {
-    if (result) {
+    if (result || batchResultMeta) {
       featureCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
-  }, [result])
+  }, [result, batchResultMeta])
 
   useEffect(() => {
     return () => {
@@ -277,6 +313,11 @@ export default function App() {
         URL.revokeObjectURL(viewedResultBeforeUrlRef.current)
         viewedResultBeforeUrlRef.current = null
       }
+      for (const url of batchResultUrlsRef.current) {
+        URL.revokeObjectURL(url)
+      }
+      batchResultUrlsRef.current.clear()
+      void wakeLockRef.current?.release()
     }
   }, [])
 
@@ -316,17 +357,40 @@ export default function App() {
     }
   }, [])
 
-  // Tahap pipeline aktif untuk tab saat ini (bila tab ini sudah pernah diterapkan)
+  // Mode Antrean Multi-Video aktif HANYA saat ada 2 atau lebih video (1 video tetap 100% mode tunggal)
+  const isBatchMode = batchItems.length >= 2
+  const safeBatchPreviewIndex = isBatchMode
+    ? Math.min(Math.max(0, batchPreviewIndex), batchItems.length - 1)
+    : 0
+  const activeBatchPreviewItem = isBatchMode
+    ? (batchItems[safeBatchPreviewIndex] ?? batchItems[0] ?? null)
+    : null
+
+  // Tahap pipeline aktif untuk tab saat ini (bila tab ini sudah pernah diterapkan di mode 1 video)
   const activeTabStepIndex = useMemo(
-    () => pipelineSteps.findIndex((s) => s.tabId === activeTab),
-    [pipelineSteps, activeTab],
+    () => (isBatchMode ? -1 : pipelineSteps.findIndex((s) => s.tabId === activeTab)),
+    [isBatchMode, pipelineSteps, activeTab],
   )
   const activeTabStep = activeTabStepIndex >= 0 ? pipelineSteps[activeTabStepIndex] : null
 
   // Input efektif untuk form, pratinjau, estimator, Before/After, dan eksekusi:
-  // - Jika tab ini sudah terpasang di pipelineSteps -> pakai snapshot step.inputFile (agar ubah setelan mengganti bersih tanpa tumpuk ganda)
-  // - Jika tab belum terpasang -> pakai video pipeline terbaru (selectedVideo)
+  // - Mode Antrean (2+ video) -> pakai video yang dipilih di dropdown "Pratinjau dari: Video #N"
+  // - Mode 1 video dengan tab sudah terpasang -> pakai snapshot step.inputFile (non-destructive)
+  // - Mode 1 video biasa -> pakai selectedVideo
   const effectiveInputVideo = useMemo<SelectedVideo | null>(() => {
+    if (isBatchMode && activeBatchPreviewItem) {
+      return {
+        file: activeBatchPreviewItem.file,
+        name: activeBatchPreviewItem.file.name,
+        extension: activeBatchPreviewItem.extension,
+        sizeBytes: activeBatchPreviewItem.file.size,
+        metadata: activeBatchPreviewItem.metadata ?? {
+          duration: null,
+          width: null,
+          height: null,
+        },
+      }
+    }
     if (activeTabStep) {
       return {
         file: activeTabStep.inputFile,
@@ -337,7 +401,7 @@ export default function App() {
       }
     }
     return selectedVideo
-  }, [activeTabStep, selectedVideo])
+  }, [isBatchMode, activeBatchPreviewItem, activeTabStep, selectedVideo])
 
   // Kelola Blob URL file input efektif untuk pratinjau live (Tab 3 & Tab 7) dan Before/After Comparison
   useEffect(() => {
@@ -360,6 +424,7 @@ export default function App() {
     isMobile,
   )
   const isSeparateMp3Export =
+    !isBatchMode &&
     activeTab === 'audio-denoise' &&
     activeTabStep !== null &&
     audioDenoiseOptions.outputMode === 'audio-mp3'
@@ -373,7 +438,8 @@ export default function App() {
     Boolean(effectiveInputVideo) &&
     (activeTab === 'ai-upscale' || activeTab === 'auto-chroma') &&
     !NATIVE_DECODER_EXTENSIONS.has(activeInputExtension)
-  const isBusy = isLoadingEngine || isPreparing || isProcessing || isAiRunning || isChromaRunning
+  const isBusy =
+    isLoadingEngine || isPreparing || isProcessing || isAiRunning || isChromaRunning || isBatchRunning
 
   // [BUG-07 & NEW-07] Watchdog liveness: reset idleSeconds HANYA saat terjadi kemajuan nyata
   // (bukan setiap baris log mentah) agar proses macet yang mencetak log berulang tetap terdeteksi
@@ -383,6 +449,7 @@ export default function App() {
     setIdleSeconds(0)
   }, [
     isBusy,
+    batchActiveItemIndex,
     progress,
     ffmpegCurrentFrame,
     ffmpegCurrentTimeLabel,
@@ -580,6 +647,34 @@ export default function App() {
     setPendingRemoveStepId(null)
     setPendingResetAll(false)
 
+    // Mode Antrean Multi-Video (2+ video): bersih saat pindah tab & reset hasil batch sebelumnya
+    if (isBatchMode) {
+      if (batchResultMeta) {
+        revokeAllBatchResultUrls()
+        setBatchResultMeta(null)
+        setBatchItems((prev) =>
+          prev.map((item) => ({
+            ...item,
+            status: 'pending',
+            progress: 0,
+            result: null,
+            outputFile: null,
+            errorMessage: undefined,
+          })),
+        )
+      }
+      if (nextTab !== activeTab) {
+        setActiveTab(nextTab)
+        if (nextTab === 'compress' && activeBatchPreviewItem) {
+          syncCompressBoundsForFile(
+            activeBatchPreviewItem.file.size,
+            activeBatchPreviewItem.metadata?.duration ?? null,
+          )
+        }
+      }
+      return
+    }
+
     const leavingAudioOnly = Boolean(
       (result && isAudioOnlyResultFile(result)) || lastProcessedWasAudioOnlyRef.current,
     )
@@ -760,11 +855,7 @@ export default function App() {
     }
   }
 
-  const handleSelectFile = async (file: File) => {
-    dismissChainNotice()
-    setPendingRemoveStepId(null)
-    setPendingResetAll(false)
-    lastProcessedWasAudioOnlyRef.current = false
+  const resetChromaSessionCaches = () => {
     // [BUG-26NOV-11] Reset flag sticky backend Tab 7 & cache benchmark sesi saat file baru diunggah
     resetChromaRuntimeRef.current?.()
     try {
@@ -772,16 +863,305 @@ export default function App() {
     } catch {
       // Abaikan bila sessionStorage dibatasi
     }
+  }
+
+  const readMetadataForBatchItems = async (
+    targetItems: readonly BatchQueueItem[],
+    syncCompressFromFirst: boolean,
+  ) => {
+    const reqId = batchMetadataReqRef.current + 1
+    batchMetadataReqRef.current = reqId
+
+    for (let i = 0; i < targetItems.length; i += 1) {
+      if (batchMetadataReqRef.current !== reqId) return
+      const item = targetItems[i]
+      if (!item.isReadingMetadata && item.metadata) continue
+
+      const metadata = await readVideoMetadata(item.file)
+      if (batchMetadataReqRef.current !== reqId) return
+
+      setBatchItems((prev) =>
+        prev.map((entry) =>
+          entry.id === item.id
+            ? { ...entry, metadata, isReadingMetadata: false }
+            : entry,
+        ),
+      )
+
+      if (syncCompressFromFirst && i === 0) {
+        syncCompressBoundsForFile(item.file.size, metadata.duration)
+      }
+    }
+  }
+
+  const handleSelectFile = async (file: File) => {
+    batchMetadataReqRef.current += 1
+    revokeAllBatchResultUrls()
+    setBatchItems([])
+    setBatchPreviewIndex(0)
+    setBatchResultMeta(null)
+    setBatchActiveItemIndex(-1)
+    dismissChainNotice()
+    setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+    lastProcessedWasAudioOnlyRef.current = false
+    resetChromaSessionCaches()
     await clearCurrentResult()
     await loadPipelineDisplayVideo(file, { resetOriginal: true, syncCompress: true })
   }
 
-  const handleClearFile = async () => {
+  const handleSelectFiles = async (files: File[]) => {
+    if (isBusy || files.length === 0) return
+
+    const validated = validateIncomingBatchFiles(files, [], isMobile)
+    const noticeMsg = validated.combinedNotice
+
+    if (validated.duplicateNames.length > 0) {
+      addLog(
+        `[LocalVid Batch] ${validated.duplicateNames.length} file duplikat dilewati saat unggah: ${validated.duplicateNames.join(', ')}.`,
+      )
+    }
+
+    if (validated.acceptedFiles.length === 0) {
+      if (noticeMsg) showChainNotice(noticeMsg, 5500)
+      return
+    }
+
+    // 1 video: jalankan 100% mode tunggal non-destructive seperti biasa (anti-regresi)
+    if (validated.acceptedFiles.length === 1) {
+      await handleSelectFile(validated.acceptedFiles[0])
+      if (noticeMsg) showChainNotice(noticeMsg, 5500)
+      return
+    }
+
+    // 2+ video: aktifkan Mode Antrean Multi-Video (Batch Queue)
     metadataReqIdRef.current += 1
     dismissChainNotice()
     setPendingRemoveStepId(null)
     setPendingResetAll(false)
     lastProcessedWasAudioOnlyRef.current = false
+    resetChromaSessionCaches()
+    revokeAllBatchResultUrls()
+    setOriginalSourceFile(null)
+    setSelectedVideo(null)
+    setPipelineSteps([])
+    setIsReadingMetadata(false)
+    setExpectedDuration(null)
+    setBatchResultMeta(null)
+    setBatchActiveItemIndex(-1)
+    await clearCurrentResult()
+
+    const createdItems = validated.acceptedFiles.map((file, idx) =>
+      createBatchQueueItem(file, idx + 1),
+    )
+    setBatchItems(createdItems)
+    setBatchPreviewIndex(0)
+    addLog(
+      `[LocalVid Batch] Antrean multi-video aktif: ${createdItems.length} video siap diproses berurutan 1 per 1.`,
+    )
+    if (noticeMsg) {
+      showChainNotice(noticeMsg, 5500)
+    }
+    void readMetadataForBatchItems(createdItems, true)
+  }
+
+  const handleAddMoreFiles = async (files: File[]) => {
+    if (isBusy || files.length === 0) return
+
+    const baseItems: BatchQueueItem[] = isBatchMode
+      ? batchItems.map((item) => ({
+          ...item,
+          status: 'pending',
+          progress: 0,
+          result: null,
+          outputFile: null,
+          errorMessage: undefined,
+        }))
+      : selectedVideo
+        ? [createBatchQueueItem(selectedVideo.file, 1, selectedVideo.metadata)]
+        : []
+
+    const existingFiles = baseItems.map((item) => item.file)
+    const validated = validateIncomingBatchFiles(files, existingFiles, isMobile)
+    const noticeMsg = validated.combinedNotice
+
+    if (validated.duplicateNames.length > 0) {
+      addLog(
+        `[LocalVid Batch] ${validated.duplicateNames.length} file duplikat dilewati: ${validated.duplicateNames.join(', ')}.`,
+      )
+    }
+
+    if (validated.acceptedFiles.length === 0) {
+      if (noticeMsg) showChainNotice(noticeMsg, 5500)
+      return
+    }
+
+    const newItems = validated.acceptedFiles.map((file, idx) =>
+      createBatchQueueItem(file, baseItems.length + idx + 1),
+    )
+    const combined = reindexBatchItems([...baseItems, ...newItems])
+
+    if (combined.length === 1) {
+      await handleSelectFile(combined[0].file)
+      if (noticeMsg) showChainNotice(noticeMsg, 5500)
+      return
+    }
+
+    metadataReqIdRef.current += 1
+    setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+    lastProcessedWasAudioOnlyRef.current = false
+    revokeAllBatchResultUrls()
+    setOriginalSourceFile(null)
+    setSelectedVideo(null)
+    setPipelineSteps([])
+    setIsReadingMetadata(false)
+    setExpectedDuration(null)
+    setBatchResultMeta(null)
+    setBatchActiveItemIndex(-1)
+    await clearCurrentResult()
+
+    setBatchItems(combined)
+    if (!isBatchMode) {
+      setBatchPreviewIndex(0)
+    }
+    addLog(
+      `[LocalVid Batch] ${newItems.length} video ditambahkan ke antrean (total ${combined.length} video).`,
+    )
+    if (noticeMsg) {
+      showChainNotice(noticeMsg, 5500)
+    } else {
+      showChainNotice(
+        `${newItems.length} video ditambahkan. Antrean sekarang berisi ${combined.length} video.`,
+        3600,
+      )
+    }
+    void readMetadataForBatchItems(newItems, baseItems.length === 0)
+  }
+
+  const handleRemoveBatchItem = async (itemId: string) => {
+    if (isBusy) return
+    const target = batchItems.find((item) => item.id === itemId)
+    if (!target) return
+
+    if (target.result?.url && batchResultUrlsRef.current.has(target.result.url)) {
+      URL.revokeObjectURL(target.result.url)
+      batchResultUrlsRef.current.delete(target.result.url)
+    }
+
+    const remaining = reindexBatchItems(batchItems.filter((item) => item.id !== itemId))
+    if (remaining.length === 0) {
+      await handleClearFile()
+      return
+    }
+
+    // Jika tersisa tepat 1 video, kembalikan mulus ke Mode 1 Video normal
+    if (remaining.length === 1) {
+      batchMetadataReqRef.current += 1
+      revokeAllBatchResultUrls()
+      const singleItem = remaining[0]
+      setBatchItems([])
+      setBatchPreviewIndex(0)
+      setBatchResultMeta(null)
+      setBatchActiveItemIndex(-1)
+      await loadPipelineDisplayVideo(singleItem.file, { resetOriginal: true, syncCompress: true })
+      showChainNotice('Tersisa 1 video, beralih otomatis ke mode edit tunggal.', 3500)
+      return
+    }
+
+    setBatchItems(remaining)
+    setBatchPreviewIndex((prev) => Math.min(prev, remaining.length - 1))
+    if (batchResultMeta) {
+      revokeAllBatchResultUrls()
+      setBatchResultMeta(null)
+      setBatchItems(
+        remaining.map((item) => ({
+          ...item,
+          status: 'pending',
+          progress: 0,
+          result: null,
+          outputFile: null,
+          errorMessage: undefined,
+        })),
+      )
+    }
+  }
+
+  const handleEditSettingsFromBatchResult = () => {
+    if (isBusy) return
+    revokeAllBatchResultUrls()
+    setBatchResultMeta(null)
+    setBatchActiveItemIndex(-1)
+    setProcessError(null)
+    resetProcessState()
+    setBatchItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        status: 'pending',
+        progress: 0,
+        result: null,
+        outputFile: null,
+        errorMessage: undefined,
+      })),
+    )
+  }
+
+  const handleContinueBatchWithOutputs = async () => {
+    if (isBusy) return
+    const completedVideoFiles = batchItems
+      .filter(
+        (item) =>
+          item.status === 'done' &&
+          item.outputFile !== null &&
+          item.result !== null &&
+          !isAudioOnlyResultFile(item.result),
+      )
+      .map((item) => item.outputFile!)
+
+    if (completedVideoFiles.length === 0) return
+
+    revokeAllBatchResultUrls()
+    setBatchResultMeta(null)
+    setBatchActiveItemIndex(-1)
+    setProcessError(null)
+    resetProcessState()
+
+    if (completedVideoFiles.length === 1) {
+      await handleSelectFile(completedVideoFiles[0])
+      showChainNotice(
+        '1 video hasil dimuat sebagai input baru. Pilih tab fitur di atas untuk lanjut edit.',
+        4500,
+      )
+      featureCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+
+    const nextItems = completedVideoFiles.map((file, idx) => createBatchQueueItem(file, idx + 1))
+    setBatchItems(nextItems)
+    setBatchPreviewIndex(0)
+    addLog(
+      `[LocalVid Batch] ${nextItems.length} video hasil dimuat ke antrean baru untuk tahap edit berikutnya.`,
+    )
+    showChainNotice(
+      `${nextItems.length} video hasil siap dilanjutkan ke fitur lain. Pilih tab fitur di atas.`,
+      4500,
+    )
+    void readMetadataForBatchItems(nextItems, true)
+    featureCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const handleClearFile = async () => {
+    metadataReqIdRef.current += 1
+    batchMetadataReqRef.current += 1
+    dismissChainNotice()
+    setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+    lastProcessedWasAudioOnlyRef.current = false
+    revokeAllBatchResultUrls()
+    setBatchItems([])
+    setBatchPreviewIndex(0)
+    setBatchResultMeta(null)
+    setBatchActiveItemIndex(-1)
     setOriginalSourceFile(null)
     setSelectedVideo(null)
     setPipelineSteps([])
@@ -862,6 +1242,40 @@ export default function App() {
     cancel()
   }
 
+  const handleSkipCurrentBatchItem = () => {
+    if (!isBatchRunning) return
+    batchControlRef.current.skipCurrent = true
+    cancelledByUserRef.current = true
+    if (aiAbortControllerRef.current) {
+      aiAbortControllerRef.current.abort()
+      aiAbortControllerRef.current = null
+    }
+    if (chromaAbortControllerRef.current) {
+      chromaAbortControllerRef.current.abort()
+      chromaAbortControllerRef.current = null
+    }
+    setIsPreparing(false)
+    setIsAiRunning(false)
+    setIsChromaRunning(false)
+    setAiFrameProgress(null)
+    setChromaFrameProgress(null)
+    setStatusStage('Melewati video ini dan lanjut ke antrean berikutnya...')
+    addLog('[LocalVid Batch] Pengguna melewati video aktif. Melanjutkan ke video berikutnya...')
+    cancel()
+  }
+
+  const handleCancelAllBatch = () => {
+    if (!isBatchRunning) {
+      handleCancel()
+      return
+    }
+    batchControlRef.current.cancelAll = true
+    addLog(
+      '[LocalVid Batch] Pengguna membatalkan sisa antrean. Video yang sudah selesai tetap disimpan untuk diunduh.',
+    )
+    handleCancel()
+  }
+
   const effectiveInputDimensions = useMemo(
     () => ({
       width: effectiveInputVideo?.metadata.width ?? null,
@@ -896,14 +1310,19 @@ export default function App() {
     aiSettings.enginePreference !== 'auto-onnx' ||
     isValidModelUrl(aiSettings.modelUrl)
 
-  const canStartProcess =
-    Boolean(effectiveInputVideo) &&
-    !isBusy &&
-    !nativeFormatWarning &&
-    (activeTab !== 'compress' || compressSettingsReady) &&
-    (activeTab !== 'enhance' || activeEnhanceFilters.length > 0) &&
-    (activeTab !== 'ai-upscale' || (aiAnyGpuAvailable && aiDurationOk && aiSettingsReady)) &&
-    (activeTab !== 'auto-chroma' || chromaDurationOk)
+  const canStartProcess = isBatchMode
+    ? batchItems.length >= 2 &&
+      !isBusy &&
+      (activeTab !== 'compress' || compressCodecPair.compatibilityWarning === null) &&
+      (activeTab !== 'enhance' || activeEnhanceFilters.length > 0) &&
+      (activeTab !== 'ai-upscale' || (aiAnyGpuAvailable && aiSettingsReady))
+    : Boolean(effectiveInputVideo) &&
+      !isBusy &&
+      !nativeFormatWarning &&
+      (activeTab !== 'compress' || compressSettingsReady) &&
+      (activeTab !== 'enhance' || activeEnhanceFilters.length > 0) &&
+      (activeTab !== 'ai-upscale' || (aiAnyGpuAvailable && aiDurationOk && aiSettingsReady)) &&
+      (activeTab !== 'auto-chroma' || chromaDurationOk)
 
   // [BUG-09] Ringkasan singkat opsi aktif Tab 3 untuk ditampilkan tepat di atas tombol proses
   const enhanceActiveSummaryItems = (() => {
@@ -932,6 +1351,9 @@ export default function App() {
   )
 
   const actionButtonLabel = (() => {
+    if (isBatchRunning && batchActiveItemIndex >= 0) {
+      return `Memproses Video ${batchActiveItemIndex + 1} dari ${batchItems.length}...`
+    }
     if (isLoadingEngine) return 'Memuat Engine FFmpeg...'
     if (aiFrameProgress && isAiRunning) return aiFrameProgress.label
     if (chromaFrameProgress && isChromaRunning) return chromaFrameProgress.label
@@ -941,6 +1363,38 @@ export default function App() {
     if (isPreparing || isProcessing || isAiRunning || isChromaRunning) {
       return statusStage || 'Memproses Video...'
     }
+
+    if (isBatchMode) {
+      const count = batchItems.length
+      if (activeTab === 'ai-upscale' && !aiAnyGpuAvailable) {
+        return 'Membutuhkan WebGPU atau WebGL2'
+      }
+      if (activeTab === 'convert') {
+        return `Ubah ${count} Video ke .${outputFormat.toUpperCase()}${fastRemux ? ' (Mode Kilat)' : ''}`
+      }
+      if (activeTab === 'compress') {
+        const tpl = SOCIAL_TEMPLATES.find((t) => t.id === compressOptions.socialTemplate)
+        return `Kompres ${count} Video (${tpl && tpl.id !== 'custom' ? tpl.name : 'Custom'})`
+      }
+      if (activeTab === 'stabilize') {
+        const stab = getStabilizerOption(stabilizerLevel)
+        return `Stabilkan ${count} Video (${stab.title})`
+      }
+      if (activeTab === 'audio-denoise') {
+        return audioDenoiseOptions.outputMode === 'audio-mp3'
+          ? `Ekstrak & Bersihkan Audio (${count} Video ke .MP3)`
+          : `Bersihkan Audio (${count} Video)`
+      }
+      if (activeTab === 'auto-chroma') {
+        const tpl = getChromaTemplateDef(chromaKeyOptions.templateId)
+        return `Proses ${count} Video (${tpl.isInstant ? tpl.shortTitle : 'Auto Green Screen'})`
+      }
+      if (activeTab === 'ai-upscale') {
+        return `Upscale ${count} Video (GPU HD)`
+      }
+      return `Jernihkan ${count} Video`
+    }
+
     if (nativeFormatWarning) {
       return 'Butuh Format MP4, MOV, atau WebM'
     }
@@ -1062,28 +1516,18 @@ export default function App() {
     })
   }
 
-  const handleProcessVideo = async () => {
-    const workVideo = effectiveInputVideo
-    if (!workVideo || !canStartProcess) return
-
-    const replacingStepId = isSeparateMp3Export ? null : (activeTabStep?.id ?? null)
-
-    cancelledByUserRef.current = false
-    setPendingRemoveStepId(null)
-    setPendingResetAll(false)
-    dismissChainNotice()
-    revokeViewedBeforeUrl()
-    setProcessError(null)
-    setResult(null)
-    setActiveResultStepId(null)
-    setAiFrameProgress(null)
-    setAiFallbackNotice(null)
-    setChromaFrameProgress(null)
-    setIsPreparing(true)
-    setStatusStage('Menyiapkan engine FFmpeg...')
-
+  /**
+   * Menjalankan 1 video pada tab fitur yang sedang aktif.
+   * Dipakai bersama oleh Mode 1 Video (batchIndex = undefined) dan Mode Antrean Multi-Video (batchIndex = 1..N)
+   * agar logika seluruh 7 tab 100% konsisten, MEMFS selalu dibersihkan tuntas, dan nama file bermerek akurat.
+   */
+  const executeSingleVideoForActiveTab = async (
+    workVideo: SelectedVideo,
+    batchIndex?: number,
+  ): Promise<ProcessedVideoResult> => {
+    const isBatchItem = batchIndex !== undefined
     const startedAt = performance.now()
-    const inputExt = workVideo.extension || 'mp4'
+    const inputExt = (workVideo.extension || 'mp4').toLowerCase()
     const inputName = `input.${inputExt}`
     const durationSec = workVideo.metadata.duration
     const workDimensions = {
@@ -1113,20 +1557,59 @@ export default function App() {
             : `output.${targetFormat}`
     let finalMimeType = audioTarget ? audioTarget.mimeType : getMimeTypeForFormat(targetFormat)
 
+    const finalizeOutput = async (
+      outputMemfsName: string,
+      mimeType: string,
+      extraTempFiles?: string[],
+    ): Promise<{ url: string; blob: Blob }> => {
+      const { url, blob } = await readOutputAsBlobURL(outputMemfsName, mimeType)
+      if (isBatchItem) {
+        // Buat Blob URL milik antrean batch yang tidak akan dicabut bila video berikutnya di-skip / cancel()
+        const ownedBatchUrl = URL.createObjectURL(blob)
+        batchResultUrlsRef.current.add(ownedBatchUrl)
+        // Hapus seluruh file temp MEMFS (input, output, frame AI/Chroma) + cabut URL ephemeral milik useFFmpeg
+        await cleanupMemory(extraTempFiles ? { files: extraTempFiles } : undefined)
+        return { url: ownedBatchUrl, blob }
+      }
+      await cleanupMemory({
+        files: extraTempFiles,
+        preserveBlobUrls: [url],
+      })
+      return { url, blob }
+    }
+
+    const throwIfCancelled = () => {
+      if (cancelledByUserRef.current) {
+        throw new DOMException('Proses dibatalkan oleh pengguna.', 'AbortError')
+      }
+    }
+
+    setExpectedDuration(durationSec)
+    setIsPreparing(true)
+    setStatusStage(
+      isBatchItem
+        ? `Video #${batchIndex}: menyiapkan engine FFmpeg...`
+        : 'Menyiapkan engine FFmpeg...',
+    )
+
     try {
       await cleanupMemory()
       const ffmpeg = await loadEngine()
-
-      if (cancelledByUserRef.current) return
+      throwIfCancelled()
 
       // TAB 5: AI / GPU HD UPSCALER (BETA) - Native <video>+<canvas> + Offscreen WebGPU/WebGL2
       if (activeTab === 'ai-upscale') {
+        if (!NATIVE_DECODER_EXTENSIONS.has(inputExt)) {
+          throw new Error(
+            `Format .${inputExt.toUpperCase()} belum didukung langsung oleh GPU HD Upscaler. Gunakan MP4, MOV, atau WebM.`,
+          )
+        }
         if (!aiAnyGpuAvailable) {
           throw new Error(
             'GPU HD Upscaler membutuhkan browser dengan dukungan WebGPU atau WebGL2.',
           )
         }
-        if (!aiDurationOk) {
+        if (!isDurationWithinAiLimit(durationSec, isMobile)) {
           throw new Error(
             `Durasi video melebihi batas maksimal ${aiMaxDurationSec} detik untuk GPU HD Upscaler di perangkat ini.`,
           )
@@ -1190,14 +1673,14 @@ export default function App() {
           onLog: addLog,
         })
 
-        if (cancelledByUserRef.current) return
+        throwIfCancelled()
 
         setStatusStage('Menyiapkan pratinjau & membersihkan RAM...')
-        const { url, blob } = await readOutputAsBlobURL(finalOutputName, finalMimeType)
-        await cleanupMemory({
-          files: aiOutcome.tempFiles,
-          preserveBlobUrls: [url],
-        })
+        const { url, blob } = await finalizeOutput(
+          finalOutputName,
+          finalMimeType,
+          aiOutcome.tempFiles,
+        )
 
         if (preAiEstimate) {
           const midBytes =
@@ -1209,7 +1692,7 @@ export default function App() {
           )
         }
 
-        const downloadFileName = buildBrandedFilename('gpu-hd', 'mp4')
+        const downloadFileName = buildBrandedFilename('gpu-hd', 'mp4', batchIndex)
 
         const srcRes =
           workDimensions.width && workDimensions.height
@@ -1220,39 +1703,39 @@ export default function App() {
           `Selesai: ${aiOutcome.backendName} • ${aiOutcome.totalFrames} frame (${aiOutcome.targetWidth}×${aiOutcome.targetHeight})`,
         )
 
-        commitProcessedResult(
-          {
-            url,
-            blob,
-            fileName: downloadFileName,
-            mimeType: finalMimeType,
-            outputSizeBytes: blob.size,
-            originalSizeBytes: workVideo.sizeBytes,
-            durationSeconds: aiEffectiveDur,
-            feature: 'ai-upscale',
-            usedFallbackEncode: false,
-            summaryNote: `${aiOutcome.backendName} • ${aiOutcome.totalFrames} frame (${aiOutcome.targetWidth}×${aiOutcome.targetHeight})`,
-            elapsedMs: performance.now() - startedAt,
-            details: {
-              kind: 'ai-upscale',
-              gpuEngine: aiOutcome.backendName,
-              sourceResolution: srcRes,
-              targetResolution: `${aiOutcome.targetWidth}×${aiOutcome.targetHeight}`,
-              totalFrames: aiOutcome.totalFrames,
-              targetFps: effectiveAiSettings.targetFps,
-              fallbackNotice: aiOutcome.fallbackReason,
-            },
+        return {
+          url,
+          blob,
+          fileName: downloadFileName,
+          mimeType: finalMimeType,
+          outputSizeBytes: blob.size,
+          originalSizeBytes: workVideo.sizeBytes,
+          durationSeconds: aiEffectiveDur,
+          feature: 'ai-upscale',
+          usedFallbackEncode: false,
+          summaryNote: `${aiOutcome.backendName} • ${aiOutcome.totalFrames} frame (${aiOutcome.targetWidth}×${aiOutcome.targetHeight})`,
+          elapsedMs: performance.now() - startedAt,
+          details: {
+            kind: 'ai-upscale',
+            gpuEngine: aiOutcome.backendName,
+            sourceResolution: srcRes,
+            targetResolution: `${aiOutcome.targetWidth}×${aiOutcome.targetHeight}`,
+            totalFrames: aiOutcome.totalFrames,
+            targetFps: effectiveAiSettings.targetFps,
+            fallbackNotice: aiOutcome.fallbackReason,
           },
-          workVideo,
-          replacingStepId,
-        )
-        return
+        }
       }
 
       // TAB 7: AUTO GREEN SCREEN (MediaPipe Subjek Manusia / AI RMBG-1.4 Semua Objek + FFmpeg MP4)
       if (activeTab === 'auto-chroma') {
+        if (!NATIVE_DECODER_EXTENSIONS.has(inputExt)) {
+          throw new Error(
+            `Format .${inputExt.toUpperCase()} belum didukung langsung oleh Auto Green Screen. Gunakan MP4, MOV, atau WebM.`,
+          )
+        }
         const maxChromaSec = getChromaMaxDurationSec(isMobile, chromaKeyOptions.subjectMode)
-        if (!chromaDurationOk) {
+        if (!isDurationWithinChromaLimit(durationSec, isMobile, chromaKeyOptions.subjectMode)) {
           throw new Error(
             `Durasi video melebihi batas maksimal ${maxChromaSec} detik untuk mode Auto Green Screen aktif di perangkat ini.`,
           )
@@ -1317,14 +1800,14 @@ export default function App() {
           onLog: addLog,
         })
 
-        if (cancelledByUserRef.current) return
+        throwIfCancelled()
 
         setStatusStage('Menyiapkan pratinjau & membersihkan RAM...')
-        const { url, blob } = await readOutputAsBlobURL(finalOutputName, 'video/mp4')
-        await cleanupMemory({
-          files: chromaOutcome.tempFiles,
-          preserveBlobUrls: [url],
-        })
+        const { url, blob } = await finalizeOutput(
+          finalOutputName,
+          'video/mp4',
+          chromaOutcome.tempFiles,
+        )
 
         if (preChromaEstimate) {
           const midBytes =
@@ -1337,6 +1820,7 @@ export default function App() {
         const downloadFileName = buildBrandedFilename(
           getChromaOutputSuffix(chromaKeyOptions),
           'mp4',
+          batchIndex,
         )
 
         const resLabel = `${chromaOutcome.targetWidth}×${chromaOutcome.targetHeight}`
@@ -1347,42 +1831,41 @@ export default function App() {
           `Selesai: ${templateOrModeLabel} • ${chromaOutcome.totalFrames} frame (${resLabel})`,
         )
 
-        commitProcessedResult(
-          {
-            url,
-            blob,
-            fileName: downloadFileName,
-            mimeType: 'video/mp4',
-            outputSizeBytes: blob.size,
-            originalSizeBytes: workVideo.sizeBytes,
-            durationSeconds: chromaOutcome.effectiveDurationSec,
-            feature: 'auto-chroma',
-            usedFallbackEncode: false,
-            summaryNote: `${templateOrModeLabel} • ${chromaOutcome.totalFrames} frame (${resLabel})`,
-            elapsedMs: performance.now() - startedAt,
-            details: {
-              kind: 'auto-chroma',
-              templateOrModeLabel,
-              bgModeLabel: bgDisplay,
-              resolutionLabel: resLabel,
-              totalFrames: chromaOutcome.totalFrames,
-              targetFps: chromaKeyOptions.targetFps,
-              delegateLabel: chromaOutcome.delegateLabel,
-            },
+        return {
+          url,
+          blob,
+          fileName: downloadFileName,
+          mimeType: 'video/mp4',
+          outputSizeBytes: blob.size,
+          originalSizeBytes: workVideo.sizeBytes,
+          durationSeconds: chromaOutcome.effectiveDurationSec,
+          feature: 'auto-chroma',
+          usedFallbackEncode: false,
+          summaryNote: `${templateOrModeLabel} • ${chromaOutcome.totalFrames} frame (${resLabel})`,
+          elapsedMs: performance.now() - startedAt,
+          details: {
+            kind: 'auto-chroma',
+            templateOrModeLabel,
+            bgModeLabel: bgDisplay,
+            resolutionLabel: resLabel,
+            totalFrames: chromaOutcome.totalFrames,
+            targetFps: chromaKeyOptions.targetFps,
+            delegateLabel: chromaOutcome.delegateLabel,
           },
-          workVideo,
-          replacingStepId,
-        )
-        return
+        }
       }
 
       // TAB 1, 2, 3, 4, 6 (FFmpeg.wasm)
-      setStatusStage('Menyalin video ke memori lokal browser...')
+      setStatusStage(
+        isBatchItem
+          ? `Video #${batchIndex}: menyalin video ke memori lokal browser...`
+          : 'Menyalin video ke memori lokal browser...',
+      )
       await writeInputFile(inputName, workVideo.file)
       registerTempFile(finalOutputName)
       setIsPreparing(false)
 
-      if (cancelledByUserRef.current) return
+      throwIfCancelled()
 
       const outputName = finalOutputName
       let exitCode = 0
@@ -1493,16 +1976,70 @@ export default function App() {
           }
         }
       } else if (activeTab === 'compress') {
+        let effectiveCompressOptions = compressOptions
+        if (isBatchItem) {
+          if (compressOptions.socialTemplate !== 'custom') {
+            effectiveCompressOptions = applySocialTemplate(
+              compressOptions.socialTemplate,
+              compressOptions,
+              workVideo.sizeBytes,
+              durationSec,
+            )
+          } else if (compressOptions.compressionMode === 'target-size') {
+            const trimCheck = validateTrimSettings(
+              compressOptions.trimStart,
+              compressOptions.trimEnd,
+              durationSec,
+            )
+            const bounds = computeTargetSizeBounds(
+              workVideo.sizeBytes,
+              trimCheck.effectiveDurationSec,
+              compressOptions.removeAudio,
+              durationSec !== null && durationSec > 0,
+            )
+            const clampedTarget = Number(
+              Math.min(bounds.maxMB, Math.max(bounds.minMB, compressOptions.targetSizeMB)).toFixed(1),
+            )
+            effectiveCompressOptions = { ...compressOptions, targetSizeMB: clampedTarget }
+          }
+
+          const perVideoTrim = validateTrimSettings(
+            effectiveCompressOptions.trimStart,
+            effectiveCompressOptions.trimEnd,
+            durationSec,
+          )
+          if (!perVideoTrim.isValid) {
+            throw new Error(
+              perVideoTrim.error ||
+                'Pengaturan potong durasi (Trim) tidak cocok dengan panjang video ini.',
+            )
+          }
+          const perVideoCrop = validateCropSettings(
+            effectiveCompressOptions,
+            workDimensions.width,
+            workDimensions.height,
+          )
+          if (!perVideoCrop.isValid) {
+            throw new Error(
+              perVideoCrop.error ||
+                'Pengaturan potong layar (Crop) tidak cocok dengan resolusi video ini.',
+            )
+          }
+        }
+
         const preCompressEst = estimateCompressedSize(
-          compressOptions,
+          effectiveCompressOptions,
           workVideo.sizeBytes,
           durationSec,
           workDimensions,
           inputExt,
         )
-        if (compressOptions.compressionMode === 'crf' && compressOptions.videoCodec !== 'copy') {
+        if (
+          effectiveCompressOptions.compressionMode === 'crf' &&
+          effectiveCompressOptions.videoCodec !== 'copy'
+        ) {
           calibrationToRecord = {
-            key: `compress:${compressOptions.socialTemplate}`,
+            key: `compress:${effectiveCompressOptions.socialTemplate}`,
             midBytes:
               ((preCompressEst.minEstimatedMB + preCompressEst.maxEstimatedMB) / 2) * 1024 * 1024,
           }
@@ -1510,7 +2047,7 @@ export default function App() {
         const built = buildAdvancedCompressArgs(
           inputName,
           outputName,
-          compressOptions,
+          effectiveCompressOptions,
           isMobile,
           recommendedThreads,
           workVideo.sizeBytes,
@@ -1518,15 +2055,17 @@ export default function App() {
           workDimensions,
           inputExt,
         )
-        const activeTpl = SOCIAL_TEMPLATES.find((t) => t.id === compressOptions.socialTemplate)
+        const activeTpl = SOCIAL_TEMPLATES.find(
+          (t) => t.id === effectiveCompressOptions.socialTemplate,
+        )
         const modeDesc =
           built.resolvedVideoCodec === 'copy'
             ? 'Copy'
-            : compressOptions.compressionMode === 'target-size'
-              ? `Target ${compressOptions.targetSizeMB.toFixed(1)} MB (${built.targetVideoBitrateKbps ?? 0} kbps)`
-              : `CRF ${getEffectiveCrf(compressOptions)}`
+            : effectiveCompressOptions.compressionMode === 'target-size'
+              ? `Target ${effectiveCompressOptions.targetSizeMB.toFixed(1)} MB (${built.targetVideoBitrateKbps ?? 0} kbps)`
+              : `CRF ${getEffectiveCrf(effectiveCompressOptions)}`
 
-        suffix = getCompressOutputTag(compressOptions)
+        suffix = getCompressOutputTag(effectiveCompressOptions)
 
         setStatusStage(
           `Mengompres ke .${targetFormat.toUpperCase()} (${
@@ -1565,8 +2104,8 @@ export default function App() {
                   : built.resolvedAudioCodec === 'libmp3lame'
                     ? 'MP3'
                     : built.resolvedAudioCodec.toUpperCase()
-        const derivedTpl = compressOptions.derivedFromTemplate
-          ? SOCIAL_TEMPLATES.find((t) => t.id === compressOptions.derivedFromTemplate)
+        const derivedTpl = effectiveCompressOptions.derivedFromTemplate
+          ? SOCIAL_TEMPLATES.find((t) => t.id === effectiveCompressOptions.derivedFromTemplate)
           : null
         const customPrefix = derivedTpl ? `Custom (diubah dari ${derivedTpl.name})` : 'Custom'
         const modeOrTemplate =
@@ -1574,9 +2113,9 @@ export default function App() {
             ? activeTpl.name
             : built.resolvedVideoCodec === 'copy'
               ? `${customPrefix} • Copy Video`
-              : compressOptions.compressionMode === 'target-size'
-                ? `${customPrefix} • Target ${compressOptions.targetSizeMB.toFixed(1)} MB`
-                : `${customPrefix} • CRF ${getEffectiveCrf(compressOptions)}`
+              : effectiveCompressOptions.compressionMode === 'target-size'
+                ? `${customPrefix} • Target ${effectiveCompressOptions.targetSizeMB.toFixed(1)} MB`
+                : `${customPrefix} • CRF ${getEffectiveCrf(effectiveCompressOptions)}`
 
         resultDetails = {
           kind: 'compress',
@@ -1788,6 +2327,7 @@ export default function App() {
           fallbackCodecLabel: usedFallbackEncode ? 'H.264/AAC' : undefined,
         }
       } else {
+        const workEnhanceFilters = buildEnhanceFilterChain(enhanceOptions, workDimensions)
         const preEnhanceEst = estimateEnhanceOutputSize(
           enhanceOptions,
           workVideo.sizeBytes,
@@ -1818,7 +2358,7 @@ export default function App() {
           notes.length > 0 ? `Memproses: ${notes.join(' + ')}...` : 'Menjernihkan video...',
         )
         addLog(
-          `[LocalVid] Menjalankan Tab Jernihkan & HD (${recommendedThreads} thread) • -vf "${activeEnhanceFilters.join(
+          `[LocalVid] Menjalankan Tab Jernihkan & HD (${recommendedThreads} thread) • -vf "${workEnhanceFilters.join(
             ',',
           )}"`,
         )
@@ -1875,7 +2415,7 @@ export default function App() {
         }
       }
 
-      if (cancelledByUserRef.current) return
+      throwIfCancelled()
 
       if (exitCode !== 0) {
         throw new Error(
@@ -1884,9 +2424,7 @@ export default function App() {
       }
 
       setStatusStage('Menyiapkan pratinjau & membersihkan RAM...')
-      const { url, blob } = await readOutputAsBlobURL(finalOutputName, finalMimeType)
-
-      await cleanupMemory({ preserveBlobUrls: [url] })
+      const { url, blob } = await finalizeOutput(finalOutputName, finalMimeType)
 
       if (calibrationToRecord) {
         recordAdaptiveSizeCalibration(
@@ -1896,26 +2434,56 @@ export default function App() {
         )
       }
 
-      const downloadFileName = buildBrandedFilename(suffix, finalOutputExt)
+      const downloadFileName = buildBrandedFilename(suffix, finalOutputExt, batchIndex)
 
-      commitProcessedResult(
-        {
-          url,
-          blob,
-          fileName: downloadFileName,
-          mimeType: finalMimeType,
-          outputSizeBytes: blob.size,
-          originalSizeBytes: workVideo.sizeBytes,
-          durationSeconds: resultDurationSec,
-          feature: activeTab,
-          usedFallbackEncode,
-          summaryNote,
-          elapsedMs: performance.now() - startedAt,
-          details: resultDetails,
-        },
-        workVideo,
-        replacingStepId,
-      )
+      return {
+        url,
+        blob,
+        fileName: downloadFileName,
+        mimeType: finalMimeType,
+        outputSizeBytes: blob.size,
+        originalSizeBytes: workVideo.sizeBytes,
+        durationSeconds: resultDurationSec,
+        feature: activeTab,
+        usedFallbackEncode,
+        summaryNote,
+        elapsedMs: performance.now() - startedAt,
+        details: resultDetails,
+      }
+    } finally {
+      aiAbortControllerRef.current = null
+      chromaAbortControllerRef.current = null
+      setIsPreparing(false)
+      setIsAiRunning(false)
+      setIsChromaRunning(false)
+      setAiFrameProgress(null)
+      setChromaFrameProgress(null)
+    }
+  }
+
+  const handleProcessVideo = async () => {
+    const workVideo = effectiveInputVideo
+    if (!workVideo || !canStartProcess) return
+
+    const replacingStepId = isSeparateMp3Export ? null : (activeTabStep?.id ?? null)
+
+    cancelledByUserRef.current = false
+    setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+    dismissChainNotice()
+    revokeViewedBeforeUrl()
+    setProcessError(null)
+    setResult(null)
+    setActiveResultStepId(null)
+    setAiFrameProgress(null)
+    setAiFallbackNotice(null)
+    setChromaFrameProgress(null)
+
+    try {
+      const processed = await executeSingleVideoForActiveTab(workVideo)
+      if (!cancelledByUserRef.current) {
+        commitProcessedResult(processed, workVideo, replacingStepId)
+      }
     } catch (err) {
       const isAbort = err instanceof DOMException && err.name === 'AbortError'
       if (!cancelledByUserRef.current && !isAbort) {
@@ -1926,12 +2494,214 @@ export default function App() {
         await cleanupMemory()
       }
     } finally {
-      aiAbortControllerRef.current = null
-      chromaAbortControllerRef.current = null
-      setIsPreparing(false)
-      setIsAiRunning(false)
-      setIsChromaRunning(false)
       setStatusStage('')
+    }
+  }
+
+  const handleProcessBatch = async () => {
+    if (!isBatchMode || !canStartProcess || batchItems.length < 2) return
+
+    const queueSnapshot = batchItems.map((item) => ({ ...item }))
+    const batchStartedAt = performance.now()
+    let wasCancelledEarly = false
+
+    cancelledByUserRef.current = false
+    batchControlRef.current = { skipCurrent: false, cancelAll: false }
+    setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+    dismissChainNotice()
+    setProcessError(null)
+    setAiFallbackNotice(null)
+    revokeAllBatchResultUrls()
+    setBatchResultMeta(null)
+    setIsBatchRunning(true)
+    setBatchActiveItemIndex(0)
+
+    setBatchItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        status: 'pending',
+        progress: 0,
+        result: null,
+        outputFile: null,
+        errorMessage: undefined,
+      })),
+    )
+
+    // Screen Wake Lock API: jaga layar HP Android & iPhone tetap menyala selama antrean berjalan
+    const wakeLock = createScreenWakeLockController(addLog)
+    wakeLockRef.current = wakeLock
+    const wakeLocked = await wakeLock.acquire()
+    setIsWakeLockActive(wakeLocked)
+
+    addLog(
+      `[LocalVid Batch] Memulai antrean ${queueSnapshot.length} video pada fitur ${FEATURE_TAB_LABELS[activeTab]} (render berurutan 1 per 1).`,
+    )
+
+    try {
+      for (let i = 0; i < queueSnapshot.length; i += 1) {
+        if (batchControlRef.current.cancelAll) {
+          wasCancelledEarly = true
+          break
+        }
+
+        const item = queueSnapshot[i]
+        batchControlRef.current.skipCurrent = false
+        cancelledByUserRef.current = false
+        resetProcessState()
+        setProcessError(null)
+        setBatchActiveItemIndex(i)
+
+        setBatchItems((prev) =>
+          prev.map((entry, idx) =>
+            idx === i
+              ? {
+                  ...entry,
+                  status: 'processing',
+                  progress: 0,
+                  errorMessage: undefined,
+                }
+              : entry,
+          ),
+        )
+
+        addLog(
+          `[LocalVid Batch] === Video ${item.index}/${queueSnapshot.length}: ${item.file.name} (${formatFileSizeMB(item.file.size)}) ===`,
+        )
+
+        let itemMeta = item.metadata
+        if (!itemMeta) {
+          itemMeta = await readVideoMetadata(item.file)
+          setBatchItems((prev) =>
+            prev.map((entry, idx) =>
+              idx === i
+                ? { ...entry, metadata: itemMeta, isReadingMetadata: false }
+                : entry,
+            ),
+          )
+        }
+
+        const workVideo: SelectedVideo = {
+          file: item.file,
+          name: item.file.name,
+          extension: item.extension,
+          sizeBytes: item.file.size,
+          metadata: itemMeta,
+        }
+
+        try {
+          const processed = await executeSingleVideoForActiveTab(workVideo, item.index)
+          const outputFile = new File([processed.blob], processed.fileName, {
+            type: processed.mimeType || processed.blob.type || 'video/mp4',
+            lastModified: Date.now(),
+          })
+
+          setBatchItems((prev) =>
+            prev.map((entry, idx) =>
+              idx === i
+                ? {
+                    ...entry,
+                    status: 'done',
+                    progress: 100,
+                    result: processed,
+                    outputFile,
+                    errorMessage: undefined,
+                  }
+                : entry,
+            ),
+          )
+
+          addLog(
+            `[LocalVid Batch] Video #${item.index} selesai -> ${processed.fileName} (${formatFileSizeMB(outputFile.size)}). MEMFS dibersihkan.`,
+          )
+        } catch (err) {
+          // Isolasi error & pembersihan MEMFS wajib sebelum lanjut ke video berikutnya
+          await cleanupMemory()
+
+          if (batchControlRef.current.cancelAll) {
+            wasCancelledEarly = true
+            setBatchItems((prev) =>
+              prev.map((entry, idx) =>
+                idx >= i && entry.status !== 'done'
+                  ? {
+                      ...entry,
+                      status: 'skipped',
+                      progress: 0,
+                      errorMessage:
+                        idx === i
+                          ? 'Dibatalkan oleh pengguna.'
+                          : 'Antrean dihentikan sebelum video ini diproses.',
+                    }
+                  : entry,
+              ),
+            )
+            resetProcessState()
+            break
+          }
+
+          if (batchControlRef.current.skipCurrent) {
+            setBatchItems((prev) =>
+              prev.map((entry, idx) =>
+                idx === i
+                  ? {
+                      ...entry,
+                      status: 'skipped',
+                      progress: 0,
+                      errorMessage: 'Dilewati oleh pengguna.',
+                    }
+                  : entry,
+              ),
+            )
+            resetProcessState()
+            // Beri waktu 300 ms agar worker FFmpeg baru hasil respawn siap bersih
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 300))
+            continue
+          }
+
+          const message =
+            err instanceof Error ? err.message : 'Gagal memproses video ini.'
+          setBatchItems((prev) =>
+            prev.map((entry, idx) =>
+              idx === i
+                ? {
+                    ...entry,
+                    status: 'error',
+                    progress: 0,
+                    errorMessage: message,
+                  }
+                : entry,
+            ),
+          )
+          addLog(`[LocalVid Batch] Video #${item.index} gagal: ${message}. Lanjut ke video berikutnya.`)
+          resetProcessState()
+        }
+
+        // Jeda 150 ms untuk memberi waktu Garbage Collector browser membebaskan RAM antar video
+        if (i < queueSnapshot.length - 1 && !batchControlRef.current.cancelAll) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 150))
+        }
+      }
+    } finally {
+      await wakeLock.release()
+      if (wakeLockRef.current === wakeLock) {
+        wakeLockRef.current = null
+      }
+      setIsWakeLockActive(false)
+      setIsBatchRunning(false)
+      setBatchActiveItemIndex(-1)
+      setStatusStage('')
+      setProcessError(null)
+      resetProcessState()
+      setBatchResultMeta({
+        feature: activeTab,
+        totalElapsedMs: performance.now() - batchStartedAt,
+        wasCancelledEarly,
+      })
+      addLog(
+        wasCancelledEarly
+          ? '[LocalVid Batch] Antrean dihentikan lebih awal. Hasil video yang sudah selesai tetap tersedia untuk diunduh.'
+          : '[LocalVid Batch] Seluruh antrean video selesai diproses.',
+      )
     }
   }
 
@@ -1951,8 +2721,54 @@ export default function App() {
     (isProcessing && !hasExpectedDuration && displayedPercent === 0)
   const showProgressCard = isBusy || progress > 0 || activeFrameProgress !== null
 
-  const step1Done = Boolean(selectedVideo)
-  const step3Done = Boolean(result)
+  // Sinkronkan progres video aktif ke kartu antrean di UploadZone selama Batch Running
+  useEffect(() => {
+    if (!isBatchRunning || batchActiveItemIndex < 0) return
+    setBatchItems((prev) =>
+      prev.map((item, idx) =>
+        idx === batchActiveItemIndex &&
+        item.status === 'processing' &&
+        item.progress !== displayedPercent
+          ? { ...item, progress: displayedPercent }
+          : item,
+      ),
+    )
+  }, [isBatchRunning, batchActiveItemIndex, displayedPercent])
+
+  const batchProgressStats = useMemo(() => {
+    if (!isBatchMode) {
+      return {
+        doneCount: 0,
+        failedOrSkippedCount: 0,
+        pendingCount: 0,
+        overallPercent: 0,
+        activeItem: null as BatchQueueItem | null,
+      }
+    }
+    let doneCount = 0
+    let failedOrSkippedCount = 0
+    let pendingCount = 0
+    for (const item of batchItems) {
+      if (item.status === 'done') doneCount += 1
+      else if (item.status === 'error' || item.status === 'skipped') failedOrSkippedCount += 1
+      else if (item.status === 'pending') pendingCount += 1
+    }
+    const activeItem =
+      batchActiveItemIndex >= 0 && batchActiveItemIndex < batchItems.length
+        ? batchItems[batchActiveItemIndex]
+        : null
+    const completedFraction =
+      doneCount + failedOrSkippedCount + (isBatchRunning && activeItem ? displayedPercent / 100 : 0)
+    const overallPercent =
+      batchItems.length > 0
+        ? Math.min(100, Math.max(0, Math.round((completedFraction / batchItems.length) * 100)))
+        : 0
+    return { doneCount, failedOrSkippedCount, pendingCount, overallPercent, activeItem }
+  }, [isBatchMode, batchItems, batchActiveItemIndex, isBatchRunning, displayedPercent])
+
+  const hasBatchResultView = Boolean(isBatchMode && batchResultMeta && !isBatchRunning)
+  const step1Done = Boolean(selectedVideo) || isBatchMode
+  const step3Done = Boolean(result) || hasBatchResultView
 
   const ctaGradientClass =
     activeTab === 'compress'
@@ -2176,14 +2992,19 @@ export default function App() {
 
         {/* Main Workspace */}
         <main id="studio-workspace" className="flex flex-col gap-5">
-          {/* 1. Area Upload Lokal + Bar Alur Edit Ringkas */}
+          {/* 1. Area Upload Lokal + Antrean Multi-Video / Bar Alur Edit Ringkas */}
           <UploadZone
             selectedVideo={selectedVideo}
+            batchItems={batchItems}
+            isBatchMode={isBatchMode}
+            isBatchRunning={isBatchRunning}
             pipelineSteps={pipelineSteps}
             isMobile={isMobile}
             disabled={isBusy}
             isReadingMetadata={isReadingMetadata}
-            onSelectFile={(file) => void handleSelectFile(file)}
+            onSelectFiles={(files) => void handleSelectFiles(files)}
+            onAddMoreFiles={(files) => void handleAddMoreFiles(files)}
+            onRemoveBatchItem={(itemId) => void handleRemoveBatchItem(itemId)}
             onClearFile={() => void handleClearFile()}
             onSelectStepTab={handleTabChange}
             onRemoveStep={handleRequestRemoveStep}
@@ -2348,12 +3169,38 @@ export default function App() {
               chromaKeyOptions={chromaKeyOptions}
               onChromaKeyOptionsChange={setChromaKeyOptions}
               onLog={addLog}
-              pipelineSteps={pipelineSteps}
+              pipelineSteps={isBatchMode ? [] : pipelineSteps}
               nativeFormatWarning={nativeFormatWarning}
               onViewStepResult={(stepId) => void handleViewStepResult(stepId)}
               onRemoveStep={handleRequestRemoveStep}
+              batchModeInfo={
+                isBatchMode
+                  ? {
+                      totalCount: batchItems.length,
+                      previewIndex: safeBatchPreviewIndex,
+                      items: batchItems.map((item) => ({
+                        id: item.id,
+                        index: item.index,
+                        name: item.file.name,
+                      })),
+                      onPreviewIndexChange: setBatchPreviewIndex,
+                    }
+                  : null
+              }
               resultView={
-                result ? (
+                hasBatchResultView && batchResultMeta ? (
+                  <BatchResultView
+                    items={batchItems}
+                    feature={batchResultMeta.feature}
+                    totalElapsedMs={batchResultMeta.totalElapsedMs}
+                    isMobile={isMobile}
+                    deviceType={deviceType}
+                    wasCancelledEarly={batchResultMeta.wasCancelledEarly}
+                    onContinueBatchWithOutputs={() => void handleContinueBatchWithOutputs()}
+                    onEditSettings={handleEditSettingsFromBatchResult}
+                    onChangeAllVideos={handleChangeVideoFromResult}
+                  />
+                ) : result ? (
                   <ResultPreview
                     result={result}
                     beforeUrl={viewedResultBeforeUrl ?? sourcePreviewUrl}
@@ -2376,7 +3223,7 @@ export default function App() {
           </div>
 
           {/* Tombol Proses Utama & Progress Bar Real-time (Sembunyikan saat Clean Result View tampil) */}
-          {!result && (
+          {!result && !hasBatchResultView && (
             <section aria-label="Eksekusi dan progres pemrosesan" className="flex flex-col gap-3">
               {/* [BUG-09] Ringkasan singkat opsi aktif tepat di atas tombol proses pada Tab 3 */}
               {activeTab === 'enhance' && (
@@ -2439,7 +3286,7 @@ export default function App() {
               <div className="flex flex-col gap-2.5 sm:flex-row">
                 <button
                   type="button"
-                  onClick={() => void handleProcessVideo()}
+                  onClick={() => void (isBatchMode ? handleProcessBatch() : handleProcessVideo())}
                   disabled={!canStartProcess}
                   className={`inline-flex min-h-14 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r px-6 py-3.5 text-sm font-bold text-white transition-[transform,filter,box-shadow] duration-150 hover:brightness-105 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-none disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none sm:text-base ${ctaGradientClass}`}
                 >
@@ -2451,15 +3298,36 @@ export default function App() {
                   <span className="truncate">{actionButtonLabel}</span>
                 </button>
 
-                {isBusy && (
-                  <button
-                    type="button"
-                    onClick={handleCancel}
-                    className="inline-flex min-h-14 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl border-2 border-rose-200 bg-rose-50 px-5 py-3.5 text-sm font-bold text-rose-700 transition-[background-color,border-color,transform] duration-150 hover:border-rose-300 hover:bg-rose-100 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2"
-                  >
-                    <Square aria-hidden="true" className="h-4 w-4 fill-current" />
-                    <span>Batalkan</span>
-                  </button>
+                {isBusy && isBatchRunning ? (
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={handleSkipCurrentBatchItem}
+                      className="inline-flex min-h-14 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3.5 text-sm font-bold text-amber-900 transition-[background-color,border-color,transform] duration-150 hover:border-amber-400 hover:bg-amber-100 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 focus-visible:ring-offset-2"
+                    >
+                      <SkipForward aria-hidden="true" className="h-4 w-4" />
+                      <span>Lewati Video Ini</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelAllBatch}
+                      className="inline-flex min-h-14 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl border-2 border-rose-200 bg-rose-50 px-4 py-3.5 text-sm font-bold text-rose-700 transition-[background-color,border-color,transform] duration-150 hover:border-rose-300 hover:bg-rose-100 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2"
+                    >
+                      <Square aria-hidden="true" className="h-4 w-4 fill-current" />
+                      <span>Batalkan Semua Antrean</span>
+                    </button>
+                  </div>
+                ) : (
+                  isBusy && (
+                    <button
+                      type="button"
+                      onClick={handleCancel}
+                      className="inline-flex min-h-14 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl border-2 border-rose-200 bg-rose-50 px-5 py-3.5 text-sm font-bold text-rose-700 transition-[background-color,border-color,transform] duration-150 hover:border-rose-300 hover:bg-rose-100 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2"
+                    >
+                      <Square aria-hidden="true" className="h-4 w-4 fill-current" />
+                      <span>Batalkan</span>
+                    </button>
+                  )
                 )}
               </div>
 
@@ -2468,6 +3336,7 @@ export default function App() {
                   Ekspor MP3 dibuat terpisah dan tidak mengganti stage video di rantai edit.
                 </p>
               ) : (
+                !isBatchMode &&
                 activeTabStep &&
                 !isBusy &&
                 !nativeFormatWarning && (
@@ -2500,6 +3369,71 @@ export default function App() {
                   aria-live="polite"
                   className="bento-card animate-lv-fade-up rounded-2xl bg-white p-4"
                 >
+                  {/* Header & Progres Global Antrean Multi-Video */}
+                  {isBatchRunning && batchActiveItemIndex >= 0 && (
+                    <div className="mb-3.5 rounded-xl border border-blue-200/80 bg-blue-50/70 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="inline-flex min-w-0 items-center gap-1.5 font-extrabold text-blue-950">
+                          <Layers aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+                          <span className="whitespace-nowrap">
+                            Memproses Video {batchActiveItemIndex + 1} dari {batchItems.length}
+                          </span>
+                        </span>
+                        <span className="font-mono font-bold text-blue-700 tabular-nums">
+                          Total {batchProgressStats.overallPercent}%
+                        </span>
+                      </div>
+
+                      {batchProgressStats.activeItem && (
+                        <p className="mt-1 truncate text-xs font-semibold text-slate-700">
+                          File aktif: {batchProgressStats.activeItem.file.name}
+                        </p>
+                      )}
+
+                      <div
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={batchProgressStats.overallPercent}
+                        aria-label="Progres total antrean multi-video"
+                        className="mt-2 h-2 w-full overflow-hidden rounded-full bg-blue-100 ring-1 ring-inset ring-blue-200/80"
+                      >
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-[width] duration-200 ease-linear"
+                          style={{
+                            width: `${batchProgressStats.overallPercent}%`,
+                            minWidth: batchProgressStats.overallPercent > 0 ? '6px' : undefined,
+                          }}
+                        />
+                      </div>
+
+                      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-medium text-slate-600">
+                        <span>
+                          {batchProgressStats.doneCount} selesai • 1 diproses •{' '}
+                          {batchProgressStats.pendingCount} menunggu
+                          {batchProgressStats.failedOrSkippedCount > 0
+                            ? ` • ${batchProgressStats.failedOrSkippedCount} dilewati/gagal`
+                            : ''}
+                        </span>
+                      </div>
+
+                      {isMobile && (
+                        <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-white/85 px-2.5 py-1.5 text-[11px] leading-relaxed font-medium text-blue-900 ring-1 ring-blue-200/70">
+                          <SunMedium
+                            aria-hidden="true"
+                            className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${
+                              isWakeLockActive ? 'text-amber-500' : 'text-blue-600'
+                            }`}
+                          />
+                          <span>
+                            Layar dijaga tetap menyala. Jangan tutup browser sampai semua video
+                            selesai.
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm">
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="truncate font-bold text-slate-800">
@@ -2606,18 +3540,32 @@ export default function App() {
                         <span>
                           Tidak ada kemajuan selama{' '}
                           <strong className="font-mono">{idleSeconds}</strong> detik, periksa{' '}
-                          <strong className="font-bold">Log Teknis FFmpeg</strong> di bawah atau
-                          batalkan proses.
+                          <strong className="font-bold">Log Teknis FFmpeg</strong> di bawah atau{' '}
+                          {isBatchRunning
+                            ? 'lewati video ini / batalkan antrean.'
+                            : 'batalkan proses.'}
                         </span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleCancel}
-                        className="inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-lg border border-rose-300 bg-rose-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1"
-                      >
-                        <Square aria-hidden="true" className="h-3 w-3 fill-current" />
-                        <span>Batalkan Proses</span>
-                      </button>
+                      <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        {isBatchRunning && (
+                          <button
+                            type="button"
+                            onClick={handleSkipCurrentBatchItem}
+                            className="inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 focus-visible:ring-offset-1"
+                          >
+                            <SkipForward aria-hidden="true" className="h-3.5 w-3.5" />
+                            <span>Lewati Video Ini</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={isBatchRunning ? handleCancelAllBatch : handleCancel}
+                          className="inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-lg border border-rose-300 bg-rose-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1"
+                        >
+                          <Square aria-hidden="true" className="h-3 w-3 fill-current" />
+                          <span>{isBatchRunning ? 'Batalkan Semua' : 'Batalkan Proses'}</span>
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

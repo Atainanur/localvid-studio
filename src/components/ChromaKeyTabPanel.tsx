@@ -45,6 +45,12 @@ import {
 import type { ChromaEngineBadge } from '../utils/chromaKeyEngine'
 import { formatDuration, formatFileSizeMB } from '../utils/videoProcessing'
 
+interface ChromaBatchPreviewControl {
+  previewIndex: number
+  items: ReadonlyArray<{ id: string; index: number; name: string }>
+  onPreviewIndexChange: (index: number) => void
+}
+
 interface ChromaKeyTabPanelProps {
   options: ChromaKeyOptions
   onChange: (next: ChromaKeyOptions) => void
@@ -55,6 +61,7 @@ interface ChromaKeyTabPanelProps {
   sourceDurationSec: number | null
   sourceDimensions: { width: number | null; height: number | null }
   sourcePreviewUrl: string | null
+  batchPreviewControl?: ChromaBatchPreviewControl | null
   onSwitchToCompress: () => void
   onLog?: (message: string) => void
 }
@@ -71,6 +78,7 @@ export function ChromaKeyTabPanel({
   sourceDurationSec,
   sourceDimensions,
   sourcePreviewUrl,
+  batchPreviewControl,
   onSwitchToCompress,
   onLog,
 }: ChromaKeyTabPanelProps) {
@@ -409,11 +417,31 @@ export function ChromaKeyTabPanel({
             Cek hasil potongan pada detik pilihan sebelum merender seluruh video.
           </p>
         </div>
-        {previewEngineBadge && (
-          <span className="whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 font-mono text-[11px] font-bold text-slate-700 ring-1 ring-slate-200">
-            {previewEngineBadge}
-          </span>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {batchPreviewControl && batchPreviewControl.items.length > 1 && (
+            <label className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+              <span className="shrink-0">Pratinjau dari:</span>
+              <select
+                aria-label="Pilih video referensi pratinjau Auto Green Screen"
+                disabled={disabled}
+                value={batchPreviewControl.previewIndex}
+                onChange={(e) => batchPreviewControl.onPreviewIndexChange(Number(e.target.value))}
+                className="max-w-[160px] cursor-pointer rounded-md bg-white px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-900 ring-1 ring-slate-200 focus:outline-none focus:ring-2 focus:ring-green-600 disabled:opacity-50"
+              >
+                {batchPreviewControl.items.map((bItem, idx) => (
+                  <option key={bItem.id} value={idx}>
+                    Video #{bItem.index}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {previewEngineBadge && (
+            <span className="whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 font-mono text-[11px] font-bold text-slate-700 ring-1 ring-slate-200">
+              {previewEngineBadge}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Deteksi Pintar: Subjek Manusia tidak ditemukan di frame -> tawarkan 1-klik ke Template Produk & Objek */}

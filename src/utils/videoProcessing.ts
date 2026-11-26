@@ -675,12 +675,14 @@ export function getMimeTypeForFormat(format: OutputFormat): string {
 export const BRAND_FILENAME_PREFIX = 'Github - Atainanur'
 
 /**
- * Membangun nama file unduhan terpusat dengan branding "Github - Atainanur_<tag>.<ext>".
+ * Membangun nama file unduhan terpusat dengan branding:
+ * - Mode 1 video : "Github - Atainanur_<tag>.<ext>"
+ * - Mode Antrean : "Github - Atainanur_<batchIndex>_<tag>.<ext>" (contoh: "Github - Atainanur_1_kompres.mp4")
  * - Menghapus karakter ilegal sistem file Windows/Android/iOS (: / \ * ? " < > |).
  * - Menormalisasi ekstensi agar tidak pernah menghasilkan titik ganda (..mp4).
  * - Anti penumpukan prefix untuk pipeline edit berantai (tidak pernah menempelkan nama file lama).
  */
-export function buildBrandedFilename(tag: string, ext: string): string {
+export function buildBrandedFilename(tag: string, ext: string, batchIndex?: number): string {
   const safeTag = tag
     .replace(/[\x00-\x1f<>:"/\\|?*]+/g, '-')
     .replace(/\s+/g, '-')
@@ -696,6 +698,13 @@ export function buildBrandedFilename(tag: string, ext: string): string {
 
   const finalTag = safeTag || 'video'
   const finalExt = safeExt || 'mp4'
+  const hasBatchIndex =
+    typeof batchIndex === 'number' && Number.isFinite(batchIndex) && batchIndex >= 1
+
+  if (hasBatchIndex) {
+    return `${BRAND_FILENAME_PREFIX}_${Math.floor(batchIndex)}_${finalTag}.${finalExt}`
+  }
+
   return `${BRAND_FILENAME_PREFIX}_${finalTag}.${finalExt}`
 }
 
@@ -703,8 +712,9 @@ export function buildOutputFileName(
   _originalName: string,
   suffix: string,
   format: OutputFormat | 'mp3',
+  batchIndex?: number,
 ): string {
-  return buildBrandedFilename(suffix, format)
+  return buildBrandedFilename(suffix, format, batchIndex)
 }
 
 export function buildFastRemuxArgs(
