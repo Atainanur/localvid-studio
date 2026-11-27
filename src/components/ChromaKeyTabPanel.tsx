@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { motion } from 'motion/react'
 import {
   AlertTriangle,
   Box,
-  Check,
   Clock,
   Cpu,
   Eye,
@@ -67,6 +67,12 @@ interface ChromaKeyTabPanelProps {
 }
 
 const LOW_FOREGROUND_THRESHOLD = 0.015
+
+const CARD_SPRING = {
+  type: 'spring' as const,
+  stiffness: 420,
+  damping: 30,
+}
 
 export function ChromaKeyTabPanel({
   options,
@@ -409,8 +415,7 @@ export function ChromaKeyTabPanel({
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="inline-flex items-center gap-2 text-base font-bold text-slate-900">
-            <Eye aria-hidden="true" className="h-4 w-4 text-green-600" />
+          <h3 className="text-base font-bold text-slate-900">
             {sectionTitle}
           </h3>
           <p className="mt-0.5 text-xs leading-relaxed text-slate-600 sm:text-sm">
@@ -426,7 +431,7 @@ export function ChromaKeyTabPanel({
                 disabled={disabled}
                 value={batchPreviewControl.previewItemId}
                 onChange={(e) => batchPreviewControl.onPreviewItemIdChange(e.target.value)}
-                className="max-w-[160px] cursor-pointer rounded-md bg-white px-1.5 py-0.5 font-mono text-[11px] font-bold text-slate-900 ring-1 ring-slate-200 focus:outline-none focus:ring-2 focus:ring-green-600 disabled:opacity-50"
+                className="max-w-[160px] cursor-pointer rounded-md bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-900 ring-1 ring-slate-200 focus:outline-none focus:ring-2 focus:ring-green-600 disabled:opacity-50"
               >
                 {batchPreviewControl.items.map((bItem) => (
                   <option key={bItem.id} value={bItem.id}>
@@ -437,7 +442,7 @@ export function ChromaKeyTabPanel({
             </label>
           )}
           {previewEngineBadge && (
-            <span className="whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 font-mono text-[11px] font-bold text-slate-700 ring-1 ring-slate-200">
+            <span className="whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700 ring-1 ring-slate-200">
               {previewEngineBadge}
             </span>
           )}
@@ -477,10 +482,10 @@ export function ChromaKeyTabPanel({
       {showObjectLowContrastHint && (
         <div
           role="status"
-          className="animate-lv-fade-up flex flex-col gap-2.5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs leading-relaxed text-sky-950 sm:flex-row sm:items-center sm:justify-between"
+          className="animate-lv-fade-up flex flex-col gap-2.5 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] px-4 py-3 text-xs leading-relaxed text-[#0D6E5D] sm:flex-row sm:items-center sm:justify-between"
         >
           <div className="flex items-start gap-2">
-            <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+            <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[#14A085]" />
             <span>
               Objek utama kurang kontras di frame ini. Coba turunkan Sensitivitas (Threshold) di
               mode Custom atau geser ke detik lain.
@@ -491,7 +496,7 @@ export function ChromaKeyTabPanel({
               type="button"
               disabled={disabled}
               onClick={() => handleSelectTemplate('custom')}
-              className="shrink-0 cursor-pointer rounded-lg border border-sky-300 bg-white px-3 py-1.5 text-[11px] font-bold text-sky-900 transition-colors hover:bg-sky-100 disabled:opacity-50"
+              className="mint-secondary-btn shrink-0 cursor-pointer rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors disabled:opacity-50"
             >
               Buka Custom / Manual
             </button>
@@ -540,7 +545,7 @@ export function ChromaKeyTabPanel({
                 </span>
               </span>
               {previewEngineBadge && (
-                <span className="rounded-full bg-slate-800 px-2 py-0.5 font-mono text-[10px] font-bold text-green-300 ring-1 ring-slate-700">
+                <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-green-300 ring-1 ring-slate-700">
                   {previewEngineBadge}
                 </span>
               )}
@@ -639,11 +644,11 @@ export function ChromaKeyTabPanel({
               </label>
               <div className="flex items-center gap-2">
                 {foregroundRatio !== null && !holdOriginal && (
-                  <span className="rounded-md bg-slate-800 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-300 tabular-nums">
+                  <span className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-300 tabular-nums">
                     Subjek {(foregroundRatio * 100).toFixed(1)}%
                   </span>
                 )}
-                <span className="font-mono text-[11px] font-bold text-green-400 tabular-nums">
+                <span className="text-[11px] font-bold text-green-400 tabular-nums">
                   {formatDuration(scrubTimeSec)} / {formatDuration(effectiveScrubMax)}
                 </span>
               </div>
@@ -684,20 +689,20 @@ export function ChromaKeyTabPanel({
   )
 
   return (
-    <div className="animate-lv-fade-up flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       {/* 1. PILIH TEMPLATE AUTO GREEN SCREEN (6 KARTU 1-KLIK + CUSTOM/MANUAL) */}
       <div className="flex flex-col gap-3.5">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h3 className="text-base font-bold text-slate-900">
+            <h3 className="text-base font-bold text-[#0D2B24]">
               1. Pilih Template Auto Green Screen
             </h3>
-            <p className="mt-0.5 text-xs leading-relaxed text-slate-600 sm:text-sm">
+            <p className="mt-0.5 text-xs leading-relaxed text-[#4A6B63] sm:text-sm">
               Pilih template 1-klik sesuai jenis subjek (Manusia atau Produk/Objek), atau pilih
               Custom / Manual untuk pengaturan penuh. Diproses 100% lokal di browser.
             </p>
           </div>
-          <span className="whitespace-nowrap rounded-full bg-green-100 px-2.5 py-1 font-mono text-[11px] font-bold text-green-800 ring-1 ring-green-200">
+          <span className="whitespace-nowrap rounded-full bg-[#E8FFF5] px-2.5 py-1 text-[11px] font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
             {options.subjectMode === 'all-objects'
               ? 'Maks 15 dtk (Desktop) • Maks 8 dtk (Mobile)'
               : 'Maks 30 dtk (Desktop) • Maks 15 dtk (Mobile)'}
@@ -708,15 +713,16 @@ export function ChromaKeyTabPanel({
           {CHROMA_TEMPLATES.map((tpl) => {
             const selected = options.templateId === tpl.id
             return (
-              <button
+              <motion.button
                 key={tpl.id}
                 type="button"
                 disabled={disabled}
                 onClick={() => handleSelectTemplate(tpl.id)}
-                className={`flex min-h-26 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl border p-3.5 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                  selected
-                    ? 'border-green-500 bg-green-50/80 shadow-sm ring-1 ring-green-500/35'
-                    : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
+                whileTap={!disabled ? { scale: 0.98 } : undefined}
+                transition={CARD_SPRING}
+                className={`flex min-h-26 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                  selected ? 'mint-option-card-active' : 'mint-option-card'
                 }`}
               >
                 <div className="flex w-full items-start justify-between gap-2">
@@ -726,26 +732,17 @@ export function ChromaKeyTabPanel({
                       className={`mt-0.5 h-7 w-7 shrink-0 rounded-xl ring-1 ring-black/15 ${tpl.swatchStyle}`}
                     />
                     <div className="min-w-0">
-                      <span className="block text-xs font-bold leading-snug text-slate-900">
+                      <span className="block text-xs font-bold leading-snug text-[#0D2B24]">
                         {tpl.title}
                       </span>
-                      <span className="mt-1 inline-block rounded-full bg-white/95 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200">
+                      <span className="mt-1 inline-block rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
                         {tpl.badge}
                       </span>
                     </div>
                   </div>
-                  <span
-                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                      selected
-                        ? 'border-green-600 bg-green-600 text-white'
-                        : 'border-slate-300 bg-white'
-                    }`}
-                  >
-                    {selected && <Check aria-hidden="true" className="h-3 w-3" />}
-                  </span>
                 </div>
-                <p className="text-[11px] leading-relaxed text-slate-600">{tpl.description}</p>
-              </button>
+                <p className="text-[11px] leading-relaxed text-[#4A6B63]">{tpl.description}</p>
+              </motion.button>
             )
           })}
         </div>
@@ -808,11 +805,11 @@ export function ChromaKeyTabPanel({
           {renderLivePreviewSection('Pratinjau Live 1-Frame Sebelum Render')}
 
           {/* Kotak Ringkas Estimasi Ukuran & Setelan Otomatis Template */}
-          <div className="flex flex-col gap-3 rounded-2xl border border-green-200/80 bg-gradient-to-r from-green-50/80 via-emerald-50/50 to-white p-4">
+          <div className="flex flex-col gap-3 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <Sparkles aria-hidden="true" className="h-4 w-4 text-green-700" />
-                <span className="text-xs font-bold text-slate-900 sm:text-sm">
+                <Sparkles aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
+                <span className="text-xs font-bold text-[#0D2B24] sm:text-sm">
                   Setelan Otomatis: {activeTemplate.title}
                 </span>
               </div>
@@ -820,70 +817,70 @@ export function ChromaKeyTabPanel({
                 type="button"
                 disabled={disabled}
                 onClick={() => handleSelectTemplate('custom')}
-                className="cursor-pointer text-xs font-bold text-green-700 underline decoration-green-400 underline-offset-2 transition-colors hover:text-green-900 disabled:opacity-50"
+                className="cursor-pointer text-xs font-bold text-[#0D6E5D] underline decoration-[#6DE7C1] underline-offset-2 transition-colors hover:text-[#0D2B24] disabled:opacity-50"
               >
                 Ingin atur manual? Pilih Custom / Manual
               </button>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-              <span className="rounded-full bg-white px-2.5 py-0.5 font-semibold text-slate-700 ring-1 ring-green-200">
+              <span className="rounded-full bg-white px-2.5 py-0.5 font-semibold text-[#0D2B24] ring-1 ring-[#B5F5DB]">
                 {getChromaSubjectModeLabel(options.subjectMode)}
               </span>
-              <span className="rounded-full bg-white px-2.5 py-0.5 font-mono font-semibold text-green-800 ring-1 ring-green-200">
+              <span className="rounded-full bg-white px-2.5 py-0.5 font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
                 {options.subjectMode === 'all-objects'
                   ? activeSpeedProfile.shortTag
                   : 'MediaPipe VIDEO'}
               </span>
-              <span className="rounded-full bg-white px-2.5 py-0.5 font-semibold text-slate-700 ring-1 ring-green-200">
+              <span className="rounded-full bg-white px-2.5 py-0.5 font-semibold text-[#0D2B24] ring-1 ring-[#B5F5DB]">
                 {getChromaBgDisplayLabel(options)}
               </span>
-              <span className="rounded-full bg-white px-2.5 py-0.5 font-mono font-semibold text-slate-700 ring-1 ring-green-200">
+              <span className="rounded-full bg-white px-2.5 py-0.5 font-semibold text-[#0D2B24] ring-1 ring-[#B5F5DB]">
                 {options.targetFps} fps{estimatedFrames ? ` (±${estimatedFrames} frame)` : ''}
               </span>
-              <span className="rounded-full bg-white px-2.5 py-0.5 font-mono font-semibold text-slate-700 ring-1 ring-green-200">
+              <span className="rounded-full bg-white px-2.5 py-0.5 font-semibold text-[#0D2B24] ring-1 ring-[#B5F5DB]">
                 {targetDims ? `${targetDims.width}×${targetDims.height}` : `Maks ${options.maxResolution}`}
               </span>
-              <span className="rounded-full bg-white px-2.5 py-0.5 font-semibold text-slate-700 ring-1 ring-green-200">
+              <span className="rounded-full bg-white px-2.5 py-0.5 font-semibold text-[#0D2B24] ring-1 ring-[#B5F5DB]">
                 Mask Cleanup Aktif
               </span>
-              <span className="rounded-full bg-green-100 px-2.5 py-0.5 font-mono font-bold text-green-800">
+              <span className="rounded-full bg-[#B5F5DB] px-2.5 py-0.5 font-bold text-[#0D6E5D]">
                 Smart Cap Aktif
               </span>
             </div>
 
             {sizeEstimate && originalSizeBytes !== null && (
-              <div className="grid grid-cols-1 gap-3 border-t border-green-200/70 pt-3 sm:grid-cols-2 sm:items-center">
+              <div className="grid grid-cols-1 gap-3 border-t border-[#B5F5DB] pt-3 sm:grid-cols-2 sm:items-center">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-green-600 ring-1 ring-green-200">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-[#14A085] ring-1 ring-[#B5F5DB]">
                     <HardDrive aria-hidden="true" className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-[#4A6B63]">
                       Ukuran Asli
                     </p>
-                    <p className="font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                    <p className="text-base font-extrabold text-[#0D2B24] tabular-nums">
                       {formatFileSizeMB(originalSizeBytes)}
                     </p>
                   </div>
                 </div>
-                <div className="rounded-xl bg-white/95 p-3 ring-1 ring-green-200/80 sm:text-right">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-green-700">
+                <div className="rounded-xl bg-white p-3 ring-1 ring-[#B5F5DB] sm:text-right">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-[#0D6E5D]">
                     Estimasi Ukuran Hasil (Perkiraan)
                   </p>
-                  <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                  <p className="mt-0.5 text-base font-extrabold text-[#0D2B24] tabular-nums">
                     ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
                     {sizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
-                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                    <span className="text-[11px] font-semibold text-[#4A6B63]">
                       (perkiraan)
                     </span>
                   </p>
-                  <p className="mt-0.5 font-mono text-[11px] text-slate-500">
+                  <p className="mt-0.5 text-[11px] text-[#4A6B63]">
                     CRF 22 • {options.targetFps} fps
                     {sizeEstimate.maxRateKbps ? ` • Cap <= ${sizeEstimate.maxRateKbps}k` : ''}
                   </p>
                   {sizeEstimate.calibrationSamples && sizeEstimate.calibrationSamples > 0 ? (
-                    <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                    <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
                       Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
                     </p>
                   ) : null}
@@ -892,23 +889,23 @@ export function ChromaKeyTabPanel({
             )}
 
             {/* [UX #23] Accordion Opsi Lanjutan Tepian (Default Tertutup pada Mode Template 1-Klik) */}
-            <details className="rounded-xl border border-green-200/80 bg-white/90 px-3.5 py-2.5 text-xs text-slate-700">
-              <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 font-bold text-slate-800 select-none hover:text-green-800">
+            <details className="rounded-xl border border-[#B5F5DB] bg-white px-3.5 py-2.5 text-xs text-[#4A6B63]">
+              <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 font-bold text-[#0D2B24] select-none hover:text-[#0D6E5D]">
                 <span className="inline-flex items-center gap-1.5">
-                  <SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5 text-green-600" />
+                  <SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
                   <span>Sesuaikan Detail Tepian (Opsional)</span>
                 </span>
-                <span className="font-mono text-[11px] font-normal text-slate-500">
+                <span className="text-[11px] font-normal text-[#4A6B63]">
                   Feather {options.edgeFeather.toFixed(1)}px • Thr {options.threshold.toFixed(2)}
                 </span>
               </summary>
-              <div className="mt-3 flex flex-col gap-3 border-t border-slate-200/80 pt-3">
+              <div className="mt-3 flex flex-col gap-3 border-t border-[#E2F3EC] pt-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs font-bold text-slate-900">
+                    <p className="text-xs font-bold text-[#0D2B24]">
                       Bersihkan Bercak &amp; Isi Lubang Mask (Mask Cleanup)
                     </p>
-                    <p className="text-[11px] text-slate-500">
+                    <p className="text-[11px] text-[#4A6B63]">
                       Menghapus bercak latar dan menutup lubang interior pada objek.
                     </p>
                   </div>
@@ -919,12 +916,14 @@ export function ChromaKeyTabPanel({
                     aria-label="Aktifkan Mask Cleanup"
                     disabled={disabled}
                     onClick={() => onChange({ ...options, maskCleanup: !options.maskCleanup })}
-                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 disabled:opacity-50 ${
-                      options.maskCleanup ? 'bg-green-600' : 'bg-slate-300'
+                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                      options.maskCleanup
+                        ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                        : 'bg-[#B5F5DB]'
                     }`}
                   >
                     <span
-                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                      className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
                         options.maskCleanup ? 'translate-x-6' : 'translate-x-1'
                       }`}
                     />
@@ -937,7 +936,7 @@ export function ChromaKeyTabPanel({
                       <label htmlFor="tpl-chroma-feather" className="text-[11px] font-bold text-slate-800">
                         Edge Feather
                       </label>
-                      <span className="font-mono text-[11px] font-bold text-green-800 tabular-nums">
+                      <span className="text-[11px] font-bold text-green-800 tabular-nums">
                         {options.edgeFeather.toFixed(1)} px
                       </span>
                     </div>
@@ -958,7 +957,7 @@ export function ChromaKeyTabPanel({
                       <label htmlFor="tpl-chroma-threshold" className="text-[11px] font-bold text-slate-800">
                         Threshold
                       </label>
-                      <span className="font-mono text-[11px] font-bold text-green-800 tabular-nums">
+                      <span className="text-[11px] font-bold text-green-800 tabular-nums">
                         {options.threshold.toFixed(2)}
                       </span>
                     </div>
@@ -979,7 +978,7 @@ export function ChromaKeyTabPanel({
                       <label htmlFor="tpl-chroma-shift" className="text-[11px] font-bold text-slate-800">
                         Edge Shift
                       </label>
-                      <span className="font-mono text-[11px] font-bold text-green-800 tabular-nums">
+                      <span className="text-[11px] font-bold text-green-800 tabular-nums">
                         {options.edgeShift > 0 ? `+${options.edgeShift}` : String(options.edgeShift)}
                       </span>
                     </div>
@@ -1051,15 +1050,16 @@ export function ChromaKeyTabPanel({
                 const selected = options.subjectMode === mode.id
                 const ModeIcon = mode.id === 'person' ? UserSquare2 : Box
                 return (
-                  <button
+                  <motion.button
                     key={mode.id}
                     type="button"
                     disabled={disabled}
                     onClick={() => handleSelectSubjectMode(mode.id)}
-                    className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2.5 rounded-2xl border p-4 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                      selected
-                        ? 'border-green-500 bg-green-50/75 shadow-sm ring-1 ring-green-500/30'
-                        : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                    whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
+                    whileTap={!disabled ? { scale: 0.98 } : undefined}
+                    transition={CARD_SPRING}
+                    className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2.5 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                      selected ? 'mint-option-card-active' : 'mint-option-card'
                     }`}
                   >
                     <div className="flex w-full items-start justify-between gap-2">
@@ -1067,49 +1067,40 @@ export function ChromaKeyTabPanel({
                         <span
                           className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
                             selected
-                              ? 'bg-green-600 text-white shadow-sm shadow-green-600/20'
-                              : 'bg-slate-200/80 text-slate-600'
+                              ? 'bg-[#14A085] text-white shadow-sm shadow-[#0D6E5D]/20'
+                              : 'bg-[#E8FFF5] text-[#0D6E5D]'
                           }`}
                         >
                           <ModeIcon aria-hidden="true" className="h-5 w-5" />
                         </span>
                         <div>
-                          <span className="block text-xs font-bold text-slate-900 sm:text-sm">
+                          <span className="block text-xs font-bold text-[#0D2B24] sm:text-sm">
                             {mode.title}
                           </span>
-                          <span className="mt-1 inline-block rounded-full bg-white px-2 py-0.5 font-mono text-[10px] font-semibold text-green-800 ring-1 ring-green-200">
+                          <span className="mt-1 inline-block rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
                             {mode.badge}
                           </span>
                         </div>
                       </div>
-                      <span
-                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                          selected
-                            ? 'border-green-600 bg-green-600 text-white'
-                            : 'border-slate-300 bg-white'
-                        }`}
-                      >
-                        {selected && <Check aria-hidden="true" className="h-3 w-3" />}
-                      </span>
                     </div>
-                    <p className="text-[11px] leading-relaxed text-slate-600">{mode.description}</p>
-                    <p className="font-mono text-[10px] font-semibold text-slate-500">
+                    <p className="text-[11px] leading-relaxed text-[#4A6B63]">{mode.description}</p>
+                    <p className="text-[10px] font-semibold text-[#4A6B63]">
                       {mode.modelSizeLabel}
                     </p>
-                  </button>
+                  </motion.button>
                 )
               })}
             </div>
 
             {/* Pemilih Profil Kecepatan (khusus Mode Semua Objek / AI RMBG-1.4) */}
             {options.subjectMode === 'all-objects' && (
-              <div className="animate-lv-fade-up rounded-2xl border border-green-200/80 bg-green-50/45 p-4">
+              <div className="animate-lv-fade-up rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900 sm:text-sm">
-                    <Zap aria-hidden="true" className="h-4 w-4 text-green-700" />
+                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0D2B24] sm:text-sm">
+                    <Zap aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
                     Profil Kecepatan (Keyframe Mask Interpolation)
                   </span>
-                  <span className="rounded-full bg-white px-2.5 py-0.5 font-mono text-[10px] font-bold text-green-800 ring-1 ring-green-200">
+                  <span className="rounded-full bg-white px-2.5 py-0.5 text-[10px] font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
                     {activeSpeedProfile.shortTag}
                   </span>
                 </div>
@@ -1122,16 +1113,16 @@ export function ChromaKeyTabPanel({
                         type="button"
                         disabled={disabled}
                         onClick={() => onChange({ ...options, speedProfile: prof.id })}
-                        className={`min-h-14 cursor-pointer touch-manipulation rounded-xl border px-3 py-2 text-left transition-[border-color,background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-1 disabled:opacity-60 ${
+                        className={`min-h-14 cursor-pointer touch-manipulation rounded-xl border px-3 py-2 text-left transition-[border-color,background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-1 disabled:opacity-60 ${
                           selected
-                            ? 'border-green-600 bg-green-600 text-white shadow-sm'
-                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                            ? 'border-[#14A085] bg-[#14A085] text-white shadow-xs'
+                            : 'border-[#E2F3EC] bg-white text-[#0D2B24] hover:border-[#6DE7C1]'
                         }`}
                       >
                         <div className="text-xs font-bold">{prof.label}</div>
                         <div
                           className={`mt-0.5 text-[10px] leading-snug ${
-                            selected ? 'text-green-100' : 'text-slate-500'
+                            selected ? 'text-[#E8FFF5]' : 'text-[#4A6B63]'
                           }`}
                         >
                           {prof.hint}
@@ -1145,15 +1136,15 @@ export function ChromaKeyTabPanel({
           </div>
 
           {/* 3. JENIS LATAR BELAKANG */}
-          <div className="flex flex-col gap-3.5 border-t border-slate-200/80 pt-5">
+          <div className="flex flex-col gap-3.5 border-t border-[#E2F3EC] pt-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h3 className="text-base font-bold text-slate-900">3. Jenis Latar Belakang</h3>
-                <p className="mt-0.5 text-xs leading-relaxed text-slate-600 sm:text-sm">
+                <h3 className="text-base font-bold text-[#0D2B24]">3. Jenis Latar Belakang</h3>
+                <p className="mt-0.5 text-xs leading-relaxed text-[#4A6B63] sm:text-sm">
                   Pilih warna solid chroma key atau efek blur bokeh di belakang subjek.
                 </p>
               </div>
-              <span className="whitespace-nowrap rounded-full bg-green-50 px-3 py-1 text-xs font-bold text-green-800 ring-1 ring-green-200">
+              <span className="whitespace-nowrap rounded-full bg-[#E8FFF5] px-3 py-1 text-xs font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
                 {getChromaBgDisplayLabel(options)}
               </span>
             </div>
@@ -1162,15 +1153,16 @@ export function ChromaKeyTabPanel({
               {CHROMA_BG_MODES.map((mode) => {
                 const selected = options.bgMode === mode.id
                 return (
-                  <button
+                  <motion.button
                     key={mode.id}
                     type="button"
                     disabled={disabled}
                     onClick={() => onChange({ ...options, bgMode: mode.id })}
-                    className={`flex min-h-22 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl border p-3.5 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                      selected
-                        ? 'border-green-500 bg-green-50/75 shadow-sm ring-1 ring-green-500/30'
-                        : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                    whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
+                    whileTap={!disabled ? { scale: 0.98 } : undefined}
+                    transition={CARD_SPRING}
+                    className={`flex min-h-22 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                      selected ? 'mint-option-card-active' : 'mint-option-card'
                     }`}
                   >
                     <div className="flex w-full items-start justify-between gap-2">
@@ -1180,26 +1172,17 @@ export function ChromaKeyTabPanel({
                           className={`h-8 w-8 shrink-0 rounded-xl ring-1 ring-black/15 ${mode.swatchStyle}`}
                         />
                         <div>
-                          <span className="block text-xs font-bold text-slate-900 sm:text-sm">
+                          <span className="block text-xs font-bold text-[#0D2B24] sm:text-sm">
                             {mode.title}
                           </span>
-                          <span className="mt-0.5 inline-block rounded-full bg-white/95 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200">
+                          <span className="mt-0.5 inline-block rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
                             {mode.badge}
                           </span>
                         </div>
                       </div>
-                      <span
-                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                          selected
-                            ? 'border-green-600 bg-green-600 text-white'
-                            : 'border-slate-300 bg-white'
-                        }`}
-                      >
-                        {selected && <Check aria-hidden="true" className="h-3 w-3" />}
-                      </span>
                     </div>
-                    <p className="text-[11px] leading-relaxed text-slate-600">{mode.description}</p>
-                  </button>
+                    <p className="text-[11px] leading-relaxed text-[#4A6B63]">{mode.description}</p>
+                  </motion.button>
                 )
               })}
             </div>
@@ -1227,7 +1210,7 @@ export function ChromaKeyTabPanel({
                       }
                       className="h-9 w-12 cursor-pointer rounded-lg border border-slate-300 bg-white p-0.5 disabled:cursor-not-allowed disabled:opacity-50"
                     />
-                    <span className="rounded-lg bg-white px-2.5 py-1.5 font-mono text-xs font-bold text-slate-800 ring-1 ring-slate-200">
+                    <span className="rounded-lg bg-white px-2.5 py-1.5 text-xs font-bold text-slate-800 ring-1 ring-slate-200">
                       {sanitizeHexColor(options.customColor)}
                     </span>
                   </div>
@@ -1272,7 +1255,7 @@ export function ChromaKeyTabPanel({
                     <Sparkles aria-hidden="true" className="h-3.5 w-3.5 text-green-700" />
                     Tingkat Blur Background (Bokeh)
                   </label>
-                  <span className="rounded-full bg-white px-2.5 py-0.5 font-mono font-bold text-green-800 ring-1 ring-green-200 tabular-nums">
+                  <span className="rounded-full bg-white px-2.5 py-0.5 font-bold text-green-800 ring-1 ring-green-200 tabular-nums">
                     {options.blurAmount} px
                   </span>
                 </div>
@@ -1287,7 +1270,7 @@ export function ChromaKeyTabPanel({
                   onChange={(e) => onChange({ ...options, blurAmount: Number(e.target.value) })}
                   className="h-2 w-full cursor-pointer accent-green-600 disabled:cursor-not-allowed disabled:opacity-50"
                 />
-                <div className="flex justify-between font-mono text-[10px] text-slate-500">
+                <div className="flex justify-between text-[10px] text-slate-500">
                   <span>4 px (Halus)</span>
                   <span>12 px (Standar DSLR)</span>
                   <span>24 px (Sangat Buram)</span>
@@ -1328,7 +1311,7 @@ export function ChromaKeyTabPanel({
                   <span className="text-xs font-bold text-slate-900 sm:text-sm">
                     Bersihkan Bercak Latar (Mask Cleanup)
                   </span>
-                  <span className="rounded-full bg-green-100 px-2 py-0.5 font-mono text-[10px] font-bold text-green-800">
+                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-800">
                     Opening 3x3
                   </span>
                 </div>
@@ -1344,12 +1327,14 @@ export function ChromaKeyTabPanel({
                 aria-label="Aktifkan Bersihkan Bercak Latar Mask Cleanup"
                 disabled={disabled}
                 onClick={() => onChange({ ...options, maskCleanup: !options.maskCleanup })}
-                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 disabled:opacity-50 ${
-                  options.maskCleanup ? 'bg-green-600' : 'bg-slate-300'
+                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                  options.maskCleanup
+                    ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                    : 'bg-[#B5F5DB]'
                 }`}
               >
                 <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                  className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
                     options.maskCleanup ? 'translate-x-6' : 'translate-x-1'
                   }`}
                 />
@@ -1362,7 +1347,7 @@ export function ChromaKeyTabPanel({
                   <label htmlFor="chroma-edge-feather" className="text-xs font-bold text-slate-800">
                     Kehalusan Tepi (Feather)
                   </label>
-                  <span className="rounded-full bg-white px-2 py-0.5 font-mono text-[11px] font-bold text-green-800 ring-1 ring-slate-200 tabular-nums">
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-green-800 ring-1 ring-slate-200 tabular-nums">
                     {options.edgeFeather.toFixed(1)} px
                   </span>
                 </div>
@@ -1387,7 +1372,7 @@ export function ChromaKeyTabPanel({
                   <label htmlFor="chroma-threshold" className="text-xs font-bold text-slate-800">
                     Sensitivitas (Threshold)
                   </label>
-                  <span className="rounded-full bg-white px-2 py-0.5 font-mono text-[11px] font-bold text-green-800 ring-1 ring-slate-200 tabular-nums">
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-green-800 ring-1 ring-slate-200 tabular-nums">
                     {options.threshold.toFixed(2)}
                   </span>
                 </div>
@@ -1412,7 +1397,7 @@ export function ChromaKeyTabPanel({
                   <label htmlFor="chroma-edge-shift" className="text-xs font-bold text-slate-800">
                     Perluas / Persempit Mask
                   </label>
-                  <span className="rounded-full bg-white px-2 py-0.5 font-mono text-[11px] font-bold text-green-800 ring-1 ring-slate-200 tabular-nums">
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-green-800 ring-1 ring-slate-200 tabular-nums">
                     {options.edgeShift > 0 ? `+${options.edgeShift}` : String(options.edgeShift)}
                   </span>
                 </div>
@@ -1452,7 +1437,7 @@ export function ChromaKeyTabPanel({
                     Frame Rate Output
                   </span>
                   {estimatedFrames !== null && (
-                    <span className="rounded-full bg-green-100 px-2 py-0.5 font-mono text-[11px] font-bold text-green-800 tabular-nums">
+                    <span className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-bold text-green-800 tabular-nums">
                       ±{estimatedFrames} frame
                     </span>
                   )}
@@ -1472,7 +1457,7 @@ export function ChromaKeyTabPanel({
                             : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                         }`}
                       >
-                        <div className="font-mono text-xs font-bold">{opt.label}</div>
+                        <div className="text-xs font-bold">{opt.label}</div>
                         <div
                           className={`mt-0.5 truncate text-[10px] ${
                             active ? 'text-green-100' : 'text-slate-500'
@@ -1494,7 +1479,7 @@ export function ChromaKeyTabPanel({
                     Resolusi Maksimal
                   </span>
                   {targetDims && (
-                    <span className="rounded-full bg-green-100 px-2 py-0.5 font-mono text-[11px] font-bold text-green-800 tabular-nums">
+                    <span className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-bold text-green-800 tabular-nums">
                       {targetDims.width}×{targetDims.height}
                     </span>
                   )}
@@ -1536,7 +1521,7 @@ export function ChromaKeyTabPanel({
                   <span className="text-xs font-bold text-slate-900 sm:text-sm">
                     Batasi Ukuran Hasil (Smart Cap)
                   </span>
-                  <span className="rounded-full bg-green-100 px-2 py-0.5 font-mono text-[10px] font-bold text-green-800">
+                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-800">
                     {options.smartSizeCap
                       ? `CRF 22 • ${isMobile ? 'ultrafast' : 'veryfast'} + Cap`
                       : 'CRF 21 • Tanpa Cap'}
@@ -1554,12 +1539,14 @@ export function ChromaKeyTabPanel({
                 aria-label="Aktifkan Batasi Ukuran Hasil Smart Cap Auto Green Screen"
                 disabled={disabled}
                 onClick={() => onChange({ ...options, smartSizeCap: !options.smartSizeCap })}
-                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 disabled:opacity-50 ${
-                  options.smartSizeCap ? 'bg-green-600' : 'bg-slate-300'
+                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                  options.smartSizeCap
+                    ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                    : 'bg-[#B5F5DB]'
                 }`}
               >
                 <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                  className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
                     options.smartSizeCap ? 'translate-x-6' : 'translate-x-1'
                   }`}
                 />
@@ -1576,7 +1563,7 @@ export function ChromaKeyTabPanel({
                     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                       Ukuran Asli
                     </p>
-                    <p className="font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                    <p className="text-base font-extrabold text-slate-900 tabular-nums">
                       {formatFileSizeMB(originalSizeBytes)}
                     </p>
                   </div>
@@ -1585,14 +1572,14 @@ export function ChromaKeyTabPanel({
                   <p className="text-[11px] font-bold uppercase tracking-wider text-green-700">
                     Estimasi Ukuran Hasil (Perkiraan)
                   </p>
-                  <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                  <p className="mt-0.5 text-base font-extrabold text-slate-900 tabular-nums">
                     ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
                     {sizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
-                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                    <span className="text-[11px] font-semibold text-slate-500">
                       (perkiraan)
                     </span>
                   </p>
-                  <p className="mt-0.5 font-mono text-[11px] text-slate-500">
+                  <p className="mt-0.5 text-[11px] text-slate-500">
                     CRF {options.smartSizeCap ? '22' : '21'} • {options.targetFps} fps
                     {sizeEstimate.maxRateKbps
                       ? ` • Cap <= ${sizeEstimate.maxRateKbps}k`

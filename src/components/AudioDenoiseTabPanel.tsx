@@ -1,7 +1,7 @@
 import { useState } from 'react'
+import { motion } from 'motion/react'
 import {
   AudioLines,
-  Check,
   Copy,
   Film,
   HardDrive,
@@ -24,6 +24,12 @@ import {
   type AudioDenoisePresetId,
 } from '../utils/audioDenoiseConfig'
 import { formatFileSizeMB } from '../utils/videoProcessing'
+
+const CARD_SPRING = {
+  type: 'spring' as const,
+  stiffness: 420,
+  damping: 30,
+}
 
 interface AudioDenoiseTabPanelProps {
   options: AudioDenoiseOptions
@@ -81,22 +87,22 @@ export function AudioDenoiseTabPanel({
   }
 
   return (
-    <div className="animate-lv-fade-up flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       {/* Header singkat fitur Bersihkan Audio */}
-      <div className="flex items-start gap-3 rounded-2xl border border-fuchsia-200 bg-gradient-to-r from-fuchsia-50 via-pink-50/70 to-sky-50/50 p-4">
-        <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-fuchsia-600 text-white shadow-sm shadow-fuchsia-600/25">
+      <div className="flex items-start gap-3 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4">
+        <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#2EC7A4] to-[#0D6E5D] text-white shadow-sm shadow-[#0D6E5D]/20">
           <AudioLines aria-hidden="true" className="h-5 w-5" />
         </div>
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-bold text-slate-900">
+            <h3 className="text-base font-bold text-[#0D2B24]">
               Bersihkan Audio (Anti-Angin &amp; Noise Reduction)
             </h3>
-            <span className="whitespace-nowrap rounded-full bg-white px-2.5 py-0.5 font-mono text-[10px] font-bold text-fuchsia-700 ring-1 ring-fuchsia-200">
+            <span className="whitespace-nowrap rounded-full bg-white px-2.5 py-0.5 text-[10px] font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
               High-Pass Curam + afftdn + Noise Gate
             </span>
           </div>
-          <p className="mt-1 text-xs leading-relaxed text-slate-700 sm:text-sm">
+          <p className="mt-1 text-xs leading-relaxed text-[#4A6B63] sm:text-sm">
             Redam suara angin, tiupan langsung ke mikrofon, kipas angin, AC, dan desis latar secara
             lokal di browser tanpa efek pumping. Mode Video Copy menyalin gambar asli tanpa render
             ulang video sehingga selesai dalam hitungan detik.
@@ -108,10 +114,10 @@ export function AudioDenoiseTabPanel({
       <div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h4 className="text-sm font-bold text-slate-900 sm:text-base">
+            <h4 className="text-sm font-bold text-[#0D2B24] sm:text-base">
               1. Pilih Tingkat Pembersihan Noise
             </h4>
-            <p className="mt-0.5 text-xs text-slate-600">
+            <p className="mt-0.5 text-xs text-[#4A6B63]">
               Gunakan preset Kuat (Angin &amp; Tiupan Mic) untuk tiupan angin outdoor, atau atur
               bebas di Custom / Manual.
             </p>
@@ -121,71 +127,56 @@ export function AudioDenoiseTabPanel({
         <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           {AUDIO_DENOISE_PRESETS.map((preset) => {
             const selected = options.preset === preset.id
-            const isManual = preset.id === 'custom'
             return (
-              <button
+              <motion.button
                 key={preset.id}
                 type="button"
                 disabled={disabled}
                 onClick={() => handleSelectPreset(preset.id)}
-                className={`flex min-h-24 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl border p-3.5 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                  selected
-                    ? isManual
-                      ? 'border-blue-500 bg-blue-50/80 shadow-sm ring-1 ring-blue-500/30'
-                      : 'border-fuchsia-500 bg-fuchsia-50/80 shadow-sm ring-1 ring-fuchsia-500/30'
-                    : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                whileHover={!disabled ? { y: -2 } : undefined}
+                whileTap={!disabled ? { scale: 0.98 } : undefined}
+                transition={CARD_SPRING}
+                className={`flex min-h-24 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                  selected ? 'mint-option-card-active' : 'mint-option-card'
                 }`}
               >
                 <div className="flex w-full items-start justify-between gap-2">
                   <div>
                     <span
-                      className={`inline-block rounded-full px-2 py-0.5 font-mono text-[10px] font-bold ${
+                      className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${
                         selected
-                          ? isManual
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-fuchsia-600 text-white'
-                          : 'bg-white text-slate-600 ring-1 ring-slate-200'
+                          ? 'bg-[#14A085] text-white'
+                          : 'bg-[#E8FFF5] text-[#0D6E5D] ring-1 ring-[#B5F5DB]'
                       }`}
                     >
                       {preset.badge}
                     </span>
-                    <span className="mt-1.5 block text-sm font-bold text-slate-900">
+                    <span className="mt-1.5 block text-sm font-bold text-[#0D2B24]">
                       {preset.title}
                     </span>
                   </div>
-                  <span
-                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                      selected
-                        ? isManual
-                          ? 'border-blue-600 bg-blue-600 text-white'
-                          : 'border-fuchsia-600 bg-fuchsia-600 text-white'
-                        : 'border-slate-300 bg-white'
-                    }`}
-                  >
-                    {selected && <Check aria-hidden="true" className="h-3 w-3" />}
-                  </span>
                 </div>
-                <p className="text-xs leading-relaxed text-slate-600">{preset.description}</p>
-              </button>
+                <p className="text-xs leading-relaxed text-[#4A6B63]">{preset.description}</p>
+              </motion.button>
             )
           })}
         </div>
 
         {/* 4 Slider + 2 Toggle Anti-Angin untuk Custom / Manual */}
         {options.preset === 'custom' && (
-          <div className="animate-lv-fade-up mt-3.5 grid grid-cols-1 gap-4 rounded-2xl border border-blue-200 bg-blue-50/45 p-4 sm:grid-cols-2">
-            <div className="sm:col-span-2 flex items-center gap-2 text-xs font-bold text-blue-900">
-              <Sliders aria-hidden="true" className="h-4 w-4 text-blue-600" />
+          <div className="animate-lv-fade-up mt-3.5 grid grid-cols-1 gap-4 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4 sm:grid-cols-2">
+            <div className="sm:col-span-2 flex items-center gap-2 text-xs font-bold text-[#0D6E5D]">
+              <Sliders aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
               <span>Pengaturan Manual Filter Anti-Angin &amp; Noise (afftdn + agate + High-Pass)</span>
             </div>
 
             {/* Slider 1: nr (5..60 dB) */}
-            <div className="rounded-xl bg-white p-3.5 ring-1 ring-blue-200/70">
+            <div className="rounded-xl bg-white p-3.5 ring-1 ring-[#B5F5DB]">
               <div className="flex items-center justify-between gap-2">
-                <label htmlFor="audio-nr-slider" className="text-xs font-bold text-slate-800">
+                <label htmlFor="audio-nr-slider" className="text-xs font-bold text-[#0D2B24]">
                   Kekuatan Noise Reduction (nr)
                 </label>
-                <span className="rounded-full bg-blue-100 px-2 py-0.5 font-mono text-xs font-bold text-blue-800 tabular-nums">
+                <span className="rounded-full bg-[#E8FFF5] px-2 py-0.5 text-xs font-bold text-[#0D6E5D] tabular-nums">
                   {options.nr} dB
                 </span>
               </div>
@@ -198,21 +189,21 @@ export function AudioDenoiseTabPanel({
                 value={options.nr}
                 disabled={disabled}
                 onChange={(e) => updateCustomParam({ nr: Number(e.target.value) })}
-                className="mt-2.5 h-2 w-full cursor-pointer accent-blue-600 disabled:opacity-50"
+                className="mt-2.5 h-2 w-full cursor-pointer accent-[#14A085] disabled:opacity-50"
               />
-              <div className="mt-1 flex justify-between font-mono text-[10px] text-slate-500">
+              <div className="mt-1 flex justify-between text-[10px] text-[#4A6B63]">
                 <span>5 dB (Halus)</span>
                 <span>60 dB (Sangat Agresif)</span>
               </div>
             </div>
 
             {/* Slider 2: nf (-60..-20 dB) */}
-            <div className="rounded-xl bg-white p-3.5 ring-1 ring-blue-200/70">
+            <div className="rounded-xl bg-white p-3.5 ring-1 ring-[#B5F5DB]">
               <div className="flex items-center justify-between gap-2">
-                <label htmlFor="audio-nf-slider" className="text-xs font-bold text-slate-800">
+                <label htmlFor="audio-nf-slider" className="text-xs font-bold text-[#0D2B24]">
                   Ambang Noise Floor (nf)
                 </label>
-                <span className="rounded-full bg-blue-100 px-2 py-0.5 font-mono text-xs font-bold text-blue-800 tabular-nums">
+                <span className="rounded-full bg-[#E8FFF5] px-2 py-0.5 text-xs font-bold text-[#0D6E5D] tabular-nums">
                   {options.nf} dB
                 </span>
               </div>
@@ -225,21 +216,21 @@ export function AudioDenoiseTabPanel({
                 value={options.nf}
                 disabled={disabled}
                 onChange={(e) => updateCustomParam({ nf: Number(e.target.value) })}
-                className="mt-2.5 h-2 w-full cursor-pointer accent-blue-600 disabled:opacity-50"
+                className="mt-2.5 h-2 w-full cursor-pointer accent-[#14A085] disabled:opacity-50"
               />
-              <div className="mt-1 flex justify-between font-mono text-[10px] text-slate-500">
+              <div className="mt-1 flex justify-between text-[10px] text-[#4A6B63]">
                 <span>-60 dB (Tenang)</span>
                 <span>-20 dB (Bising Keras)</span>
               </div>
             </div>
 
             {/* Slider 3: highpassHz (0..300 Hz, 2x p=2 saat >= 120 Hz) */}
-            <div className="rounded-xl bg-white p-3.5 ring-1 ring-blue-200/70">
+            <div className="rounded-xl bg-white p-3.5 ring-1 ring-[#B5F5DB]">
               <div className="flex items-center justify-between gap-2">
-                <label htmlFor="audio-hp-slider" className="text-xs font-bold text-slate-800">
+                <label htmlFor="audio-hp-slider" className="text-xs font-bold text-[#0D2B24]">
                   Potong Angin / High-Pass
                 </label>
-                <span className="rounded-full bg-blue-100 px-2 py-0.5 font-mono text-xs font-bold text-blue-800 tabular-nums">
+                <span className="rounded-full bg-[#E8FFF5] px-2 py-0.5 text-xs font-bold text-[#0D6E5D] tabular-nums">
                   {options.highpassHz === 0
                     ? 'Mati'
                     : `${options.highpassHz} Hz${options.highpassHz >= 120 ? ' (24dB/oct)' : ''}`}
@@ -254,9 +245,9 @@ export function AudioDenoiseTabPanel({
                 value={options.highpassHz}
                 disabled={disabled}
                 onChange={(e) => updateCustomParam({ highpassHz: Number(e.target.value) })}
-                className="mt-2.5 h-2 w-full cursor-pointer accent-blue-600 disabled:opacity-50"
+                className="mt-2.5 h-2 w-full cursor-pointer accent-[#14A085] disabled:opacity-50"
               />
-              <div className="mt-1 flex justify-between font-mono text-[10px] text-slate-500">
+              <div className="mt-1 flex justify-between text-[10px] text-[#4A6B63]">
                 <span>0 Hz (Mati)</span>
                 <span>120+ Hz (Curam 2x)</span>
                 <span>300 Hz</span>
@@ -264,12 +255,12 @@ export function AudioDenoiseTabPanel({
             </div>
 
             {/* Slider 4: lowpassHz (5000..18000 Hz, 18000 = Mati) */}
-            <div className="rounded-xl bg-white p-3.5 ring-1 ring-blue-200/70">
+            <div className="rounded-xl bg-white p-3.5 ring-1 ring-[#B5F5DB]">
               <div className="flex items-center justify-between gap-2">
-                <label htmlFor="audio-lp-slider" className="text-xs font-bold text-slate-800">
+                <label htmlFor="audio-lp-slider" className="text-xs font-bold text-[#0D2B24]">
                   Potong Desis Tinggi / Low-Pass
                 </label>
-                <span className="rounded-full bg-blue-100 px-2 py-0.5 font-mono text-xs font-bold text-blue-800 tabular-nums">
+                <span className="rounded-full bg-[#E8FFF5] px-2 py-0.5 text-xs font-bold text-[#0D6E5D] tabular-nums">
                   {options.lowpassHz >= AUDIO_DENOISE_LIMITS.lowpassOff
                     ? 'Mati'
                     : `${options.lowpassHz} Hz`}
@@ -284,21 +275,21 @@ export function AudioDenoiseTabPanel({
                 value={options.lowpassHz}
                 disabled={disabled}
                 onChange={(e) => updateCustomParam({ lowpassHz: Number(e.target.value) })}
-                className="mt-2.5 h-2 w-full cursor-pointer accent-blue-600 disabled:opacity-50"
+                className="mt-2.5 h-2 w-full cursor-pointer accent-[#14A085] disabled:opacity-50"
               />
-              <div className="mt-1 flex justify-between font-mono text-[10px] text-slate-500">
+              <div className="mt-1 flex justify-between text-[10px] text-[#4A6B63]">
                 <span>5000 Hz</span>
                 <span>18000 Hz (Mati)</span>
               </div>
             </div>
 
             {/* Toggle Custom: Noise Gate (Bungkam Angin di Jeda) */}
-            <div className="flex items-center justify-between gap-3 rounded-xl bg-white p-3.5 ring-1 ring-blue-200/70">
+            <div className="flex items-center justify-between gap-3 rounded-xl bg-white p-3.5 ring-1 ring-[#B5F5DB]">
               <div>
-                <p className="text-xs font-bold text-slate-900">
+                <p className="text-xs font-bold text-[#0D2B24]">
                   Noise Gate (Bungkam Angin di Jeda)
                 </p>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600">
+                <p className="mt-0.5 text-[11px] leading-relaxed text-[#4A6B63]">
                   Membungkam suara angin dan bising latar secara otomatis di sela-sela ucapan.
                 </p>
               </div>
@@ -309,12 +300,14 @@ export function AudioDenoiseTabPanel({
                 aria-label="Aktifkan Noise Gate Bungkam Angin di Jeda"
                 disabled={disabled}
                 onClick={() => updateCustomParam({ noiseGate: !options.noiseGate })}
-                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:opacity-50 ${
-                  options.noiseGate ? 'bg-blue-600' : 'bg-slate-300'
+                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                  options.noiseGate
+                    ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                    : 'bg-[#B5F5DB]'
                 }`}
               >
                 <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                  className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
                     options.noiseGate ? 'translate-x-6' : 'translate-x-1'
                   }`}
                 />
@@ -322,13 +315,13 @@ export function AudioDenoiseTabPanel({
             </div>
 
             {/* Toggle Custom: Reduksi Angin 2-Tahap */}
-            <div className="flex items-center justify-between gap-3 rounded-xl bg-white p-3.5 ring-1 ring-blue-200/70">
+            <div className="flex items-center justify-between gap-3 rounded-xl bg-white p-3.5 ring-1 ring-[#B5F5DB]">
               <div>
-                <p className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900">
-                  <Wind aria-hidden="true" className="h-3.5 w-3.5 text-blue-600" />
+                <p className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0D2B24]">
+                  <Wind aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
                   Reduksi Angin 2-Tahap
                 </p>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600">
+                <p className="mt-0.5 text-[11px] leading-relaxed text-[#4A6B63]">
                   Menjalankan 2 tahap afftdn berurutan untuk meredam angin outdoor dan tiupan mic.
                 </p>
               </div>
@@ -341,12 +334,14 @@ export function AudioDenoiseTabPanel({
                 onClick={() =>
                   updateCustomParam({ twoStageWindReduction: !options.twoStageWindReduction })
                 }
-                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:opacity-50 ${
-                  options.twoStageWindReduction ? 'bg-blue-600' : 'bg-slate-300'
+                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                  options.twoStageWindReduction
+                    ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                    : 'bg-[#B5F5DB]'
                 }`}
               >
                 <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                  className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
                     options.twoStageWindReduction ? 'translate-x-6' : 'translate-x-1'
                   }`}
                 />
@@ -357,13 +352,13 @@ export function AudioDenoiseTabPanel({
       </div>
 
       {/* === B. 2. PENINGKATAN KEJERNIHAN VOKAL === */}
-      <div className="flex flex-col gap-3.5 border-t border-slate-200/80 pt-5">
+      <div className="flex flex-col gap-3.5 border-t border-[#E2F3EC] pt-5">
         <div>
-          <h4 className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-900 sm:text-base">
-            <Sparkles aria-hidden="true" className="h-4 w-4 text-fuchsia-600" />
+          <h4 className="inline-flex items-center gap-1.5 text-sm font-bold text-[#0D2B24] sm:text-base">
+            <Sparkles aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
             2. Peningkatan Kejernihan Vokal
           </h4>
-          <p className="mt-0.5 text-xs text-slate-600">
+          <p className="mt-0.5 text-xs text-[#4A6B63]">
             Menjaga suara bicara tetap jelas dan stabil tanpa mengangkat kembali noise angin di
             sela-sela jeda.
           </p>
@@ -371,12 +366,12 @@ export function AudioDenoiseTabPanel({
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {/* Toggle Voice Clarity EQ */}
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-[#E2F3EC] bg-[#F7FFFC] p-4">
             <div>
-              <p className="text-xs font-bold text-slate-900 sm:text-sm">
+              <p className="text-xs font-bold text-[#0D2B24] sm:text-sm">
                 Jernihkan Vokal (Voice Clarity EQ)
               </p>
-              <p className="mt-1 text-xs leading-relaxed text-slate-600">
+              <p className="mt-1 text-xs leading-relaxed text-[#4A6B63]">
                 Mengurangi gemuruh rendah (220 Hz -3 dB) dan mengangkat kejelasan vokal (3 kHz +3.5
                 dB).
               </p>
@@ -388,12 +383,14 @@ export function AudioDenoiseTabPanel({
               aria-label="Aktifkan Jernihkan Vokal Voice Clarity EQ"
               disabled={disabled}
               onClick={() => updateOption({ voiceClarity: !options.voiceClarity })}
-              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-600 focus-visible:ring-offset-2 disabled:opacity-50 ${
-                options.voiceClarity ? 'bg-fuchsia-600' : 'bg-slate-300'
+              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                options.voiceClarity
+                  ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                  : 'bg-[#B5F5DB]'
               }`}
             >
               <span
-                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
                   options.voiceClarity ? 'translate-x-6' : 'translate-x-1'
                 }`}
               />
@@ -401,12 +398,12 @@ export function AudioDenoiseTabPanel({
           </div>
 
           {/* Toggle Auto Leveling (acompressor + alimiter) */}
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-[#E2F3EC] bg-[#F7FFFC] p-4">
             <div>
-              <p className="text-xs font-bold text-slate-900 sm:text-sm">
+              <p className="text-xs font-bold text-[#0D2B24] sm:text-sm">
                 Ratakan Volume (Auto Leveling)
               </p>
-              <p className="mt-1 text-xs leading-relaxed text-slate-600">
+              <p className="mt-1 text-xs leading-relaxed text-[#4A6B63]">
                 Kompresor terkendali (acompressor + alimiter) yang meratakan vokal tanpa menaikkan
                 kembali noise latar.
               </p>
@@ -418,12 +415,14 @@ export function AudioDenoiseTabPanel({
               aria-label="Aktifkan Ratakan Volume Auto Leveling"
               disabled={disabled}
               onClick={() => updateOption({ autoLeveling: !options.autoLeveling })}
-              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-600 focus-visible:ring-offset-2 disabled:opacity-50 ${
-                options.autoLeveling ? 'bg-fuchsia-600' : 'bg-slate-300'
+              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                options.autoLeveling
+                  ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                  : 'bg-[#B5F5DB]'
               }`}
             >
               <span
-                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
                   options.autoLeveling ? 'translate-x-6' : 'translate-x-1'
                 }`}
               />
@@ -432,17 +431,17 @@ export function AudioDenoiseTabPanel({
         </div>
 
         {/* Slider Penyesuaian Volume (50%..200%, step 5%) */}
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+        <div className="rounded-2xl border border-[#E2F3EC] bg-[#F7FFFC] p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <label
               htmlFor="audio-denoise-volume"
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900 sm:text-sm"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0D2B24] sm:text-sm"
             >
-              <Volume2 aria-hidden="true" className="h-4 w-4 text-fuchsia-600" />
+              <Volume2 aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
               Penyesuaian Volume
             </label>
             <div className="flex items-center gap-2">
-              <span className="rounded-full bg-fuchsia-100 px-2.5 py-0.5 font-mono text-xs font-bold text-fuchsia-800 tabular-nums">
+              <span className="rounded-full bg-[#E8FFF5] px-2.5 py-0.5 text-xs font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB] tabular-nums">
                 {options.volumePercent}%
               </span>
               {options.volumePercent !== 100 && (
@@ -450,7 +449,7 @@ export function AudioDenoiseTabPanel({
                   type="button"
                   disabled={disabled}
                   onClick={() => updateOption({ volumePercent: 100 })}
-                  className="cursor-pointer text-[11px] font-semibold text-slate-500 underline underline-offset-2 hover:text-slate-900 disabled:opacity-50"
+                  className="cursor-pointer text-[11px] font-semibold text-[#0D6E5D] underline underline-offset-2 hover:text-[#0D2B24] disabled:opacity-50"
                 >
                   Reset 100%
                 </button>
@@ -466,9 +465,9 @@ export function AudioDenoiseTabPanel({
             value={options.volumePercent}
             disabled={disabled}
             onChange={(e) => updateOption({ volumePercent: Number(e.target.value) })}
-            className="mt-3 h-2 w-full cursor-pointer accent-fuchsia-600 disabled:opacity-50"
+            className="mt-3 h-2 w-full cursor-pointer accent-[#14A085] disabled:opacity-50"
           />
-          <div className="mt-1 flex justify-between font-mono text-[10px] text-slate-500">
+          <div className="mt-1 flex justify-between text-[10px] text-[#4A6B63]">
             <span>50% (Lebih Pelan)</span>
             <span>100% (Asli)</span>
             <span>200% (2× Lebih Keras)</span>
@@ -477,10 +476,10 @@ export function AudioDenoiseTabPanel({
       </div>
 
       {/* === C. 3. MODE OUTPUT === */}
-      <div className="flex flex-col gap-3 border-t border-slate-200/80 pt-5">
+      <div className="flex flex-col gap-3 border-t border-[#E2F3EC] pt-5">
         <div>
-          <h4 className="text-sm font-bold text-slate-900 sm:text-base">3. Mode Output</h4>
-          <p className="mt-0.5 text-xs text-slate-600">
+          <h4 className="text-sm font-bold text-[#0D2B24] sm:text-base">3. Mode Output</h4>
+          <p className="mt-0.5 text-xs text-[#4A6B63]">
             Simpan kembali sebagai video utuh dengan suara bersih, atau ekstrak audionya saja ke
             MP3.
           </p>
@@ -507,15 +506,16 @@ export function AudioDenoiseTabPanel({
           ).map(({ id, title, badge, desc, Icon }) => {
             const selected = options.outputMode === id
             return (
-              <button
+              <motion.button
                 key={id}
                 type="button"
                 disabled={disabled}
                 onClick={() => updateOption({ outputMode: id })}
-                className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2.5 rounded-2xl border p-4 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                  selected
-                    ? 'border-fuchsia-500 bg-fuchsia-50/75 shadow-sm ring-1 ring-fuchsia-500/30'
-                    : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                whileHover={!disabled ? { y: -2 } : undefined}
+                whileTap={!disabled ? { scale: 0.98 } : undefined}
+                transition={CARD_SPRING}
+                className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2.5 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                  selected ? 'mint-option-card-active' : 'mint-option-card'
                 }`}
               >
                 <div className="flex w-full items-start justify-between gap-2">
@@ -523,107 +523,95 @@ export function AudioDenoiseTabPanel({
                     <span
                       className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
                         selected
-                          ? 'bg-fuchsia-600 text-white shadow-xs shadow-fuchsia-600/25'
-                          : 'bg-slate-200/80 text-slate-600'
+                          ? 'bg-[#14A085] text-white shadow-xs shadow-[#0D6E5D]/20'
+                          : 'bg-[#E8FFF5] text-[#0D6E5D]'
                       }`}
                     >
                       <Icon aria-hidden="true" className="h-4 w-4" />
                     </span>
                     <div>
                       <span
-                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] font-bold ${
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
                           selected
-                            ? 'bg-fuchsia-100 text-fuchsia-800 ring-1 ring-fuchsia-200'
-                            : 'bg-white text-slate-600 ring-1 ring-slate-200'
+                            ? 'bg-[#B5F5DB] text-[#0D6E5D]'
+                            : 'bg-[#F7FFFC] text-[#4A6B63] ring-1 ring-[#E2F3EC]'
                         }`}
                       >
                         {id === 'video-copy' && <Zap aria-hidden="true" className="h-3 w-3" />}
                         {badge}
                       </span>
-                      <p className="mt-1.5 text-xs font-bold text-slate-900 sm:text-sm">{title}</p>
+                      <p className="mt-1.5 text-xs font-bold text-[#0D2B24] sm:text-sm">{title}</p>
                     </div>
                   </div>
-                  <span
-                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                      selected
-                        ? 'border-fuchsia-600 bg-fuchsia-600 text-white'
-                        : 'border-slate-300 bg-white'
-                    }`}
-                  >
-                    {selected && <Check aria-hidden="true" className="h-3 w-3" />}
-                  </span>
                 </div>
-                <p className="text-xs leading-relaxed text-slate-600">{desc}</p>
-              </button>
+                <p className="text-xs leading-relaxed text-[#4A6B63]">{desc}</p>
+              </motion.button>
             )
           })}
         </div>
       </div>
 
       {/* === D. 4. KARTU ESTIMASI UKURAN & RANTAI FILTER AKTIF === */}
-      <div className="flex flex-col gap-3 border-t border-slate-200/80 pt-5">
+      <div className="flex flex-col gap-3 border-t border-[#E2F3EC] pt-5">
         {sizeEstimate && originalSizeBytes !== null && (
-          <div className="grid grid-cols-1 gap-3 rounded-2xl border border-fuchsia-200/80 bg-gradient-to-r from-fuchsia-50/80 via-pink-50/50 to-white p-4 sm:grid-cols-2 sm:items-center">
+          <div className="grid grid-cols-1 gap-3 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4 sm:grid-cols-2 sm:items-center">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-fuchsia-600 ring-1 ring-fuchsia-200">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-[#14A085] ring-1 ring-[#B5F5DB]">
                 <HardDrive aria-hidden="true" className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[#4A6B63]">
                   Ukuran Asli
                 </p>
-                <p className="font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                <p className="text-base font-extrabold text-[#0D2B24] tabular-nums">
                   {formatFileSizeMB(originalSizeBytes)}
                 </p>
               </div>
             </div>
-            <div className="rounded-xl bg-white/95 p-3 ring-1 ring-fuchsia-200/80 sm:text-right">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-fuchsia-700">
+            <div className="rounded-xl bg-white p-3 ring-1 ring-[#B5F5DB] sm:text-right">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#0D6E5D]">
                 Estimasi Ukuran Hasil (Perkiraan)
               </p>
-              <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
+              <p className="mt-0.5 text-base font-extrabold text-[#0D2B24] tabular-nums">
                 ~{sizeEstimate.minEstimatedMB.toFixed(2)} MB -{' '}
                 {sizeEstimate.maxEstimatedMB.toFixed(2)} MB{' '}
-                <span className="font-sans text-[11px] font-semibold text-slate-500">
+                <span className="text-[11px] font-semibold text-[#4A6B63]">
                   (perkiraan)
                 </span>
               </p>
-              <p className="mt-0.5 font-mono text-[11px] text-slate-500">
+              <p className="mt-0.5 text-[11px] text-[#4A6B63]">
                 {options.outputMode === 'audio-mp3'
                   ? 'MP3 192 kbps (Audio Saja)'
                   : `Video Copy (-c:v copy) • ${outputTarget.codecLabel}`}
               </p>
               {sizeEstimate.note && (
-                <p className="mt-1 text-[11px] text-slate-500">{sizeEstimate.note}</p>
+                <p className="mt-1 text-[11px] text-[#4A6B63]">{sizeEstimate.note}</p>
               )}
             </div>
           </div>
         )}
 
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-[#4A6B63]">
           Grafik perbandingan audio Before &amp; After akan muncul otomatis setelah proses selesai.
         </p>
 
         {/* [UX #23] Lipat detail filter teknis ke accordion default tertutup agar tampilan tenang */}
-        <details className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600">
-          <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 font-semibold text-slate-700 select-none hover:text-slate-950">
+        <details className="rounded-xl border border-[#E2F3EC] bg-[#F7FFFC] px-3.5 py-2.5 text-xs text-[#4A6B63]">
+          <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 font-semibold text-[#0D6E5D] select-none hover:text-[#0D2B24]">
             <span>Lihat Detail Filter Teknis</span>
-            <span className="font-mono text-[11px] text-slate-400">({afChain.length} filter)</span>
+            <span className="text-[11px] text-[#4A6B63]">({afChain.length} filter)</span>
           </summary>
-          <div className="mt-2.5 border-t border-slate-200/80 pt-2.5">
+          <div className="mt-2.5 border-t border-[#E2F3EC] pt-2.5">
             <div className="flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-800">Rantai filter audio aktif (-af)</span>
+              <span className="font-bold text-[#0D2B24]">Rantai filter audio aktif (-af)</span>
               <button
                 type="button"
                 onClick={() => void handleCopyFilterChain()}
                 aria-label="Salin rantai filter audio"
-                className="inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition-colors hover:border-fuchsia-300 hover:bg-fuchsia-50 hover:text-fuchsia-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-600"
+                className="mint-secondary-btn inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085]"
               >
                 {copiedChain ? (
-                  <>
-                    <Check aria-hidden="true" className="h-3 w-3 text-emerald-600" />
-                    <span className="text-emerald-700">Tersalin</span>
-                  </>
+                  <span className="text-[#0D6E5D]">Tersalin</span>
                 ) : (
                   <>
                     <Copy aria-hidden="true" className="h-3 w-3" />
@@ -632,7 +620,7 @@ export function AudioDenoiseTabPanel({
                 )}
               </button>
             </div>
-            <div className="mt-1.5 overflow-x-auto whitespace-nowrap rounded-lg border border-slate-200/80 bg-white px-2.5 py-1.5 font-mono text-xs font-medium text-fuchsia-800">
+            <div className="mt-1.5 overflow-x-auto whitespace-nowrap rounded-lg border border-[#E2F3EC] bg-white px-2.5 py-1.5 font-mono text-xs font-medium text-[#0D6E5D]">
               <code>{afChainString}</code>
             </div>
           </div>

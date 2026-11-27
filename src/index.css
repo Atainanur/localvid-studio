@@ -1,52 +1,57 @@
 @import "tailwindcss";
 
+@theme {
+  --font-sans: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    monospace;
+}
+
 :root {
-  /* Semantic Design Tokens - LocalVid Studio (Sunlit Bento Creative) */
-  --color-background: #f6f8fc;
-  --color-surface: #ffffff;
-  --color-surface-subtle: #f1f5fb;
-  --color-foreground: #0f172a;
-  --color-muted-foreground: #475569;
-  --color-border: #e2e8f0;
-  --color-border-strong: #cbd5e1;
+  /* Palet Utama Mint-Emerald - LocalVid Studio */
+  --mint-900: #0D6E5D;
+  --mint-700: #14A085;
+  --mint-500: #2EC7A4;
+  --mint-300: #6DE7C1;
+  --mint-200: #B5F5DB;
+  --mint-50: #E8FFF5;
+
+  /* Semantic Design Tokens */
+  --color-background: #F4FFFA;
+  --color-surface: #FFFFFF;
+  --color-surface-subtle: #F7FFFC;
+  --color-foreground: #0D2B24;
+  --color-muted-foreground: #4A6B63;
+  --color-border: #B5F5DB;
+  --color-border-subtle: #E2F3EC;
+  --color-border-strong: #6DE7C1;
 
   /* Brand & Mood Accents */
-  --color-primary: #2563eb;
-  --color-primary-hover: #1d4ed8;
-  --color-primary-soft: #eff6ff;
-  --color-primary-border: #bfdbfe;
+  --color-primary: #14A085;
+  --color-primary-hover: #0D6E5D;
+  --color-primary-soft: #E8FFF5;
+  --color-primary-border: #6DE7C1;
 
-  --color-sunny: #ea580c;
-  --color-sunny-soft: #fff7ed;
-  --color-sunny-border: #fed7aa;
+  --color-mint: #14A085;
+  --color-mint-soft: #E8FFF5;
+  --color-mint-border: #B5F5DB;
 
-  --color-mint: #059669;
-  --color-mint-soft: #ecfdf5;
-  --color-mint-border: #a7f3d0;
+  --color-destructive: #DC2626;
+  --color-destructive-soft: #FEF2F2;
+  --color-destructive-border: #FECACA;
 
-  --color-magic: #7c3aed;
-  --color-magic-soft: #f5f3ff;
-  --color-magic-border: #ddd6fe;
-
-  --color-destructive: #dc2626;
-  --color-destructive-soft: #fef2f2;
-  --color-destructive-border: #fecaca;
-
-  --color-ring: #2563eb;
+  --color-ring: #14A085;
 
   /* Typography */
-  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    sans-serif;
+  --font-sans: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     monospace;
 
   /* Elevation */
-  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04),
-    0 12px 32px -12px rgba(37, 99, 235, 0.09);
-  --shadow-card-hover: 0 4px 10px rgba(15, 23, 42, 0.05),
-    0 16px 36px -12px rgba(37, 99, 235, 0.14);
-  --shadow-cta: 0 10px 24px -8px rgba(37, 99, 235, 0.45);
-  --shadow-mint: 0 10px 24px -8px rgba(5, 150, 105, 0.38);
+  --shadow-card: 0 10px 30px -12px rgba(13, 110, 93, 0.10);
+  --shadow-card-hover: 0 14px 34px -12px rgba(13, 110, 93, 0.14);
+  --shadow-card-active: 0 6px 18px -6px rgba(20, 160, 133, 0.22);
+  --shadow-cta: 0 8px 20px -6px rgba(20, 160, 133, 0.38);
+  --shadow-mint: 0 8px 20px -6px rgba(20, 160, 133, 0.38);
 
   /* Motion Tokens */
   --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
@@ -57,35 +62,150 @@
 @layer base {
   html,
   body {
-    min-height: 100dvh;
-    font-family: var(--font-sans);
-    background-color: var(--color-background);
-    color: var(--color-foreground);
+    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+    background-color: #f4fffa;
+    background-image: linear-gradient(180deg, #f4fffa 0%, #e8fff5 100%);
+    color: #0d2b24;
+    scroll-behavior: auto;
+    overflow-x: clip;
     overscroll-behavior-y: none;
     -webkit-tap-highlight-color: transparent;
   }
 
-  code,
+  body {
+    min-height: 100dvh;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font-family: inherit;
+  }
+
   pre,
   .font-mono {
     font-family: var(--font-mono);
   }
 }
 
-/* Latar belakang studio cerah yang segar dan menenangkan */
+/* Latar belakang Mint-Emerald bersih dan ringan (scroll native 60-120fps) */
 .studio-backdrop {
-  background-color: var(--color-background);
-  background-image:
-    radial-gradient(64rem 34rem at 8% -6%, rgba(56, 189, 248, 0.2), transparent 62%),
-    radial-gradient(52rem 30rem at 92% -4%, rgba(251, 146, 60, 0.16), transparent 60%),
-    radial-gradient(46rem 28rem at 52% 108%, rgba(52, 211, 153, 0.14), transparent 62%);
-  background-attachment: scroll;
+  background-color: #f4fffa;
+  background-image: linear-gradient(180deg, #f4fffa 0%, #e8fff5 100%);
 }
 
 .bento-card {
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-card);
+  background-color: #ffffff;
+  border: 1px solid #b5f5db;
+  box-shadow: 0 10px 30px -12px rgba(13, 110, 93, 0.10);
+}
+
+/* Tombol CTA Utama Mint-Emerald */
+.mint-cta-btn {
+  background-image: linear-gradient(135deg, #2ec7a4 0%, #14a085 55%, #0d6e5d 100%);
+  color: #ffffff;
+  box-shadow: 0 8px 20px -6px rgba(20, 160, 133, 0.38);
+}
+
+.mint-cta-btn:hover:not(:disabled) {
+  background-image: linear-gradient(135deg, #14a085 0%, #0d6e5d 70%, #0a584a 100%);
+}
+
+.mint-cta-btn:disabled {
+  background-image: none;
+  background-color: #e2f3ec;
+  color: #6b8b82;
+  box-shadow: none;
+}
+
+/* Tombol Sekunder Mint-Emerald */
+.mint-secondary-btn {
+  background-color: #ffffff;
+  border: 1px solid #b5f5db;
+  color: #0d6e5d;
+}
+
+.mint-secondary-btn:hover:not(:disabled) {
+  background-color: #e8fff5;
+  border-color: #2ec7a4;
+  color: #0d2b24;
+}
+
+/* Kartu Opsi / Template Interaktif Mint-Emerald */
+.mint-option-card {
+  background-color: #ffffff;
+  border: 1px solid #e2f3ec;
+}
+
+.mint-option-card:hover:not(:disabled) {
+  border-color: #6de7c1;
+  background-color: #f7fffc;
+}
+
+.mint-option-card-active {
+  background-color: #e8fff5;
+  border: 1.5px solid #14a085;
+  box-shadow: 0 6px 18px -6px rgba(20, 160, 133, 0.22);
+}
+
+/* Tab Aktif pada Bar Navigasi 7 Fitur */
+.mint-tab-active {
+  background-image: linear-gradient(135deg, #14a085 0%, #0d6e5d 100%);
+  color: #ffffff;
+  box-shadow: 0 6px 16px -6px rgba(13, 110, 93, 0.36);
+}
+
+/* Progress Bar Mint-Emerald */
+.mint-progress-fill {
+  background-image: linear-gradient(90deg, #6de7c1 0%, #2ec7a4 50%, #14a085 100%);
+}
+
+/* Slider Range Seragam Mint-Emerald */
+input[type='range']:not(.sr-only) {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  accent-color: #14a085;
+}
+
+input[type='range']:not(.sr-only)::-webkit-slider-runnable-track {
+  height: 0.5rem;
+  border-radius: 9999px;
+  background-color: #b5f5db;
+}
+
+input[type='range']:not(.sr-only)::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: -0.3125rem;
+  border-radius: 9999px;
+  background-color: #ffffff;
+  border: 2px solid #14a085;
+  box-shadow: 0 2px 6px rgba(13, 110, 93, 0.22);
+}
+
+input[type='range']:not(.sr-only)::-moz-range-track {
+  height: 0.5rem;
+  border-radius: 9999px;
+  background-color: #b5f5db;
+}
+
+input[type='range']:not(.sr-only)::-moz-range-progress {
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #2ec7a4 0%, #14a085 100%);
+}
+
+input[type='range']:not(.sr-only)::-moz-range-thumb {
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 9999px;
+  background-color: #ffffff;
+  border: 2px solid #14a085;
+  box-shadow: 0 2px 6px rgba(13, 110, 93, 0.22);
 }
 
 .tabular-nums {

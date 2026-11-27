@@ -1,8 +1,8 @@
 import { useEffect, useState, type KeyboardEvent } from 'react'
+import { motion } from 'motion/react'
 import {
   AlertTriangle,
   ArrowRight,
-  Check,
   ChevronDown,
   ChevronUp,
   Crop,
@@ -57,6 +57,12 @@ import {
   OUTPUT_FORMAT_OPTIONS,
   type OutputFormat,
 } from '../utils/videoProcessing'
+
+const CARD_SPRING = {
+  type: 'spring' as const,
+  stiffness: 420,
+  damping: 30,
+}
 
 interface CompressTabPanelProps {
   options: CompressOptions
@@ -314,28 +320,22 @@ export function CompressTabPanel({
     : []
 
   return (
-    <div className="animate-lv-fade-up flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       {/* === 1. PILIH MODE / TEMPLATE KOMPRESI (PALING ATAS) === */}
       <div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 className="inline-flex items-center gap-1.5 text-base font-bold text-slate-900">
-              <Sparkles aria-hidden="true" className="h-4 w-4 text-emerald-600" />
+            <h3 className="inline-flex items-center gap-1.5 text-base font-bold text-[#0D2B24]">
+              <Sparkles aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
               1. Pilih Mode / Template Kompresi
             </h3>
-            <p className="mt-0.5 text-xs leading-relaxed text-slate-600">
+            <p className="mt-0.5 text-xs leading-relaxed text-[#4A6B63]">
               Pilih template media sosial untuk kompresi instan 1-klik tanpa ribet, atau pilih{' '}
-              <strong className="font-semibold text-slate-800">Custom / Manual</strong> untuk
+              <strong className="font-semibold text-[#0D2B24]">Custom / Manual</strong> untuk
               pengaturan penuh.
             </p>
           </div>
-          <span
-            className={`whitespace-nowrap rounded-full px-3 py-1 text-[11px] font-bold ${
-              isCustomMode && derivedTemplateDef
-                ? 'bg-blue-100 text-blue-800 ring-1 ring-blue-200'
-                : 'bg-emerald-100 text-emerald-800'
-            }`}
-          >
+          <span className="whitespace-nowrap rounded-full bg-[#E8FFF5] px-3 py-1 text-[11px] font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
             {isCustomMode && derivedTemplateDef
               ? `Custom (diubah dari ${derivedTemplateDef.name})`
               : activeTemplate.badge}
@@ -347,48 +347,34 @@ export function CompressTabPanel({
             const selected = options.socialTemplate === tpl.id
             const isManualCard = tpl.id === 'custom'
             return (
-              <button
+              <motion.button
                 key={tpl.id}
                 type="button"
                 disabled={disabled}
                 onClick={() => handleSelectTemplate(tpl.id)}
-                className={`flex min-h-22 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl border p-3.5 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                  selected
-                    ? isManualCard
-                      ? 'border-blue-500 bg-blue-50/80 shadow-sm ring-1 ring-blue-500/30'
-                      : 'border-emerald-500 bg-emerald-50/80 shadow-sm ring-1 ring-emerald-500/30'
-                    : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
+                whileTap={!disabled ? { scale: 0.98 } : undefined}
+                transition={CARD_SPRING}
+                className={`flex min-h-22 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                  selected ? 'mint-option-card-active' : 'mint-option-card'
                 }`}
               >
                 <div className="flex w-full items-start justify-between gap-2">
                   <div>
-                    <span className="block text-xs font-bold text-slate-900">{tpl.name}</span>
+                    <span className="block text-xs font-bold text-[#0D2B24]">{tpl.name}</span>
                     <span
                       className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${
                         selected
-                          ? isManualCard
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-emerald-600 text-white'
-                          : 'bg-white text-slate-600 ring-1 ring-slate-200'
+                          ? 'bg-[#14A085] text-white'
+                          : 'bg-[#E8FFF5] text-[#0D6E5D] ring-1 ring-[#B5F5DB]'
                       }`}
                     >
                       {isManualCard ? 'Pengaturan Bebas' : tpl.badge}
                     </span>
                   </div>
-                  <span
-                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                      selected
-                        ? isManualCard
-                          ? 'border-blue-600 bg-blue-600 text-white'
-                          : 'border-emerald-600 bg-emerald-600 text-white'
-                        : 'border-slate-300 bg-white'
-                    }`}
-                  >
-                    {selected && <Check aria-hidden="true" className="h-3 w-3" />}
-                  </span>
                 </div>
-                <p className="text-[11px] leading-snug text-slate-600">{tpl.description}</p>
-              </button>
+                <p className="text-[11px] leading-snug text-[#4A6B63]">{tpl.description}</p>
+              </motion.button>
             )
           })}
         </div>
@@ -402,19 +388,19 @@ export function CompressTabPanel({
       {!isCustomMode ? (
         <div
           key={`template-summary-${options.socialTemplate}`}
-          className="animate-lv-fade-up flex flex-col gap-4 rounded-2xl border border-emerald-200/90 bg-gradient-to-br from-emerald-50/90 via-teal-50/60 to-sky-50/50 p-4 sm:p-5"
+          className="animate-lv-fade-up flex flex-col gap-4 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4 sm:p-5"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2.5">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-xs shadow-emerald-600/25">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#2EC7A4] to-[#0D6E5D] text-white shadow-xs shadow-[#0D6E5D]/20">
                 <Zap aria-hidden="true" className="h-4 w-4" />
               </span>
               <div>
-                <h4 className="text-sm font-bold text-slate-900">
+                <h4 className="text-sm font-bold text-[#0D2B24]">
                   Estimasi Ukuran &amp; Setelan Otomatis
                 </h4>
-                <p className="text-xs text-slate-600">
-                  Preset <strong className="text-slate-900">{activeTemplate.name}</strong> siap
+                <p className="text-xs text-[#4A6B63]">
+                  Preset <strong className="text-[#0D2B24]">{activeTemplate.name}</strong> siap
                   diproses 1-klik tanpa perlu pengaturan tambahan.
                 </p>
               </div>
@@ -424,43 +410,43 @@ export function CompressTabPanel({
           {/* Perbandingan Ukuran Asli vs Estimasi Hasil */}
           {sizeEstimate && originalSizeBytes !== null ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-center">
-              <div className="flex items-center gap-3 rounded-xl bg-white/90 p-3.5 ring-1 ring-emerald-200/70">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+              <div className="flex items-center gap-3 rounded-xl bg-white p-3.5 ring-1 ring-[#B5F5DB]">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#E8FFF5] text-[#14A085]">
                   <HardDrive aria-hidden="true" className="h-5 w-5" />
                 </div>
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-[#4A6B63]">
                     Ukuran Asli
                   </p>
-                  <p className="font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                  <p className="text-base font-extrabold text-[#0D2B24] tabular-nums">
                     {formatFileSizeMB(originalSizeBytes)}
                   </p>
                 </div>
               </div>
 
-              <div className="rounded-xl bg-white/95 p-3.5 ring-1 ring-emerald-200/80 sm:text-right">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+              <div className="rounded-xl bg-white p-3.5 ring-1 ring-[#B5F5DB] sm:text-right">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[#0D6E5D]">
                   Estimasi Hasil Real-Time (Perkiraan)
                 </p>
                 {sizeEstimate.mode === 'target-size' ? (
-                  <p className="mt-0.5 font-mono text-base font-extrabold text-emerald-800 tabular-nums">
+                  <p className="mt-0.5 text-base font-extrabold text-[#0D2B24] tabular-nums">
                     ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB{' '}
-                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                    <span className="text-[11px] font-semibold text-[#4A6B63]">
                       (perkiraan)
                     </span>{' '}
-                    <span className="text-xs font-bold text-emerald-600">
+                    <span className="text-xs font-bold text-[#14A085]">
                       (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}%)
                     </span>
                   </p>
                 ) : (
-                  <p className="mt-0.5 font-mono text-base font-extrabold text-emerald-800 tabular-nums">
+                  <p className="mt-0.5 text-base font-extrabold text-[#0D2B24] tabular-nums">
                     ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
                     {sizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
-                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                    <span className="text-[11px] font-semibold text-[#4A6B63]">
                       (perkiraan)
                     </span>
                     {sizeEstimate.savingsPercentMax > 5 && (
-                      <span className="ml-1.5 text-xs font-bold text-emerald-600">
+                      <span className="ml-1.5 text-xs font-bold text-[#14A085]">
                         (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}-
                         {Math.max(0, Math.round(sizeEstimate.savingsPercentMax))}%)
                       </span>
@@ -468,21 +454,21 @@ export function CompressTabPanel({
                   </p>
                 )}
                 {sizeEstimate.targetVideoBitrateKbps !== undefined && (
-                  <p className="mt-0.5 font-mono text-[11px] text-slate-500 tabular-nums">
+                  <p className="mt-0.5 text-[11px] text-[#4A6B63] tabular-nums">
                     Target bitrate otomatis: {sizeEstimate.targetVideoBitrateKbps} kbps
                   </p>
                 )}
                 {sizeEstimate.calibrationSamples !== undefined &&
                   sizeEstimate.calibrationSamples > 0 && (
-                    <p className="mt-0.5 text-[10px] font-medium text-emerald-700">
+                    <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
                       Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
                     </p>
                   )}
               </div>
             </div>
           ) : (
-            <div className="flex items-center gap-2.5 rounded-xl bg-white/85 px-3.5 py-3 text-xs text-slate-600 ring-1 ring-emerald-200/70">
-              <Info aria-hidden="true" className="h-4 w-4 shrink-0 text-emerald-600" />
+            <div className="flex items-center gap-2.5 rounded-xl bg-white px-3.5 py-3 text-xs text-[#4A6B63] ring-1 ring-[#B5F5DB]">
+              <Info aria-hidden="true" className="h-4 w-4 shrink-0 text-[#14A085]" />
               <span>
                 Pilih file video di atas untuk melihat estimasi ukuran hasil real-time sebelum
                 kompresi.
@@ -495,7 +481,7 @@ export function CompressTabPanel({
             {templateAutoBadges.map((badgeText) => (
               <span
                 key={badgeText}
-                className="whitespace-nowrap rounded-full bg-white/95 px-2.5 py-1 font-mono text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-200/90"
+                className="whitespace-nowrap rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]"
               >
                 {badgeText}
               </span>
@@ -504,13 +490,13 @@ export function CompressTabPanel({
 
           {/* [BUG-15] Tampilkan opsi lanjutan non-konflik yang tetap dipertahankan */}
           {preservedAdvancedLabels.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200/80 bg-blue-50/80 px-3.5 py-2.5 text-xs text-blue-900">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#6DE7C1] bg-white px-3.5 py-2.5 text-xs text-[#0D6E5D]">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="font-bold">Opsi lanjutan tetap aktif:</span>
                 {preservedAdvancedLabels.map((lbl) => (
                   <span
                     key={lbl}
-                    className="rounded-full bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-blue-800 ring-1 ring-blue-200"
+                    className="rounded-full bg-[#E8FFF5] px-2 py-0.5 text-[11px] font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]"
                   >
                     {lbl}
                   </span>
@@ -520,7 +506,7 @@ export function CompressTabPanel({
                 type="button"
                 disabled={disabled}
                 onClick={() => onChange(resetPreservedAdvancedOptions(options))}
-                className="cursor-pointer text-[11px] font-bold text-blue-700 underline underline-offset-2 hover:text-blue-900 disabled:opacity-50"
+                className="cursor-pointer text-[11px] font-bold text-[#0D6E5D] underline underline-offset-2 hover:text-[#0D2B24] disabled:opacity-50"
               >
                 Reset Opsi Lanjutan
               </button>
@@ -528,15 +514,15 @@ export function CompressTabPanel({
           )}
 
           {/* Tautan cepat beralih ke Custom / Manual */}
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-emerald-200/70 pt-3 text-xs">
-            <span className="text-slate-600">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#B5F5DB] pt-3 text-xs">
+            <span className="text-[#4A6B63]">
               Ingin atur format, target MB, trim, crop, atau audio secara manual?
             </span>
             <button
               type="button"
               disabled={disabled}
               onClick={() => handleSelectTemplate('custom')}
-              className="inline-flex cursor-pointer touch-manipulation items-center gap-1 font-bold text-blue-700 underline-offset-4 transition-colors hover:text-blue-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:opacity-50"
+              className="inline-flex cursor-pointer touch-manipulation items-center gap-1 font-bold text-[#0D6E5D] underline-offset-4 transition-colors hover:text-[#0D2B24] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50"
             >
               <span>Pilih Custom / Manual</span>
               <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
@@ -554,12 +540,12 @@ export function CompressTabPanel({
           className="animate-lv-fade-up flex flex-col gap-6"
         >
           {/* === 2. FORMAT OUTPUT === */}
-          <div className="border-t border-slate-200/80 pt-5">
+          <div className="border-t border-[#E2F3EC] pt-5">
             <div>
-              <h3 className="text-base font-bold text-slate-900">2. Format Output</h3>
-              <p className="mt-0.5 text-xs text-slate-600">
+              <h3 className="text-base font-bold text-[#0D2B24]">2. Format Output</h3>
+              <p className="mt-0.5 text-xs text-[#4A6B63]">
                 Smart Auto-Pairing aktif saat codec &ldquo;Auto&rdquo;:{' '}
-                <code className="rounded bg-emerald-50 px-1.5 py-0.5 font-mono font-semibold text-emerald-800">
+                <code className="rounded bg-[#E8FFF5] px-1.5 py-0.5 font-semibold text-[#0D6E5D]">
                   {autoPairingLabel}
                 </code>
               </p>
@@ -569,39 +555,31 @@ export function CompressTabPanel({
               {OUTPUT_FORMAT_OPTIONS.map((item) => {
                 const selected = options.outputFormat === item.value
                 return (
-                  <button
+                  <motion.button
                     key={item.value}
                     type="button"
                     disabled={disabled}
                     onClick={() => handleSelectFormat(item.value)}
-                    className={`flex min-h-16 cursor-pointer touch-manipulation flex-col items-start justify-between rounded-2xl border p-3 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                      selected
-                        ? 'border-emerald-500 bg-emerald-50/80 shadow-sm ring-1 ring-emerald-500/30'
-                        : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                    whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
+                    whileTap={!disabled ? { scale: 0.98 } : undefined}
+                    transition={CARD_SPRING}
+                    className={`flex min-h-16 cursor-pointer touch-manipulation flex-col items-start justify-between rounded-2xl p-3 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                      selected ? 'mint-option-card-active' : 'mint-option-card'
                     }`}
                   >
                     <div className="flex w-full items-center justify-between gap-2">
                       <span
-                        className={`font-mono text-sm font-bold ${
-                          selected ? 'text-emerald-800' : 'text-slate-900'
+                        className={`text-sm font-bold ${
+                          selected ? 'text-[#0D6E5D]' : 'text-[#0D2B24]'
                         }`}
                       >
                         .{item.label}
                       </span>
-                      <span
-                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                          selected
-                            ? 'border-emerald-600 bg-emerald-600 text-white'
-                            : 'border-slate-300 bg-white'
-                        }`}
-                      >
-                        {selected && <Check aria-hidden="true" className="h-3 w-3" />}
-                      </span>
                     </div>
-                    <span className="mt-1 text-[11px] leading-snug text-slate-600">
+                    <span className="mt-1 text-[11px] leading-snug text-[#4A6B63]">
                       {item.description}
                     </span>
-                  </button>
+                  </motion.button>
                 )
               })}
             </div>
@@ -621,11 +599,11 @@ export function CompressTabPanel({
           </div>
 
           {/* === 3. MODE KOMPRESI: PRESET KUALITAS (CRF) VS CUSTOM TARGET SIZE (MB) === */}
-          <div className="border-t border-slate-200/80 pt-5">
+          <div className="border-t border-[#E2F3EC] pt-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="text-base font-bold text-slate-900">3. Mode Kompresi</h3>
-                <p className="mt-0.5 text-xs text-slate-600">
+                <h3 className="text-base font-bold text-[#0D2B24]">3. Mode Kompresi</h3>
+                <p className="mt-0.5 text-xs text-[#4A6B63]">
                   Pilih kontrol berbasis kualitas (CRF) atau target ukuran file akhir (MB).
                 </p>
               </div>
@@ -633,16 +611,16 @@ export function CompressTabPanel({
               <div
                 role="group"
                 aria-label="Pilih mode kompresi"
-                className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1"
+                className="inline-flex rounded-xl border border-[#B5F5DB] bg-[#E8FFF5] p-1"
               >
                 <button
                   type="button"
                   disabled={disabled || isVideoCopy}
                   onClick={() => update({ compressionMode: 'crf', customCrf: null })}
-                  className={`min-h-10 cursor-pointer touch-manipulation rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`min-h-10 cursor-pointer touch-manipulation rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:cursor-not-allowed disabled:opacity-50 ${
                     options.compressionMode === 'crf'
-                      ? 'bg-white text-emerald-700 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
+                      ? 'bg-white text-[#0D6E5D] shadow-xs'
+                      : 'text-[#4A6B63] hover:text-[#0D2B24]'
                   }`}
                 >
                   Preset Kualitas (CRF)
@@ -657,10 +635,10 @@ export function CompressTabPanel({
                       targetSizeMB: clampedTargetMB,
                     })
                   }}
-                  className={`min-h-10 cursor-pointer touch-manipulation rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`min-h-10 cursor-pointer touch-manipulation rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:cursor-not-allowed disabled:opacity-50 ${
                     options.compressionMode === 'target-size'
-                      ? 'bg-white text-emerald-700 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
+                      ? 'bg-white text-[#0D6E5D] shadow-xs'
+                      : 'text-[#4A6B63] hover:text-[#0D2B24]'
                   }`}
                 >
                   Custom Target Size (MB)
@@ -684,49 +662,41 @@ export function CompressTabPanel({
                   const selected = options.crfPreset === preset.id
                   const strengthBars = index + 1
                   return (
-                    <button
+                    <motion.button
                       key={preset.id}
                       type="button"
                       disabled={disabled}
                       onClick={() => update({ crfPreset: preset.id, customCrf: null })}
-                      className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-3.5 rounded-2xl border p-4 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                        selected
-                          ? 'border-emerald-500 bg-emerald-50/75 shadow-sm ring-1 ring-emerald-500/30'
-                          : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                      whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
+                      whileTap={!disabled ? { scale: 0.98 } : undefined}
+                      transition={CARD_SPRING}
+                      className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-3.5 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                        selected ? 'mint-option-card-active' : 'mint-option-card'
                       }`}
                     >
                       <div className="flex w-full items-start justify-between gap-2">
                         <div>
                           <span
-                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-mono text-[11px] font-bold ${
+                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
                               selected
-                                ? 'bg-emerald-600 text-white'
-                                : 'bg-slate-200/80 text-slate-700'
+                                ? 'bg-[#14A085] text-white'
+                                : 'bg-[#E8FFF5] text-[#0D6E5D]'
                             }`}
                           >
                             <Gauge aria-hidden="true" className="h-3 w-3" />
                             {preset.badge}
                           </span>
-                          <h4 className="mt-2.5 text-sm font-bold text-slate-900">
+                          <h4 className="mt-2.5 text-sm font-bold text-[#0D2B24]">
                             {preset.title}
                           </h4>
                         </div>
-                        <span
-                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                            selected
-                              ? 'border-emerald-600 bg-emerald-600 text-white'
-                              : 'border-slate-300 bg-white'
-                          }`}
-                        >
-                          {selected && <Check aria-hidden="true" className="h-3 w-3" />}
-                        </span>
                       </div>
 
-                      <p className="text-xs leading-relaxed text-slate-600">{preset.subtitle}</p>
+                      <p className="text-xs leading-relaxed text-[#4A6B63]">{preset.subtitle}</p>
 
                       <div
                         aria-hidden="true"
-                        className="flex items-center gap-1.5 border-t border-slate-200/70 pt-2.5"
+                        className="flex items-center gap-1.5 border-t border-[#E2F3EC] pt-2.5"
                       >
                         {[1, 2, 3].map((level) => (
                           <span
@@ -734,29 +704,29 @@ export function CompressTabPanel({
                             className={`h-1.5 flex-1 rounded-full transition-colors ${
                               level <= strengthBars
                                 ? selected
-                                  ? 'bg-emerald-500'
-                                  : 'bg-slate-400'
-                                : 'bg-slate-200'
+                                  ? 'bg-[#14A085]'
+                                  : 'bg-[#6DE7C1]'
+                                : 'bg-[#E2F3EC]'
                             }`}
                           />
                         ))}
                       </div>
-                    </button>
+                    </motion.button>
                   )
                 })}
               </div>
             ) : (
               /* Mode Custom Target Size (MB) */
-              <div className="mt-3.5 flex flex-col gap-3.5 rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4">
+              <div className="mt-3.5 flex flex-col gap-3.5 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex-1">
                     <label
                       htmlFor="compress-target-size-mb"
-                      className="text-xs font-bold text-slate-900"
+                      className="text-xs font-bold text-[#0D2B24]"
                     >
                       Target Ukuran File Hasil (MB)
                     </label>
-                    <p className="mt-0.5 text-xs text-slate-600">
+                    <p className="mt-0.5 text-xs text-[#4A6B63]">
                       Bitrate video akan dihitung otomatis sesuai durasi{' '}
                       {trim.isActive ? 'klip hasil trim' : 'video asli'} agar akurat dan bebas
                       error.
@@ -786,9 +756,9 @@ export function CompressTabPanel({
                         commitTargetSizeValue(targetSizeText)
                       }}
                       onKeyDown={handleTargetSizeKeyDown}
-                      className="min-h-11 w-28 rounded-xl border border-emerald-300 bg-white px-3 py-2 text-right font-mono text-sm font-bold text-slate-900 tabular-nums focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:opacity-60"
+                      className="min-h-11 w-28 rounded-xl border border-[#6DE7C1] bg-white px-3 py-2 text-right text-sm font-bold text-[#0D2B24] tabular-nums focus:border-[#14A085] focus:outline-none focus:ring-2 focus:ring-[#2EC7A4]/30 disabled:opacity-60"
                     />
-                    <span className="font-mono text-sm font-bold text-emerald-800">MB</span>
+                    <span className="text-sm font-bold text-[#0D6E5D]">MB</span>
                   </div>
                 </div>
 
@@ -801,18 +771,18 @@ export function CompressTabPanel({
                   disabled={disabled || bounds.maxMB <= bounds.minMB}
                   aria-label="Slider target ukuran file dalam MB"
                   onChange={(e) => handleTargetSizeSliderChange(e.target.value)}
-                  className="h-2.5 w-full cursor-pointer accent-emerald-600 disabled:cursor-not-allowed"
+                  className="h-2.5 w-full cursor-pointer accent-[#14A085] disabled:cursor-not-allowed"
                 />
 
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <span className="font-semibold text-emerald-900 tabular-nums">
+                  <span className="font-semibold text-[#0D6E5D] tabular-nums">
                     Batas aman untuk video ini:{' '}
-                    <strong className="font-mono">{bounds.minMB.toFixed(1)} MB</strong> (mentok
-                    kecil) – <strong className="font-mono">{bounds.maxMB.toFixed(1)} MB</strong>{' '}
+                    <strong >{bounds.minMB.toFixed(1)} MB</strong> (mentok
+                    kecil) – <strong >{bounds.maxMB.toFixed(1)} MB</strong>{' '}
                     (mentok besar)
                   </span>
                   {sizeEstimate?.targetVideoBitrateKbps !== undefined && (
-                    <span className="rounded-full bg-white px-2.5 py-0.5 font-mono text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200 tabular-nums">
+                    <span className="rounded-full bg-white px-2.5 py-0.5 text-[11px] font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB] tabular-nums">
                       Target Video: {sizeEstimate.targetVideoBitrateKbps} kbps
                     </span>
                   )}
@@ -829,51 +799,51 @@ export function CompressTabPanel({
 
           {/* === KARTU ESTIMASI UKURAN (REAL-TIME) === */}
           {sizeEstimate && originalSizeBytes !== null && (
-            <div className="grid grid-cols-1 gap-3 rounded-2xl border border-emerald-200/90 bg-gradient-to-r from-emerald-50/90 via-teal-50/70 to-sky-50/60 p-4 sm:grid-cols-2 sm:items-center">
+            <div className="grid grid-cols-1 gap-3 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4 sm:grid-cols-2 sm:items-center">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-emerald-700 shadow-xs ring-1 ring-emerald-200">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-[#14A085] shadow-xs ring-1 ring-[#B5F5DB]">
                   <HardDrive aria-hidden="true" className="h-5 w-5" />
                 </div>
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-[#4A6B63]">
                     Ukuran Asli
                   </p>
-                  <p className="font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                  <p className="text-base font-extrabold text-[#0D2B24] tabular-nums">
                     {formatFileSizeMB(originalSizeBytes)}
                   </p>
                 </div>
               </div>
 
-              <div className="rounded-xl bg-white/90 p-3 ring-1 ring-emerald-200/80 sm:text-right">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+              <div className="rounded-xl bg-white p-3 ring-1 ring-[#B5F5DB] sm:text-right">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[#0D6E5D]">
                   Estimasi Ukuran Hasil (Perkiraan)
                 </p>
                 {sizeEstimate.mode === 'target-size' ? (
-                  <p className="mt-0.5 font-mono text-base font-extrabold text-emerald-800 tabular-nums">
+                  <p className="mt-0.5 text-base font-extrabold text-[#0D2B24] tabular-nums">
                     ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB{' '}
-                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                    <span className="text-[11px] font-semibold text-[#4A6B63]">
                       (perkiraan)
                     </span>{' '}
-                    <span className="text-xs font-bold text-emerald-600">
+                    <span className="text-xs font-bold text-[#14A085]">
                       (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}%)
                     </span>
                   </p>
                 ) : (
-                  <p className="mt-0.5 font-mono text-base font-extrabold text-emerald-800 tabular-nums">
+                  <p className="mt-0.5 text-base font-extrabold text-[#0D2B24] tabular-nums">
                     ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
                     {sizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
-                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                    <span className="text-[11px] font-semibold text-[#4A6B63]">
                       (perkiraan)
                     </span>
                     {sizeEstimate.savingsPercentMax > 5 && (
-                      <span className="ml-1.5 text-xs font-bold text-emerald-600">
+                      <span className="ml-1.5 text-xs font-bold text-[#14A085]">
                         (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}-
                         {Math.max(0, Math.round(sizeEstimate.savingsPercentMax))}%)
                       </span>
                     )}
                   </p>
                 )}
-                <p className="mt-1 text-[11px] text-slate-500">
+                <p className="mt-1 text-[11px] text-[#4A6B63]">
                   {isVideoCopy
                     ? 'Mode Stream Copy'
                     : options.compressionMode === 'target-size'
@@ -890,7 +860,7 @@ export function CompressTabPanel({
                 </p>
                 {sizeEstimate.calibrationSamples !== undefined &&
                   sizeEstimate.calibrationSamples > 0 && (
-                    <p className="mt-0.5 text-[10px] font-medium text-emerald-700">
+                    <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
                       Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
                     </p>
                   )}
@@ -899,22 +869,22 @@ export function CompressTabPanel({
           )}
 
           {/* === ACCORDION PENGATURAN LANJUTAN (ADVANCED SETTINGS - DEFAULT TERTUTUP) === */}
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60">
+          <div className="overflow-hidden rounded-2xl border border-[#B5F5DB] bg-[#F7FFFC]">
             <button
               type="button"
               onClick={() => setAdvancedOpen((prev) => !prev)}
               aria-expanded={advancedOpen}
-              className="flex min-h-13 w-full cursor-pointer touch-manipulation items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600"
+              className="flex min-h-13 w-full cursor-pointer touch-manipulation items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[#E8FFF5]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#14A085]"
             >
               <div className="flex items-center gap-2.5">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-slate-700 ring-1 ring-slate-200">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-[#14A085] ring-1 ring-[#B5F5DB]">
                   <Sliders aria-hidden="true" className="h-4 w-4" />
                 </span>
                 <div>
-                  <span className="text-sm font-bold text-slate-900">
+                  <span className="text-sm font-bold text-[#0D2B24]">
                     Pengaturan Lanjutan (Advanced Settings)
                   </span>
-                  <span className="block text-[11px] text-slate-500">
+                  <span className="block text-[11px] text-[#4A6B63]">
                     Video Codec, Resolusi, Aspect Ratio, FPS, Rotasi, Audio, Trim, Crop &amp;
                     Privasi
                   </span>
@@ -923,24 +893,24 @@ export function CompressTabPanel({
 
               <div className="flex items-center gap-2">
                 {activeAdvancedCount > 0 && (
-                  <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2.5 py-0.5 font-mono text-[11px] font-bold text-emerald-800 tabular-nums">
+                  <span className="whitespace-nowrap rounded-full bg-[#B5F5DB] px-2.5 py-0.5 text-[11px] font-bold text-[#0D6E5D] tabular-nums">
                     {activeAdvancedCount} aktif
                   </span>
                 )}
                 {advancedOpen ? (
-                  <ChevronUp aria-hidden="true" className="h-4 w-4 text-slate-500" />
+                  <ChevronUp aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
                 ) : (
-                  <ChevronDown aria-hidden="true" className="h-4 w-4 text-slate-500" />
+                  <ChevronDown aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
                 )}
               </div>
             </button>
 
             {advancedOpen && (
-              <div className="animate-lv-fade-up flex flex-col gap-6 border-t border-slate-200 bg-white p-4 sm:p-5">
+              <div className="animate-lv-fade-up flex flex-col gap-6 border-t border-[#B5F5DB] bg-white p-4 sm:p-5">
                 {/* --- A. VIDEO OPTIONS --- */}
                 <div className="flex flex-col gap-3.5">
-                  <h4 className="inline-flex items-center gap-2 text-sm font-bold text-slate-900">
-                    <Film aria-hidden="true" className="h-4 w-4 text-blue-600" />
+                  <h4 className="inline-flex items-center gap-2 text-sm font-bold text-[#0D2B24]">
+                    <Film aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
                     A. Opsi Video (Video Options)
                   </h4>
 
@@ -1068,7 +1038,7 @@ export function CompressTabPanel({
                               value={options.customWidth}
                               disabled={disabled}
                               onChange={(e) => update({ customWidth: e.target.value })}
-                              className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono text-xs text-slate-900"
+                              className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900"
                             />
                           </div>
                           <div>
@@ -1088,7 +1058,7 @@ export function CompressTabPanel({
                               value={options.customHeight}
                               disabled={disabled}
                               onChange={(e) => update({ customHeight: e.target.value })}
-                              className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono text-xs text-slate-900"
+                              className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900"
                             />
                           </div>
                         </div>
@@ -1254,7 +1224,7 @@ export function CompressTabPanel({
                         >
                           Adjust Volume
                         </label>
-                        <span className="font-mono text-xs font-bold text-emerald-700 tabular-nums">
+                        <span className="text-xs font-bold text-emerald-700 tabular-nums">
                           {options.volumePercent}%
                         </span>
                       </div>
@@ -1327,15 +1297,15 @@ export function CompressTabPanel({
                 </div>
 
                 {/* --- C. TRIM SETTINGS --- */}
-                <div className="flex flex-col gap-3.5 border-t border-slate-200/80 pt-5">
+                <div className="flex flex-col gap-3.5 border-t border-[#E2F3EC] pt-5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <h4 className="inline-flex items-center gap-2 text-sm font-bold text-slate-900">
-                        <Scissors aria-hidden="true" className="h-4 w-4 text-orange-600" />
+                      <h4 className="inline-flex items-center gap-2 text-sm font-bold text-[#0D2B24]">
+                        <Scissors aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
                         C. Potong Durasi (Trim Settings)
                       </h4>
                       <p className="mt-0.5 text-[11px] text-slate-500">
-                        Biarkan <code className="font-mono">00:00:00.00</code> pada Trim End untuk
+                        Biarkan <code >00:00:00.00</code> pada Trim End untuk
                         tidak memotong bagian akhir.
                       </p>
                     </div>
@@ -1382,7 +1352,7 @@ export function CompressTabPanel({
                         disabled={disabled}
                         placeholder="00:00:00.00"
                         onChange={(e) => update({ trimStart: e.target.value })}
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100"
                       />
                     </div>
                     <div>
@@ -1399,7 +1369,7 @@ export function CompressTabPanel({
                         disabled={disabled}
                         placeholder="00:00:00.00"
                         onChange={(e) => update({ trimEnd: e.target.value })}
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100"
                       />
                     </div>
                   </div>
@@ -1412,11 +1382,11 @@ export function CompressTabPanel({
                 </div>
 
                 {/* --- D. VIDEO CROP SETTINGS --- */}
-                <div className="flex flex-col gap-3.5 border-t border-slate-200/80 pt-5">
+                <div className="flex flex-col gap-3.5 border-t border-[#E2F3EC] pt-5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <h4 className="inline-flex items-center gap-2 text-sm font-bold text-slate-900">
-                        <Crop aria-hidden="true" className="h-4 w-4 text-violet-600" />
+                      <h4 className="inline-flex items-center gap-2 text-sm font-bold text-[#0D2B24]">
+                        <Crop aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
                         D. Potong Area Frame (Video Crop Settings)
                       </h4>
                       <p className="mt-0.5 text-[11px] text-slate-500">
@@ -1424,7 +1394,7 @@ export function CompressTabPanel({
                         otomatis dibulatkan ke genap.
                       </p>
                     </div>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 font-mono text-[11px] font-bold text-slate-700 tabular-nums">
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold text-slate-700 tabular-nums">
                       Dimensi asli:{' '}
                       {sourceDimensions.width && sourceDimensions.height
                         ? `${sourceDimensions.width} × ${sourceDimensions.height} px`
@@ -1450,7 +1420,7 @@ export function CompressTabPanel({
                         value={options.cropWidth}
                         disabled={disabled || isVideoCopy}
                         onChange={(e) => update({ cropWidth: e.target.value })}
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 disabled:bg-slate-100"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 disabled:bg-slate-100"
                       />
                     </div>
                     <div>
@@ -1470,7 +1440,7 @@ export function CompressTabPanel({
                         value={options.cropHeight}
                         disabled={disabled || isVideoCopy}
                         onChange={(e) => update({ cropHeight: e.target.value })}
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 disabled:bg-slate-100"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 disabled:bg-slate-100"
                       />
                     </div>
                     <div>
@@ -1490,7 +1460,7 @@ export function CompressTabPanel({
                         value={options.cropX}
                         disabled={disabled || isVideoCopy}
                         onChange={(e) => update({ cropX: e.target.value })}
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 disabled:bg-slate-100"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 disabled:bg-slate-100"
                       />
                     </div>
                     <div>
@@ -1510,7 +1480,7 @@ export function CompressTabPanel({
                         value={options.cropY}
                         disabled={disabled || isVideoCopy}
                         onChange={(e) => update({ cropY: e.target.value })}
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 disabled:bg-slate-100"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 disabled:bg-slate-100"
                       />
                     </div>
                   </div>
@@ -1521,7 +1491,7 @@ export function CompressTabPanel({
                     </p>
                   )}
                   {crop.roundedNotice && (
-                    <p className="text-xs font-medium text-blue-700">{crop.roundedNotice}</p>
+                    <p className="text-xs font-medium text-[#0D6E5D]">{crop.roundedNotice}</p>
                   )}
                 </div>
 

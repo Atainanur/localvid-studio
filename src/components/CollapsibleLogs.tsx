@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import {
   ChevronDown,
   ChevronUp,
@@ -64,7 +65,7 @@ export function CollapsibleLogs({
     if (openTrigger > 0) {
       setIsOpen(true)
       window.setTimeout(() => {
-        sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+        sectionRef.current?.scrollIntoView({ behavior: 'auto', block: 'nearest' })
       }, 60)
     }
   }, [openTrigger])
@@ -159,23 +160,17 @@ export function CollapsibleLogs({
           type="button"
           onClick={() => setIsOpen((prev) => !prev)}
           aria-expanded={isOpen}
-          className="flex min-h-10 flex-1 cursor-pointer touch-manipulation items-center gap-2.5 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+          className="flex min-h-10 flex-1 cursor-pointer touch-manipulation items-center gap-2.5 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
         >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#B5F5DB] bg-[#E8FFF5] text-[#0D6E5D]">
             <Terminal aria-hidden="true" className="h-4 w-4" />
           </span>
-          <span className="text-xs font-bold text-slate-800 sm:text-sm">
+          <span className="text-xs font-bold text-[#0D2B24] sm:text-sm">
             Log Teknis FFmpeg
           </span>
-          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-mono text-[11px] font-semibold text-slate-600 tabular-nums">
+          <span className="rounded-full bg-[#E8FFF5] px-2.5 py-0.5 text-[11px] font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB] tabular-nums">
             {displayedLogs.length}
           </span>
-          {isActive && (
-            <span
-              aria-label="Sedang berjalan"
-              className="inline-flex h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse"
-            />
-          )}
         </button>
 
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
@@ -186,10 +181,10 @@ export function CollapsibleLogs({
                 type="button"
                 onClick={() => setShowRawLogs((prev) => !prev)}
                 aria-pressed={showRawLogs}
-                className={`inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${
+                className={`inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 ${
                   showRawLogs
-                    ? 'border-blue-300 bg-blue-50 text-blue-700'
-                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-900'
+                    ? 'border-[#2EC7A4] bg-[#E8FFF5] text-[#0D6E5D]'
+                    : 'mint-secondary-btn'
                 }`}
               >
                 {showRawLogs ? (
@@ -205,7 +200,7 @@ export function CollapsibleLogs({
                   <button
                     type="button"
                     onClick={handleDownloadLogs}
-                    className="inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 transition-colors duration-150 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+                    className="mint-secondary-btn inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
                   >
                     <Download aria-hidden="true" className="h-3.5 w-3.5" />
                     <span>Unduh Log (.txt)</span>
@@ -214,7 +209,7 @@ export function CollapsibleLogs({
                   <button
                     type="button"
                     onClick={onClear}
-                    className="inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600 transition-colors duration-150 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+                    className="inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1 rounded-lg border border-rose-200 bg-rose-50/70 px-2.5 py-1 text-xs font-semibold text-rose-700 transition-colors duration-150 hover:border-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2"
                   >
                     <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
                     <span>Bersihkan Log</span>
@@ -228,7 +223,7 @@ export function CollapsibleLogs({
             type="button"
             onClick={() => setIsOpen((prev) => !prev)}
             aria-label={isOpen ? 'Tutup log FFmpeg' : 'Buka log FFmpeg'}
-            className="inline-flex min-h-10 min-w-10 cursor-pointer touch-manipulation items-center justify-center rounded-xl text-slate-500 transition-colors duration-150 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+            className="inline-flex min-h-10 min-w-10 cursor-pointer touch-manipulation items-center justify-center rounded-xl text-[#0D6E5D] transition-colors duration-150 hover:bg-[#E8FFF5] hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
           >
             {isOpen ? (
               <ChevronUp aria-hidden="true" className="h-4 w-4" />
@@ -239,12 +234,20 @@ export function CollapsibleLogs({
         </div>
       </div>
 
-      {isOpen && (
-        <div className="border-t border-slate-200 bg-slate-950 text-slate-200">
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.div
+            key="collapsible-logs-panel"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            className="border-t border-[#B5F5DB] bg-slate-950 text-slate-200"
+          >
           {/* [BUG-06] Ringkasan Tersemat 4 field konsisten (tidak ikut terhapus oleh batas 250 baris) */}
           {(hasPinnedSummary || logs.length > 0) && (
             <div className="flex flex-col gap-1.5 border-b border-slate-800 bg-slate-900/95 px-4 py-3 font-mono text-[11px] leading-relaxed">
-              <div className="flex items-center gap-1.5 text-[11px] font-bold text-sky-400">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#6DE7C1]">
                 <Pin aria-hidden="true" className="h-3.5 w-3.5" />
                 <span>Ringkasan Tersemat</span>
               </div>
@@ -321,8 +324,9 @@ export function CollapsibleLogs({
               })
             )}
           </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </section>
   )
 }

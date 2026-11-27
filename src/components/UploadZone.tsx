@@ -1,7 +1,7 @@
 import { useRef, useState, type ChangeEvent, type DragEvent } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import {
   AlertTriangle,
-  Check,
   ChevronRight,
   Clock,
   FileVideo,
@@ -38,6 +38,17 @@ import {
   type SelectedVideo,
 } from '../utils/videoProcessing'
 
+const CARD_ENTRANCE_TRANSITION = {
+  duration: 0.28,
+  ease: [0.22, 1, 0.36, 1] as const,
+}
+
+const CTA_SPRING = {
+  type: 'spring' as const,
+  stiffness: 420,
+  damping: 30,
+}
+
 interface UploadZoneProps {
   selectedVideo: SelectedVideo | null
   batchItems: readonly BatchQueueItem[]
@@ -64,12 +75,12 @@ function getBatchStatusBadge(status: BatchItemStatus, progress: number) {
     case 'processing':
       return {
         label: `Memproses ${Math.round(progress)}%`,
-        className: 'bg-blue-50 text-blue-700 ring-blue-200',
+        className: 'bg-[#E8FFF5] text-[#0D6E5D] ring-[#6DE7C1]',
       }
     case 'done':
       return {
         label: 'Selesai',
-        className: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+        className: 'bg-[#B5F5DB] text-[#0D6E5D] ring-[#6DE7C1]',
       }
     case 'error':
       return {
@@ -84,7 +95,7 @@ function getBatchStatusBadge(status: BatchItemStatus, progress: number) {
     default:
       return {
         label: 'Menunggu',
-        className: 'bg-slate-100 text-slate-600 ring-slate-200',
+        className: 'bg-[#F7FFFC] text-[#4A6B63] ring-[#E2F3EC]',
       }
   }
 }
@@ -219,95 +230,105 @@ export function UploadZone({
       />
 
       {!selectedVideo && !isBatchMode ? (
-        <div
+        <motion.div
+          key="upload-empty"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={CARD_ENTRANCE_TRANSITION}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={(e) => handleDrop(e, false)}
           className={`bento-card group relative overflow-hidden rounded-3xl border-2 border-dashed p-6 text-center transition-[border-color,background-color,box-shadow] duration-200 sm:p-10 ${
             isDragging
-              ? 'border-blue-500 bg-blue-50/90 shadow-[0_0_0_5px_rgba(37,99,235,0.14)]'
-              : 'border-slate-300/90 bg-white/95 hover:border-blue-400 hover:bg-gradient-to-b hover:from-white hover:to-blue-50/40'
+              ? 'border-[#14A085] bg-[#E8FFF5] shadow-[0_0_0_5px_rgba(20,160,133,0.16)]'
+              : 'border-[#6DE7C1] bg-[#F6FFFB] hover:border-[#14A085] hover:bg-[#E8FFF5]/75'
           } ${disabled ? 'pointer-events-none opacity-60' : ''}`}
         >
-          {/* Aksen halo cerah dekoratif */}
+          {/* Aksen halo mint lembut dekoratif */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute -top-16 right-8 h-36 w-36 rounded-full bg-orange-200/35 blur-2xl"
+            className="pointer-events-none absolute -top-16 right-8 h-36 w-36 rounded-full bg-[#B5F5DB]/55 blur-2xl"
           />
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute -bottom-16 left-8 h-36 w-36 rounded-full bg-sky-200/40 blur-2xl"
+            className="pointer-events-none absolute -bottom-16 left-8 h-36 w-36 rounded-full bg-[#6DE7C1]/35 blur-2xl"
           />
 
           <div className="relative flex flex-col items-center">
             <div
               className={`mb-4 flex h-16 w-16 items-center justify-center rounded-2xl transition-[transform,background-color,box-shadow] duration-200 ${
                 isDragging
-                  ? 'scale-105 bg-blue-600 text-white shadow-lg shadow-blue-500/30'
-                  : 'bg-gradient-to-br from-blue-600 via-sky-500 to-teal-400 text-white shadow-lg shadow-blue-500/20 group-hover:scale-[1.03]'
+                  ? 'scale-105 bg-gradient-to-br from-[#14A085] to-[#0D6E5D] text-white shadow-lg shadow-[#0D6E5D]/25'
+                  : 'bg-gradient-to-br from-[#2EC7A4] to-[#0D6E5D] text-white shadow-lg shadow-[#0D6E5D]/20 group-hover:scale-[1.03]'
               }`}
             >
               <UploadCloud aria-hidden="true" className="h-8 w-8 stroke-[2]" />
             </div>
 
-            <span className="mb-2.5 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-[11px] font-bold text-blue-800 ring-1 ring-blue-200 sm:text-xs">
-              <Layers aria-hidden="true" className="h-3.5 w-3.5 text-blue-600" />
+            <span className="mb-2.5 inline-flex items-center gap-1.5 rounded-full bg-[#E8FFF5] px-3 py-1 text-[11px] font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB] sm:text-xs">
+              <Layers aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
               <span>{multiUploadBadgeText}</span>
             </span>
 
-            <h2 className="max-w-lg text-balance text-lg font-bold tracking-tight text-slate-900 sm:text-xl">
+            <h2 className="max-w-lg text-balance text-lg font-bold tracking-tight text-[#0D2B24] sm:text-xl">
               {isMobile
                 ? 'Pilih 1 atau Banyak Video dari HP Anda'
                 : 'Tarik & Letakkan 1 atau Banyak Video di Sini'}
             </h2>
-            <p className="mt-1.5 max-w-md text-sm leading-relaxed text-slate-600">
+            <p className="mt-1.5 max-w-md text-sm leading-relaxed text-[#4A6B63]">
               {isMobile
                 ? `Langsung diolah 100% lokal di perangkat Anda, cepat, ringan, dan bisa hingga ${maxBatchCount} video sekaligus.`
                 : `Pilih 1 video untuk Mode Tunggal atau hingga ${maxBatchCount} video sekaligus untuk Mode Antrean otomatis 1 per 1.`}
             </p>
 
-            <button
+            <motion.button
               type="button"
               onClick={openFilePicker}
               disabled={disabled}
-              className="mt-6 inline-flex min-h-12 w-full cursor-pointer touch-manipulation items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-7 py-3 text-sm font-bold text-white shadow-[var(--shadow-cta)] transition-[transform,filter,box-shadow] duration-150 hover:brightness-105 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:text-base"
+              whileTap={!disabled ? { scale: 0.98 } : undefined}
+              transition={CTA_SPRING}
+              className="mint-cta-btn mt-6 inline-flex min-h-12 w-full cursor-pointer touch-manipulation items-center justify-center gap-2.5 rounded-2xl px-7 py-3 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed sm:w-auto sm:text-base"
             >
               <FileVideo aria-hidden="true" className="h-5 w-5" />
               <span>Pilih Video</span>
-            </button>
+            </motion.button>
 
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
               {ACCEPTED_EXTENSIONS.map((ext) => (
                 <span
                   key={ext}
-                  className="whitespace-nowrap rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-mono text-xs font-semibold uppercase text-slate-600"
+                  className="whitespace-nowrap rounded-full border border-[#B5F5DB] bg-white px-3 py-1 text-xs font-semibold uppercase text-[#0D6E5D]"
                 >
                   .{ext}
                 </span>
               ))}
             </div>
           </div>
-        </div>
+        </motion.div>
       ) : isBatchMode ? (
         /* =====================================================================
          * MODE ANTREAN MULTI-VIDEO (2+ VIDEO):
          * Daftar antrean ringkas & hemat RAM (0 elemen <video> di tiap baris)
          * =================================================================== */
-        <div
+        <motion.div
+          key="upload-batch"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={CARD_ENTRANCE_TRANSITION}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={(e) => handleDrop(e, true)}
-          className={`bento-card animate-lv-fade-up rounded-3xl p-4 transition-[border-color,background-color] duration-200 sm:p-5 ${
+          className={`bento-card rounded-3xl p-4 transition-[border-color,background-color] duration-200 sm:p-5 ${
             isDragging
-              ? 'border-blue-500 bg-blue-50/70 ring-2 ring-blue-500/20'
-              : 'border-slate-200/90 bg-white'
+              ? 'border-[#14A085] bg-[#E8FFF5]/80 ring-2 ring-[#2EC7A4]/30'
+              : 'border-[#B5F5DB] bg-white'
           }`}
         >
           {/* [UX #24 & BUG-4R-16] Header Antrean 1 Baris Ringkas & Tenang */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50/90 px-3 py-1.5 text-xs font-bold text-blue-900 tabular-nums">
-                <Layers aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-[#B5F5DB] bg-[#E8FFF5] px-3 py-1.5 text-xs font-bold text-[#0D6E5D] tabular-nums">
+                <Layers aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#14A085]" />
                 <span>
                   Antrean {batchItems.length}/{maxBatchCount} • Total{' '}
                   {formatFileSizeMB(totalBatchBytes)} • Render 1 per 1
@@ -321,7 +342,7 @@ export function UploadZone({
                   type="button"
                   onClick={openAddMorePicker}
                   disabled={disabled || isBatchRunning}
-                  className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 transition-colors hover:border-blue-300 hover:bg-blue-50/70 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                  className="mint-secondary-btn inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
                 >
                   <Plus aria-hidden="true" className="h-4 w-4" />
                   <span>Tambah Video</span>
@@ -331,7 +352,7 @@ export function UploadZone({
                 type="button"
                 onClick={onClearFile}
                 disabled={disabled || isBatchRunning}
-                className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition-colors hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/70 px-3.5 py-2 text-xs font-semibold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
               >
                 <Trash2 aria-hidden="true" className="h-4 w-4" />
                 <span>Hapus Semua</span>
@@ -341,27 +362,24 @@ export function UploadZone({
 
           {/* Bar Alur Edit Antrean (metadata teks ringan, 0 snapshot Blob, scroll horizontal mulus di mobile) */}
           {batchAppliedHistory.length > 0 && (
-            <div className="mt-3 rounded-2xl border border-emerald-200/80 bg-emerald-50/55 px-3 py-2.5">
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin] [scrollbar-color:#a7f3d0_transparent]">
-                <span className="mr-0.5 shrink-0 whitespace-nowrap text-[11px] font-bold text-emerald-900">
+            <div className="mt-3 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] px-3 py-2.5">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin] [scrollbar-color:#6de7c1_transparent]">
+                <span className="mr-0.5 shrink-0 whitespace-nowrap text-[11px] font-bold text-[#0D6E5D]">
                   Efek terpasang ({batchAppliedHistory.length} tahap):
                 </span>
-                <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-lg border border-[#E2F3EC] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#4A6B63]">
                   Video Asli
                 </span>
                 {batchAppliedHistory.map((step) => (
                   <div key={step.id} className="inline-flex shrink-0 items-center gap-1.5">
                     <ChevronRight
                       aria-hidden="true"
-                      className="h-3.5 w-3.5 shrink-0 text-emerald-500"
+                      className="h-3.5 w-3.5 shrink-0 text-[#14A085]"
                     />
                     <span
                       title={step.summary}
-                      className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-[11px] font-bold text-emerald-900"
+                      className="inline-flex items-center whitespace-nowrap rounded-lg border border-[#6DE7C1] bg-white px-2.5 py-1 text-[11px] font-bold text-[#0D6E5D]"
                     >
-                      <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
-                        <Check aria-hidden="true" className="h-2.5 w-2.5 stroke-[2.75]" />
-                      </span>
                       <span>{step.tabLabel}</span>
                     </span>
                   </div>
@@ -372,169 +390,175 @@ export function UploadZone({
 
           {/* Daftar Baris Antrean (Ringan, 0 <video>, area sentuh tombol hapus >= 44x44px) */}
           <ul className="mt-3.5 flex flex-col gap-2" aria-label="Daftar antrean video">
-            {batchItems.map((item) => {
-              const preSkipReason =
-                item.status === 'pending' && !isBatchRunning
-                  ? batchPreValidationMap?.get(item.id)
-                  : undefined
-              const badge = preSkipReason
-                ? {
-                    label: 'Akan dilewati',
-                    className: 'bg-amber-50 text-amber-800 ring-amber-200',
-                  }
-                : getBatchStatusBadge(item.status, item.progress)
-              return (
-                <li
-                  key={item.id}
-                  className={`flex items-center justify-between gap-2.5 rounded-2xl border p-3 transition-colors ${
-                    item.status === 'processing'
-                      ? 'border-blue-300 bg-blue-50/60 ring-1 ring-blue-200'
-                      : item.status === 'done'
-                        ? 'border-emerald-200 bg-emerald-50/40'
-                        : item.status === 'error'
-                          ? 'border-rose-200 bg-rose-50/50'
-                          : item.status === 'skipped' || preSkipReason
-                            ? 'border-amber-200 bg-amber-50/50'
-                            : 'border-slate-200/90 bg-slate-50/70'
-                  }`}
-                >
-                  <div className="flex min-w-0 flex-1 items-start gap-2.5">
-                    <span
-                      className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl font-mono text-xs font-extrabold ${
-                        item.status === 'done'
-                          ? 'bg-emerald-600 text-white'
-                          : item.status === 'processing'
-                            ? 'bg-blue-600 text-white'
+            <AnimatePresence initial={false}>
+              {batchItems.map((item) => {
+                const preSkipReason =
+                  item.status === 'pending' && !isBatchRunning
+                    ? batchPreValidationMap?.get(item.id)
+                    : undefined
+                const badge = preSkipReason
+                  ? {
+                      label: 'Akan dilewati',
+                      className: 'bg-amber-50 text-amber-800 ring-amber-200',
+                    }
+                  : getBatchStatusBadge(item.status, item.progress)
+                return (
+                  <motion.li
+                    key={item.id}
+                    layout="position"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.97 }}
+                    transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                    className={`flex items-center justify-between gap-2.5 rounded-2xl border p-3 transition-colors ${
+                      item.status === 'processing'
+                        ? 'border-[#2EC7A4] bg-[#E8FFF5]/75 ring-1 ring-[#6DE7C1]'
+                        : item.status === 'done'
+                          ? 'border-[#B5F5DB] bg-[#F7FFFC]'
+                          : item.status === 'error'
+                            ? 'border-rose-200 bg-rose-50/50'
+                            : item.status === 'skipped' || preSkipReason
+                              ? 'border-amber-200 bg-amber-50/50'
+                              : 'border-[#E8FFF5] bg-white hover:border-[#6DE7C1]'
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                      <span
+                        className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-xs font-extrabold ${
+                          item.status === 'processing'
+                            ? 'bg-[#14A085] text-white'
                             : item.status === 'error'
                               ? 'bg-rose-600 text-white'
-                              : 'bg-slate-200 text-slate-700'
-                      }`}
-                    >
-                      #{item.index}
-                    </span>
+                              : 'bg-[#B5F5DB] text-[#0D6E5D]'
+                        }`}
+                      >
+                        #{item.index}
+                      </span>
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <p
-                          className="min-w-0 flex-1 truncate text-xs font-bold text-slate-900 sm:text-sm"
-                          title={item.file.name}
-                        >
-                          {item.file.name}
-                        </p>
-                        <span
-                          className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ${badge.className}`}
-                        >
-                          {item.status === 'processing' && (
-                            <Loader2 aria-hidden="true" className="h-3 w-3 animate-spin" />
-                          )}
-                          {item.status === 'done' && (
-                            <Check aria-hidden="true" className="h-3 w-3" />
-                          )}
-                          <span>{badge.label}</span>
-                        </span>
-                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p
+                            className="min-w-0 flex-1 truncate text-xs font-bold text-[#0D2B24] sm:text-sm"
+                            title={item.file.name}
+                          >
+                            {item.file.name}
+                          </p>
+                          <span
+                            className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[10px] font-bold ring-1 ${badge.className}`}
+                          >
+                            {item.status === 'processing' && (
+                              <Loader2 aria-hidden="true" className="h-3 w-3 animate-spin" />
+                            )}
+                            <span>{badge.label}</span>
+                          </span>
+                        </div>
 
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-[11px] text-slate-600 tabular-nums">
-                        <span>{formatFileSizeMB(item.file.size)}</span>
-                        <span>•</span>
-                        <span>
-                          {item.isReadingMetadata
-                            ? 'Membaca durasi...'
-                            : formatDuration(item.metadata?.duration ?? null)}
-                        </span>
-                        {item.metadata?.width && item.metadata?.height && (
-                          <>
-                            <span>•</span>
-                            <span>
-                              {item.metadata.width}×{item.metadata.height}
-                            </span>
-                          </>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-[#4A6B63] tabular-nums">
+                          <span>{formatFileSizeMB(item.file.size)}</span>
+                          <span>•</span>
+                          <span>
+                            {item.isReadingMetadata
+                              ? 'Membaca durasi...'
+                              : formatDuration(item.metadata?.duration ?? null)}
+                          </span>
+                          {item.metadata?.width && item.metadata?.height && (
+                            <>
+                              <span>•</span>
+                              <span>
+                                {item.metadata.width}×{item.metadata.height}
+                              </span>
+                            </>
+                          )}
+                        </div>
+
+                        {(item.errorMessage || preSkipReason) && (
+                          <p
+                            className={`mt-1 text-[11px] font-medium leading-snug ${
+                              item.status === 'error' ? 'text-rose-700' : 'text-amber-800'
+                            }`}
+                          >
+                            {item.errorMessage || preSkipReason}
+                          </p>
                         )}
                       </div>
-
-                      {(item.errorMessage || preSkipReason) && (
-                        <p
-                          className={`mt-1 text-[11px] font-medium leading-snug ${
-                            item.status === 'error' ? 'text-rose-700' : 'text-amber-800'
-                          }`}
-                        >
-                          {item.errorMessage || preSkipReason}
-                        </p>
-                      )}
                     </div>
-                  </div>
 
-                  <button
-                    type="button"
-                    disabled={disabled || isBatchRunning}
-                    onClick={() => onRemoveBatchItem(item.id)}
-                    aria-label={`Hapus Video #${item.index} (${item.file.name}) dari antrean`}
-                    title={`Hapus Video #${item.index}`}
-                    className="inline-flex min-h-11 min-w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-colors hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <X aria-hidden="true" className="h-4 w-4" />
-                  </button>
-                </li>
-              )
-            })}
+                    <button
+                      type="button"
+                      disabled={disabled || isBatchRunning}
+                      onClick={() => onRemoveBatchItem(item.id)}
+                      aria-label={`Hapus Video #${item.index} (${item.file.name}) dari antrean`}
+                      title={`Hapus Video #${item.index}`}
+                      className="inline-flex min-h-11 min-w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-rose-200/80 bg-rose-50/50 text-rose-600 transition-colors hover:border-rose-300 hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <X aria-hidden="true" className="h-4 w-4" />
+                    </button>
+                  </motion.li>
+                )
+              })}
+            </AnimatePresence>
           </ul>
-        </div>
+        </motion.div>
       ) : (
         /* =====================================================================
          * MODE 1 VIDEO TUNGGAL (100% IDENTIK DENGAN PERILAKU SEBELUMNYA)
          * =================================================================== */
-        <div
+        <motion.div
+          key="upload-single"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={CARD_ENTRANCE_TRANSITION}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={(e) => handleDrop(e, false)}
-          className={`bento-card animate-lv-fade-up rounded-3xl p-4 transition-[border-color,background-color] duration-200 sm:p-5 ${
+          className={`bento-card rounded-3xl p-4 transition-[border-color,background-color] duration-200 sm:p-5 ${
             isDragging
-              ? 'border-blue-500 bg-blue-50/70 ring-2 ring-blue-500/20'
-              : 'border-slate-200/90 bg-white'
+              ? 'border-[#14A085] bg-[#E8FFF5]/80 ring-2 ring-[#2EC7A4]/30'
+              : 'border-[#B5F5DB] bg-white'
           }`}
         >
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-start gap-3.5">
-              <div className="flex h-13 w-13 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-md shadow-blue-500/20">
+              <div className="flex h-13 w-13 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#2EC7A4] to-[#0D6E5D] text-white shadow-md shadow-[#0D6E5D]/20">
                 <FileVideo aria-hidden="true" className="h-6 w-6" />
               </div>
 
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   {pipelineSteps.length > 0 ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200">
-                      <Layers aria-hidden="true" className="h-3 w-3" />
+                    <span className="inline-flex items-center gap-1 rounded-full bg-[#E8FFF5] px-2.5 py-0.5 text-[11px] font-bold text-[#0D6E5D] ring-1 ring-[#6DE7C1]">
+                      <Layers aria-hidden="true" className="h-3 w-3 text-[#14A085]" />
                       {pipelineSteps.length} Efek Terpasang
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200">
-                      <Sparkles aria-hidden="true" className="h-3 w-3" />
+                    <span className="inline-flex items-center gap-1 rounded-full bg-[#E8FFF5] px-2.5 py-0.5 text-[11px] font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
+                      <Sparkles aria-hidden="true" className="h-3 w-3 text-[#14A085]" />
                       Siap Diolah
                     </span>
                   )}
-                  <span className="shrink-0 whitespace-nowrap rounded-full bg-blue-50 px-2.5 py-0.5 font-mono text-[11px] font-semibold uppercase text-blue-700 ring-1 ring-blue-200">
+                  <span className="shrink-0 whitespace-nowrap rounded-full bg-[#B5F5DB]/75 px-2.5 py-0.5 text-[11px] font-semibold uppercase text-[#0D6E5D] ring-1 ring-[#6DE7C1]">
                     .{selectedVideo!.extension || 'video'}
                   </span>
                 </div>
 
                 <h2
-                  className="mt-1.5 truncate text-base font-bold text-slate-900"
+                  className="mt-1.5 truncate text-base font-bold text-[#0D2B24]"
                   title={selectedVideo!.name}
                 >
                   {selectedVideo!.name}
                 </h2>
 
-                <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1">
-                    <HardDrive aria-hidden="true" className="h-3.5 w-3.5 text-blue-600" />
-                    <strong className="font-mono font-semibold text-slate-800 tabular-nums">
+                <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs text-[#4A6B63]">
+                  <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2F3EC] bg-[#F7FFFC] px-2.5 py-1">
+                    <HardDrive aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
+                    <strong className="font-semibold text-[#0D2B24] tabular-nums">
                       {formatFileSizeMB(selectedVideo!.sizeBytes)}
                     </strong>
                   </span>
 
-                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1">
-                    <Clock aria-hidden="true" className="h-3.5 w-3.5 text-orange-600" />
-                    <strong className="font-mono font-semibold text-slate-800 tabular-nums">
+                  <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2F3EC] bg-[#F7FFFC] px-2.5 py-1">
+                    <Clock aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
+                    <strong className="font-semibold text-[#0D2B24] tabular-nums">
                       {isReadingMetadata
                         ? 'Membaca...'
                         : formatDuration(selectedVideo!.metadata.duration)}
@@ -542,9 +566,9 @@ export function UploadZone({
                   </span>
 
                   {selectedVideo!.metadata.width && selectedVideo!.metadata.height && (
-                    <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1">
-                      <Maximize2 aria-hidden="true" className="h-3.5 w-3.5 text-emerald-600" />
-                      <strong className="font-mono font-semibold text-slate-800 tabular-nums">
+                    <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2F3EC] bg-[#F7FFFC] px-2.5 py-1">
+                      <Maximize2 aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
+                      <strong className="font-semibold text-[#0D2B24] tabular-nums">
                         {selectedVideo!.metadata.width} × {selectedVideo!.metadata.height}
                       </strong>
                     </span>
@@ -559,7 +583,7 @@ export function UploadZone({
                 onClick={openAddMorePicker}
                 disabled={disabled}
                 title={`Tambah video ke-2 atau lebih untuk Mode Antrean (maks ${maxBatchCount} video)`}
-                className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 transition-colors hover:border-blue-300 hover:bg-blue-50/70 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                className="mint-secondary-btn inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
               >
                 <Plus aria-hidden="true" className="h-4 w-4" />
                 <span>Tambah Video</span>
@@ -568,7 +592,7 @@ export function UploadZone({
                 type="button"
                 onClick={openFilePicker}
                 disabled={disabled}
-                className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-[background-color,border-color,color] duration-150 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                className="mint-secondary-btn inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
               >
                 <Replace aria-hidden="true" className="h-4 w-4" />
                 <span>Ganti Video</span>
@@ -578,7 +602,7 @@ export function UploadZone({
                 onClick={onClearFile}
                 disabled={disabled}
                 aria-label="Hapus video terpilih"
-                className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-500 transition-[background-color,border-color,color] duration-150 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs font-semibold text-rose-700 transition-colors duration-150 hover:border-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Trash2 aria-hidden="true" className="h-4 w-4" />
                 <span className="sm:hidden">Hapus</span>
@@ -588,22 +612,22 @@ export function UploadZone({
 
           {/* Bar Langkah Edit Ringkas (klik chip pindah ke tab, klik X hapus efek dengan target sentuh 44px) */}
           {pipelineSteps.length > 0 && (
-            <div className="animate-lv-fade-up mt-3.5 flex flex-col gap-2.5 border-t border-slate-200/80 pt-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="animate-lv-fade-up mt-3.5 flex flex-col gap-2.5 border-t border-[#E2F3EC] pt-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
-                <span className="font-bold text-slate-700">Langkah Edit:</span>
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-700 ring-1 ring-slate-200/80">
+                <span className="font-bold text-[#0D6E5D]">Langkah Edit:</span>
+                <span className="rounded-full bg-[#F7FFFC] px-2.5 py-1 font-semibold text-[#4A6B63] ring-1 ring-[#E2F3EC]">
                   Video Asli
                 </span>
                 {pipelineSteps.map((step, idx) => {
                   const isLatest = idx === pipelineSteps.length - 1
                   return (
                     <span key={step.id} className="inline-flex items-center gap-1">
-                      <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" />
+                      <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
                       <span
                         className={`inline-flex items-center rounded-full ring-1 transition-colors ${
                           isLatest
-                            ? 'bg-emerald-50 text-emerald-900 ring-emerald-300'
-                            : 'bg-slate-50 text-slate-700 ring-slate-200'
+                            ? 'bg-[#E8FFF5] text-[#0D6E5D] ring-[#2EC7A4]'
+                            : 'bg-[#F7FFFC] text-[#0D6E5D] ring-[#B5F5DB]'
                         }`}
                       >
                         <button
@@ -611,12 +635,8 @@ export function UploadZone({
                           disabled={disabled}
                           onClick={() => onSelectStepTab(step.tabId)}
                           title={`Buka tab ${step.tabLabel} (Langkah ke-${idx + 1}: ${step.summary})`}
-                          className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1 rounded-l-full py-1 pl-3 pr-1.5 font-semibold transition-colors hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1 rounded-l-full py-1 pl-3 pr-1.5 font-semibold transition-colors hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          <Check
-                            aria-hidden="true"
-                            className="h-3 w-3 shrink-0 stroke-[2.75] text-emerald-600"
-                          />
                           <span>{step.tabLabel}</span>
                         </button>
                         <button
@@ -625,7 +645,7 @@ export function UploadZone({
                           onClick={() => onRemoveStep(step.id)}
                           aria-label={`Hapus efek ${step.tabLabel}`}
                           title={`Hapus efek ${step.tabLabel}`}
-                          className="inline-flex min-h-11 min-w-11 -mr-1 cursor-pointer touch-manipulation items-center justify-center rounded-r-full text-slate-400 transition-colors hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex min-h-11 min-w-11 -mr-1 cursor-pointer touch-manipulation items-center justify-center rounded-r-full text-rose-500 transition-colors hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <X aria-hidden="true" className="h-3.5 w-3.5" />
                         </button>
@@ -639,14 +659,14 @@ export function UploadZone({
                 type="button"
                 onClick={onRevertToOriginal}
                 disabled={disabled}
-                className="inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 self-start rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 transition-colors hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
+                className="inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 self-start rounded-xl border border-rose-200 bg-rose-50/70 px-3.5 py-2 text-xs font-bold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
               >
                 <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
                 <span>Reset ke Video Asli</span>
               </button>
             </div>
           )}
-        </div>
+        </motion.div>
       )}
 
       {/* Validasi format error */}

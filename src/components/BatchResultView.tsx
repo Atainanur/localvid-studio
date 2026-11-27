@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { motion } from 'motion/react'
 import {
   AlertTriangle,
   ArrowRight,
-  Check,
-  CheckCircle2,
   ChevronRight,
   Clock,
   Download,
@@ -36,6 +35,12 @@ import {
   type FeatureTabId,
 } from '../utils/videoProcessing'
 import { AudioBeforeAfterPlayer } from './AudioBeforeAfterPlayer'
+
+const CARD_SPRING = {
+  type: 'spring' as const,
+  stiffness: 420,
+  damping: 30,
+}
 
 interface BatchResultViewProps {
   items: readonly BatchQueueItem[]
@@ -205,29 +210,35 @@ export function BatchResultView({
   const mediaUnit = allCompletedAreAudio ? 'Audio' : 'Video'
 
   return (
-    <div aria-label="Hasil antrean multi-video" className="animate-lv-fade-up flex flex-col gap-5">
+    <motion.div
+      aria-label="Hasil antrean multi-video"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+      className="flex flex-col gap-5"
+    >
       {/* 1. Header Ringkasan Antrean */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-emerald-200/90 bg-gradient-to-r from-emerald-50 via-teal-50/75 to-sky-50/60 p-4 sm:p-5">
+      <div className="flex flex-col gap-3 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-600/25">
-              <CheckCircle2 aria-hidden="true" className="h-6 w-6" />
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#2EC7A4] to-[#0D6E5D] text-white shadow-md shadow-[#0D6E5D]/20">
+              <Layers aria-hidden="true" className="h-5 w-5" />
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-1.5">
-                <h3 className="text-base font-bold text-slate-900">
+                <h3 className="text-base font-bold text-[#0D2B24]">
                   {completedItems.length} dari {items.length} {mediaUnit} Selesai Diproses!
                 </h3>
-                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-white/95 px-2.5 py-0.5 text-[11px] font-bold text-blue-700 ring-1 ring-blue-200">
-                  <Layers aria-hidden="true" className="h-3 w-3" />
+                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-white px-2.5 py-0.5 text-[11px] font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
+                  <Layers aria-hidden="true" className="h-3 w-3 text-[#14A085]" />
                   {FEATURE_TAB_LABELS[feature]}
                 </span>
-                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-white/95 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200 tabular-nums">
+                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-[#B5F5DB] px-2.5 py-0.5 text-[11px] font-bold text-[#0D6E5D] tabular-nums">
                   <Sparkles aria-hidden="true" className="h-3 w-3" />
                   Selesai dalam {elapsedSec} detik
                 </span>
               </div>
-              <p className="mt-1 text-xs leading-relaxed text-slate-600">
+              <p className="mt-1 text-xs leading-relaxed text-[#4A6B63]">
                 {wasCancelledEarly
                   ? 'Antrean dihentikan lebih awal. Video yang sudah selesai tetap siap diunduh utuh tanpa ZIP.'
                   : failedOrSkippedCount > 0
@@ -240,9 +251,9 @@ export function BatchResultView({
 
         {/* Rekap kumulatif fitur terpasang di semua video (hanya tampil jika lebih dari 1 tahap berantai) */}
         {cumulativeSteps.length > 1 && (
-          <div className="rounded-xl border border-emerald-200/80 bg-white/90 px-3.5 py-2.5">
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin] [scrollbar-color:#a7f3d0_transparent]">
-              <span className="mr-0.5 shrink-0 whitespace-nowrap text-[11px] font-bold text-emerald-900">
+          <div className="rounded-xl border border-[#B5F5DB] bg-white px-3.5 py-2.5">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin] [scrollbar-color:#6de7c1_transparent]">
+              <span className="mr-0.5 shrink-0 whitespace-nowrap text-[11px] font-bold text-[#0D6E5D]">
                 Fitur terpasang di semua video ({cumulativeSteps.length} tahap):
               </span>
               {cumulativeSteps.map((step, idx) => (
@@ -250,16 +261,13 @@ export function BatchResultView({
                   {idx > 0 && (
                     <ChevronRight
                       aria-hidden="true"
-                      className="h-3.5 w-3.5 shrink-0 text-emerald-500"
+                      className="h-3.5 w-3.5 shrink-0 text-[#14A085]"
                     />
                   )}
                   <span
                     title={step.summary}
-                    className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-emerald-200 bg-emerald-50/80 px-2.5 py-1 text-[11px] font-bold text-emerald-900"
+                    className="inline-flex items-center whitespace-nowrap rounded-lg border border-[#6DE7C1] bg-[#E8FFF5] px-2.5 py-1 text-[11px] font-bold text-[#0D6E5D]"
                   >
-                    <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
-                      <Check aria-hidden="true" className="h-2.5 w-2.5 stroke-[2.75]" />
-                    </span>
                     <span>{step.tabLabel}</span>
                   </span>
                 </div>
@@ -270,21 +278,21 @@ export function BatchResultView({
 
         {/* [BUG-4R-15a] Ringkasan Ukuran Gabungan dengan badge Hemat / Naik + konteks jelas */}
         {completedItems.length > 0 && (
-          <div className="flex flex-col gap-1.5 rounded-xl bg-white/90 px-3.5 py-2.5 text-xs ring-1 ring-emerald-200/80">
+          <div className="flex flex-col gap-1.5 rounded-xl bg-white px-3.5 py-2.5 text-xs ring-1 ring-[#B5F5DB]">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-1.5 font-mono font-bold text-slate-800 tabular-nums">
-                <span className="font-sans text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              <div className="flex flex-wrap items-center gap-1.5 font-bold text-[#0D2B24] tabular-nums">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-[#4A6B63]">
                   Total Ukuran:
                 </span>
-                <span className="text-slate-600">{formatFileSizeMB(totalOriginalBytes)}</span>
-                <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" />
-                <span className="text-slate-900">{formatFileSizeMB(totalOutputBytes)}</span>
+                <span className="text-[#4A6B63]">{formatFileSizeMB(totalOriginalBytes)}</span>
+                <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
+                <span className="text-[#0D2B24]">{formatFileSizeMB(totalOutputBytes)}</span>
               </div>
               <span
-                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-mono text-[11px] font-bold tabular-nums ${
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold tabular-nums ${
                   combinedIsSmaller
-                    ? 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200'
-                    : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200'
+                    ? 'bg-[#B5F5DB] text-[#0D6E5D]'
+                    : 'bg-[#F7FFFC] text-[#4A6B63] ring-1 ring-[#E2F3EC]'
                 }`}
               >
                 {combinedIsSmaller ? (
@@ -300,7 +308,7 @@ export function BatchResultView({
               </span>
             </div>
             {!combinedIsSmaller && combinedSavingsBytes < 0 && Math.abs(combinedSavingsPercent) >= 0.5 && (
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[11px] text-[#4A6B63]">
                 Ukuran naik karena peningkatan kualitas, resolusi, atau bitrate output.
               </p>
             )}
@@ -310,15 +318,17 @@ export function BatchResultView({
 
       {/* 2. Tombol Unduh Semua TANPA ZIP/RAR (Adaptif Android, iPhone Safari, Desktop) */}
       {completedItems.length > 0 && (
-        <div className="flex flex-col gap-2.5 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+        <div className="flex flex-col gap-2.5 rounded-2xl border border-[#B5F5DB] bg-[#F7FFFC] p-4">
           <div className="flex flex-col gap-2.5 sm:flex-row">
             {canWebShareAll ? (
               <>
-                <button
+                <motion.button
                   type="button"
                   disabled={isSharingAll}
                   onClick={() => void handleShareAllMobile()}
-                  className="inline-flex min-h-13 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-3 text-sm font-bold text-white shadow-[var(--shadow-mint)] transition-[transform,filter] duration-150 hover:brightness-105 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
+                  whileTap={!isSharingAll ? { scale: 0.98 } : undefined}
+                  transition={CARD_SPRING}
+                  className="mint-cta-btn inline-flex min-h-13 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
                 >
                   {isSharingAll ? (
                     <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />
@@ -328,13 +338,15 @@ export function BatchResultView({
                   <span>
                     Simpan / Bagikan Semua ({completedItems.length} {mediaUnit})
                   </span>
-                </button>
+                </motion.button>
 
-                <button
+                <motion.button
                   type="button"
                   disabled={isDownloadingAll}
                   onClick={() => void handleStaggeredDownloadAll()}
-                  className="inline-flex min-h-12 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl border-2 border-blue-200 bg-white px-5 py-2.5 text-xs font-bold text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-50 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:opacity-60 sm:text-sm"
+                  whileTap={!isDownloadingAll ? { scale: 0.98 } : undefined}
+                  transition={CARD_SPRING}
+                  className="mint-secondary-btn inline-flex min-h-12 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-5 py-2.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-sm"
                 >
                   {isDownloadingAll ? (
                     <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
@@ -344,14 +356,16 @@ export function BatchResultView({
                   <span>
                     {downloadAllStatus ?? `Unduh Semua (${completedItems.length} File Terpisah)`}
                   </span>
-                </button>
+                </motion.button>
               </>
             ) : (
-              <button
+              <motion.button
                 type="button"
                 disabled={isDownloadingAll}
                 onClick={() => void handleStaggeredDownloadAll()}
-                className="inline-flex min-h-13 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-3 text-sm font-bold text-white shadow-[var(--shadow-mint)] transition-[transform,filter] duration-150 hover:brightness-105 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
+                whileTap={!isDownloadingAll ? { scale: 0.98 } : undefined}
+                transition={CARD_SPRING}
+                className="mint-cta-btn inline-flex min-h-13 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
               >
                 {isDownloadingAll ? (
                   <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />
@@ -361,13 +375,13 @@ export function BatchResultView({
                 <span>
                   {downloadAllStatus ?? `Unduh Semua (${completedItems.length} File Terpisah)`}
                 </span>
-              </button>
+              </motion.button>
             )}
           </div>
 
           {/* Catatan Bantuan 1 Baris Jujur sesuai Perangkat */}
-          <p className="flex items-start gap-1.5 text-xs leading-relaxed text-slate-600">
-            <Info aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-600" />
+          <p className="flex items-start gap-1.5 text-xs leading-relaxed text-[#4A6B63]">
+            <Info aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#14A085]" />
             <span>
               {deviceType === 'iOS'
                 ? 'Khusus iPhone/Safari, gunakan tombol Simpan / Bagikan Semua untuk langsung masuk ke Foto/Galeri, atau ketuk tombol Unduh di masing-masing video.'
@@ -376,7 +390,7 @@ export function BatchResultView({
           </p>
 
           {shareStatusMessage && (
-            <p role="status" className="text-xs font-semibold text-blue-700">
+            <p role="status" className="text-xs font-semibold text-[#0D6E5D]">
               {shareStatusMessage}
             </p>
           )}
@@ -405,9 +419,9 @@ export function BatchResultView({
           return (
             <article
               key={item.id}
-              className={`rounded-2xl border p-3.5 shadow-2xs sm:p-4 ${
+              className={`rounded-2xl border p-3.5 shadow-2xs transition-colors sm:p-4 ${
                 isDone
-                  ? 'border-slate-200 bg-white'
+                  ? 'border-[#E2F3EC] bg-white hover:border-[#6DE7C1]'
                   : item.status === 'error'
                     ? 'border-rose-200 bg-rose-50/50'
                     : 'border-amber-200 bg-amber-50/50'
@@ -416,9 +430,9 @@ export function BatchResultView({
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 items-start gap-3">
                   <span
-                    className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-mono text-xs font-extrabold ${
+                    className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-extrabold ${
                       isDone
-                        ? 'bg-emerald-600 text-white'
+                        ? 'bg-[#B5F5DB] text-[#0D6E5D]'
                         : item.status === 'error'
                           ? 'bg-rose-600 text-white'
                           : 'bg-amber-500 text-white'
@@ -433,11 +447,11 @@ export function BatchResultView({
                       className="flex flex-wrap items-center gap-1.5"
                       title={isDone ? res.fileName : item.file.name}
                     >
-                      <span className="min-w-0 break-words font-mono text-xs font-bold leading-snug text-slate-900 line-clamp-2 sm:text-sm">
+                      <span className="min-w-0 break-words text-xs font-bold leading-snug text-[#0D2B24] line-clamp-2 sm:text-sm">
                         {nameParts.baseName}
                       </span>
                       {nameParts.extLabel && (
-                        <span className="shrink-0 whitespace-nowrap rounded-md bg-emerald-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200">
+                        <span className="shrink-0 whitespace-nowrap rounded-md bg-[#E8FFF5] px-1.5 py-0.5 text-[11px] font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
                           {nameParts.extLabel}
                         </span>
                       )}
@@ -455,30 +469,30 @@ export function BatchResultView({
                     </div>
 
                     {isDone ? (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-600">
-                        <span className="inline-flex items-center gap-1 font-mono font-semibold text-slate-800 tabular-nums">
-                          <span className="text-slate-500">
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[#4A6B63]">
+                        <span className="inline-flex items-center gap-1 font-semibold text-[#0D2B24] tabular-nums">
+                          <span className="text-[#4A6B63]">
                             {formatFileSizeMB(res.originalSizeBytes)}
                           </span>
-                          <ArrowRight aria-hidden="true" className="h-3 w-3 text-slate-400" />
+                          <ArrowRight aria-hidden="true" className="h-3 w-3 text-[#14A085]" />
                           <span>{formatFileSizeMB(res.outputSizeBytes)}</span>
                         </span>
                         {showItemSavings ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-800 ring-1 ring-emerald-200 tabular-nums">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-[#B5F5DB] px-2 py-0.5 text-[10px] font-bold text-[#0D6E5D] tabular-nums">
                             <TrendingDown aria-hidden="true" className="h-3 w-3" />
                             Hemat {itemSavingsPct.toFixed(1)}%
                           </span>
                         ) : itemSavingsPct < -0.5 ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-700 ring-1 ring-slate-200 tabular-nums">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-[#F7FFFC] px-2 py-0.5 text-[10px] font-bold text-[#4A6B63] ring-1 ring-[#E2F3EC] tabular-nums">
                             <TrendingUp aria-hidden="true" className="h-3 w-3" />
                             Naik {Math.abs(itemSavingsPct).toFixed(1)}%
                           </span>
                         ) : null}
-                        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-slate-500 tabular-nums">
-                          <Clock aria-hidden="true" className="h-3 w-3 text-orange-500" />
+                        <span className="inline-flex items-center gap-1 text-[11px] text-[#4A6B63] tabular-nums">
+                          <Clock aria-hidden="true" className="h-3 w-3 text-[#14A085]" />
                           {itemDuration}
                         </span>
-                        <span className="font-mono text-[11px] text-slate-500 tabular-nums">
+                        <span className="text-[11px] text-[#4A6B63] tabular-nums">
                           • Selesai dalam {(res.elapsedMs / 1000).toFixed(1)} dtk
                         </span>
                       </div>
@@ -493,7 +507,7 @@ export function BatchResultView({
                     )}
 
                     {isDone && res.summaryNote && (
-                      <p className="mt-1 text-[11px] text-slate-500">{res.summaryNote}</p>
+                      <p className="mt-1 text-[11px] text-[#4A6B63]">{res.summaryNote}</p>
                     )}
                   </div>
                 </div>
@@ -506,10 +520,10 @@ export function BatchResultView({
                       onClick={() =>
                         setOpenPreviewItemId((prev) => (prev === item.id ? null : item.id))
                       }
-                      className={`inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 sm:flex-initial ${
+                      className={`inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] sm:flex-initial ${
                         isPreviewOpen
-                          ? 'border-blue-500 bg-blue-50 text-blue-800'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50/70'
+                          ? 'border border-[#14A085] bg-[#E8FFF5] text-[#0D6E5D]'
+                          : 'mint-secondary-btn'
                       }`}
                     >
                       {isPreviewOpen ? (
@@ -528,7 +542,7 @@ export function BatchResultView({
                     <button
                       type="button"
                       onClick={() => triggerSingleFileDownload(res.url, res.fileName)}
-                      className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50/80 px-4 py-2 text-xs font-bold text-emerald-800 transition-colors hover:border-emerald-400 hover:bg-emerald-100 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-1 sm:flex-initial"
+                      className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-[#6DE7C1] bg-[#E8FFF5] px-4 py-2 text-xs font-bold text-[#0D6E5D] transition-colors hover:border-[#14A085] hover:bg-[#B5F5DB]/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-1 sm:flex-initial"
                     >
                       <Download aria-hidden="true" className="h-4 w-4" />
                       <span>
@@ -591,14 +605,14 @@ export function BatchResultView({
       </div>
 
       {/* 4. Aksi Lanjutan di Bagian Bawah (Hierarki Tenang: Tombol Outline Sekunder) */}
-      <div className="flex flex-col gap-3 border-t border-slate-200/80 pt-4">
+      <div className="flex flex-col gap-3 border-t border-[#E2F3EC] pt-4">
         <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             {completedVideoItems.length > 0 && !allCompletedAreAudio && (
               <button
                 type="button"
                 onClick={onContinueBatchWithOutputs}
-                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-blue-300 bg-blue-50/80 px-4 py-2.5 text-xs font-bold text-blue-800 transition-colors hover:border-blue-400 hover:bg-blue-100 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 sm:text-sm"
+                className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 sm:text-sm"
               >
                 <Layers aria-hidden="true" className="h-4 w-4" />
                 <span>Lanjut Edit {completedVideoItems.length} Hasil ke Fitur Lain</span>
@@ -608,7 +622,7 @@ export function BatchResultView({
             <button
               type="button"
               onClick={onEditSettings}
-              className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-800 transition-colors hover:border-blue-300 hover:bg-blue-50/70 hover:text-blue-700 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 sm:text-sm"
+              className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 sm:text-sm"
             >
               <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />
               <span>Proses Ulang / Ubah Setelan</span>
@@ -618,7 +632,7 @@ export function BatchResultView({
           <button
             type="button"
             onClick={onChangeAllVideos}
-            className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 sm:text-sm"
+            className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 sm:text-sm"
           >
             <FolderSync aria-hidden="true" className="h-4 w-4" />
             <span>Ganti Semua Video</span>
@@ -627,8 +641,8 @@ export function BatchResultView({
 
         {/* Catatan konsisten untuk alur edit berantai atau audio-only */}
         {completedVideoItems.length > 0 && !allCompletedAreAudio && (
-          <p className="flex items-center gap-1.5 text-xs text-slate-600">
-            <Info aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+          <p className="flex items-center gap-1.5 text-xs text-[#4A6B63]">
+            <Info aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#14A085]" />
             <span>
               Klik &ldquo;Lanjut Edit {completedVideoItems.length} Hasil ke Fitur Lain&rdquo; untuk
               meneruskan seluruh video ini ke tahap fitur berikutnya sambil mencatat riwayat efeknya.
@@ -638,12 +652,12 @@ export function BatchResultView({
 
         {/* [BUG-4R-18] Penjelasan tenang bila seluruh hasil batch berupa audio (.MP3) */}
         {allCompletedAreAudio && completedItems.length > 0 && (
-          <p className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
-            <Info aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-fuchsia-600" />
+          <p className="flex items-center gap-1.5 text-xs font-medium text-[#4A6B63]">
+            <Info aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#14A085]" />
             <span>Hasil berupa audio (.MP3) tidak dapat dilanjutkan ke fitur edit video.</span>
           </p>
         )}
       </div>
-    </div>
+    </motion.div>
   )
 }

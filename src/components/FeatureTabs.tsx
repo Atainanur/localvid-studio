@@ -1,11 +1,10 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import {
   AlertTriangle,
   ArrowLeftRight,
   ArrowRight,
   AudioLines,
-  Check,
-  CheckCircle2,
   Clock,
   Cpu,
   Eye,
@@ -146,61 +145,51 @@ const TABS: ReadonlyArray<{
   id: FeatureTabId
   label: string
   badge?: string
-  activeAccent: string
-  iconBg: string
   Icon: typeof ArrowLeftRight
 }> = [
   {
     id: 'convert',
     label: 'Ubah Ekstensi',
-    activeAccent: 'text-blue-700 ring-blue-200',
-    iconBg: 'bg-blue-100 text-blue-700',
     Icon: ArrowLeftRight,
   },
   {
     id: 'compress',
     label: 'Kompres Video',
-    activeAccent: 'text-emerald-700 ring-emerald-200',
-    iconBg: 'bg-emerald-100 text-emerald-700',
     Icon: Minimize2,
   },
   {
     id: 'enhance',
     label: 'Jernihkan & HD',
-    activeAccent: 'text-orange-700 ring-orange-200',
-    iconBg: 'bg-orange-100 text-orange-700',
     Icon: Sparkles,
   },
   {
     id: 'stabilize',
     label: 'Stabilizer',
-    activeAccent: 'text-cyan-700 ring-cyan-200',
-    iconBg: 'bg-cyan-100 text-cyan-700',
     Icon: Video,
   },
   {
     id: 'ai-upscale',
     label: 'AI HD Upscaler',
     badge: 'Beta',
-    activeAccent: 'text-violet-700 ring-violet-200',
-    iconBg: 'bg-violet-100 text-violet-700',
     Icon: Cpu,
   },
   {
     id: 'audio-denoise',
     label: 'Bersihkan Audio',
-    activeAccent: 'text-fuchsia-700 ring-fuchsia-200',
-    iconBg: 'bg-fuchsia-100 text-fuchsia-700',
     Icon: AudioLines,
   },
   {
     id: 'auto-chroma',
     label: 'Auto Green Screen',
-    activeAccent: 'text-green-700 ring-green-200',
-    iconBg: 'bg-green-100 text-green-700',
     Icon: UserSquare2,
   },
 ]
+
+const CARD_SPRING = {
+  type: 'spring' as const,
+  stiffness: 420,
+  damping: 30,
+}
 
 export function FeatureTabs({
   activeTab,
@@ -244,6 +233,22 @@ export function FeatureTabs({
   resultView,
 }: FeatureTabsProps) {
   const [compareOriginal, setCompareOriginal] = useState(false)
+  const tabListRef = useRef<HTMLDivElement | null>(null)
+  const tabButtonRefs = useRef<Partial<Record<FeatureTabId, HTMLButtonElement | null>>>({})
+
+  // Geser halus hanya kontainer horizontal strip tab agar tidak pernah menarik scroll vertikal
+  useEffect(() => {
+    const tabList = tabListRef.current
+    const activeBtn = tabButtonRefs.current[activeTab]
+    if (tabList && activeBtn && tabList.scrollWidth > tabList.clientWidth + 4) {
+      const targetLeft =
+        activeBtn.offsetLeft - (tabList.clientWidth - activeBtn.offsetWidth) / 2
+      tabList.scrollTo({
+        left: Math.max(0, targetLeft),
+        behavior: 'smooth',
+      })
+    }
+  }, [activeTab])
 
   const enhanceFilterChain = buildEnhanceFilterChain(enhanceOptions, selectedVideoDimensions)
   const stabilizerFilterChain = buildStabilizerFilterChain(
@@ -344,18 +349,22 @@ export function FeatureTabs({
   })()
 
   return (
-    <section
+    <motion.section
       aria-label="Pengaturan fitur video"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
       className="bento-card overflow-hidden rounded-3xl bg-white"
     >
       {/* Baris Navigasi 7 Tab - 1 baris rapi di Desktop (7 kolom pas tanpa terpotong) dan horizontal scroll di Mobile */}
-      <div className="border-b border-slate-200/80 bg-slate-50/90 p-2 sm:p-2.5">
+      <div className="border-b border-[#E2F3EC] bg-[#F7FFFC] p-2.5 sm:p-3">
         <div
+          ref={tabListRef}
           role="tablist"
           aria-label="Fitur pengolah video"
-          className="flex flex-nowrap gap-2 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1.5 [scrollbar-width:thin] [scrollbar-color:#cbd5e1_transparent] lg:grid lg:grid-cols-7 lg:gap-1 lg:overflow-visible lg:pb-0 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/80 hover:[&::-webkit-scrollbar-thumb]:bg-slate-400"
+          className="flex flex-nowrap gap-1.5 overflow-x-auto snap-x snap-mandatory rounded-2xl border border-[#B5F5DB] bg-white p-1.5 shadow-[0_6px_18px_-10px_rgba(13,110,93,0.14)] [scrollbar-width:thin] [scrollbar-color:#6de7c1_transparent] lg:grid lg:grid-cols-7 lg:gap-1 lg:overflow-visible [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#B5F5DB] hover:[&::-webkit-scrollbar-thumb]:bg-[#6DE7C1]"
         >
-          {TABS.map(({ id, label, badge, activeAccent, iconBg, Icon }) => {
+          {TABS.map(({ id, label, badge, Icon }) => {
             const isActive = activeTab === id
             const stepIndex = pipelineSteps.findIndex((s) => s.tabId === id)
             const installedStep = stepIndex >= 0 ? pipelineSteps[stepIndex] : null
@@ -363,15 +372,19 @@ export function FeatureTabs({
               batchModeInfo && batchAppliedFeatureMap ? (batchAppliedFeatureMap[id] ?? null) : null
             const isBatchApplied = Boolean(batchAppliedInfo && batchAppliedInfo.count > 0)
             const hasAppliedEffect = Boolean(installedStep) || isBatchApplied
-            const activeTextClass = activeAccent.split(' ')[0]
 
             return (
-              <button
+              <motion.button
                 key={id}
+                ref={(el) => {
+                  tabButtonRefs.current[id] = el
+                }}
                 type="button"
                 role="tab"
                 aria-selected={isActive}
                 disabled={disabled}
+                whileTap={!disabled ? { scale: 0.98 } : undefined}
+                transition={CARD_SPRING}
                 title={
                   disabled
                     ? 'Proses sedang berjalan, tunggu selesai atau klik Batalkan untuk pindah tab'
@@ -382,17 +395,21 @@ export function FeatureTabs({
                         : label
                 }
                 onClick={() => onTabChange(id)}
-                className={`flex min-h-11 shrink-0 snap-start cursor-pointer touch-manipulation items-center justify-center gap-1.5 whitespace-nowrap rounded-2xl px-3 py-2 text-xs font-bold transition-[background-color,color,box-shadow,border-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 lg:w-full lg:min-w-0 lg:gap-1.5 lg:px-2 lg:text-[11px] xl:px-2.5 xl:text-xs ${
+                className={`flex min-h-11 shrink-0 snap-start cursor-pointer touch-manipulation items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold transition-[background-color,color,box-shadow,border-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60 lg:w-full lg:min-w-0 lg:gap-1.5 lg:px-2 lg:text-[11px] xl:px-2.5 xl:text-xs ${
                   isActive
-                    ? `bg-white shadow-sm ring-1 ${hasAppliedEffect ? 'ring-emerald-400' : activeAccent} ${activeTextClass}`
+                    ? 'mint-tab-active border border-transparent'
                     : hasAppliedEffect
-                      ? 'bg-emerald-50/80 text-emerald-900 ring-1 ring-emerald-300/80 hover:bg-emerald-50'
-                      : 'text-slate-600 hover:bg-white/75 hover:text-slate-900'
+                      ? 'border border-[#6DE7C1] bg-[#E8FFF5] text-[#0D6E5D] hover:bg-[#dcfcee]'
+                      : 'border border-transparent text-[#4A6B63] hover:bg-[#F7FFFC] hover:text-[#0D6E5D]'
                 }`}
               >
                 <span
                   className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors lg:h-6 lg:w-6 ${
-                    isActive || hasAppliedEffect ? iconBg : 'bg-slate-200/70 text-slate-500'
+                    isActive
+                      ? 'bg-white/20 text-white'
+                      : hasAppliedEffect
+                        ? 'bg-[#B5F5DB] text-[#0D6E5D]'
+                        : 'bg-[#E8FFF5] text-[#14A085]'
                   }`}
                 >
                   <Icon aria-hidden="true" className="h-4 w-4 lg:h-3.5 lg:w-3.5" />
@@ -401,30 +418,25 @@ export function FeatureTabs({
                 {badge && !hasAppliedEffect && (
                   <span
                     className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
-                      isActive ? 'bg-violet-600 text-white' : 'bg-violet-100 text-violet-700'
+                      isActive
+                        ? 'bg-white/20 text-white'
+                        : 'bg-[#E8FFF5] text-[#0D6E5D] ring-1 ring-[#B5F5DB]'
                     }`}
                   >
                     {badge}
                   </span>
                 )}
-                {batchAppliedInfo && batchAppliedInfo.count > 1 ? (
+                {batchAppliedInfo && batchAppliedInfo.count > 1 && (
                   <span
                     aria-label={`Fitur sudah diterapkan ${batchAppliedInfo.count} kali`}
-                    className="inline-flex h-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 px-1 font-mono text-[9px] font-extrabold text-white tabular-nums"
+                    className={`inline-flex h-4 shrink-0 items-center justify-center rounded-full px-1 text-[9px] font-extrabold tabular-nums ${
+                      isActive ? 'bg-white/25 text-white' : 'bg-[#B5F5DB] text-[#0D6E5D]'
+                    }`}
                   >
                     {batchAppliedInfo.count}x
                   </span>
-                ) : (
-                  hasAppliedEffect && (
-                    <span
-                      aria-label="Efek terpasang"
-                      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
-                    >
-                      <Check aria-hidden="true" className="h-2.5 w-2.5 stroke-[2.75]" />
-                    </span>
-                  )
                 )}
-              </button>
+              </motion.button>
             )
           })}
         </div>
@@ -432,20 +444,28 @@ export function FeatureTabs({
 
       {/* Area Konten: Clean Result View saat hasil siap, atau Form Pengaturan Tab Aktif */}
       <div className="p-4 sm:p-6">
-        {resultView ? (
-          resultView
-        ) : (
-          <>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={resultView ? 'result-view' : activeTab}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {resultView ? (
+              resultView
+            ) : (
+              <>
             {/* [BUG-4R-04a] Banner ringan untuk kembali ke hasil batch sebelumnya yang tetap tersimpan */}
             {savedBatchResultBanner && (
               <div
                 role="status"
-                className="animate-lv-fade-up mb-5 flex flex-col gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/75 px-4 py-3 text-xs text-emerald-950 sm:flex-row sm:items-center sm:justify-between"
+                className="animate-lv-fade-up mb-5 flex flex-col gap-2.5 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] px-4 py-3 text-xs text-[#0D6E5D] sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0 text-emerald-600" />
+                  <Layers aria-hidden="true" className="h-4 w-4 shrink-0 text-[#14A085]" />
                   <span>
-                    <strong className="font-bold">
+                    <strong className="font-bold text-[#0D2B24]">
                       {savedBatchResultBanner.count} hasil batch ({savedBatchResultBanner.featureLabel})
                     </strong>{' '}
                     masih tersimpan dan siap diunduh kapan saja.
@@ -455,7 +475,7 @@ export function FeatureTabs({
                   type="button"
                   disabled={disabled}
                   onClick={savedBatchResultBanner.onRestore}
-                  className="inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3.5 py-2 text-xs font-bold text-emerald-900 transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:opacity-50"
+                  className="mint-secondary-btn inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:opacity-50"
                 >
                   <Eye aria-hidden="true" className="h-3.5 w-3.5" />
                   <span>Lihat Hasil Batch</span>
@@ -466,11 +486,11 @@ export function FeatureTabs({
             {batchModeInfo && batchModeInfo.totalCount > 1 && (
               <div
                 role="status"
-                className="animate-lv-fade-up mb-5 flex items-start gap-2.5 rounded-2xl border border-blue-200 bg-blue-50/90 px-4 py-3 text-xs leading-relaxed text-blue-950"
+                className="animate-lv-fade-up mb-5 flex items-start gap-2.5 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] px-4 py-3 text-xs leading-relaxed text-[#0D6E5D]"
               >
-                <Layers aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+                <Layers aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[#14A085]" />
                 <span>
-                  <strong className="font-bold">
+                  <strong className="font-bold text-[#0D2B24]">
                     Mode Antrean Aktif ({batchModeInfo.totalCount} Video):
                   </strong>{' '}
                   Pengaturan yang kamu pilih di bawah akan diterapkan otomatis ke semua video
@@ -492,16 +512,16 @@ export function FeatureTabs({
               return (
                 <div
                   role="status"
-                  className="animate-lv-fade-up mb-5 flex items-start gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-xs leading-relaxed text-emerald-950"
+                  className="animate-lv-fade-up mb-5 flex items-start gap-2.5 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] px-4 py-3 text-xs leading-relaxed text-[#0D6E5D]"
                 >
-                  <CheckCircle2
+                  <Sparkles
                     aria-hidden="true"
-                    className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600"
+                    className="mt-0.5 h-4 w-4 shrink-0 text-[#14A085]"
                   />
                   <span>
-                    Fitur <strong className="font-bold">{activeTabLabel}</strong> sudah diterapkan
+                    Fitur <strong className="font-bold text-[#0D2B24]">{activeTabLabel}</strong> sudah diterapkan
                     pada antrean video ini sebelumnya (Tahap ke-{lastStepNumber}:{' '}
-                    <strong className="font-semibold">{activeBatchApplied.lastSummary}</strong>).
+                    <strong className="font-semibold text-[#0D2B24]">{activeBatchApplied.lastSummary}</strong>).
                     Kamu tetap bisa menjalankannya lagi atau pilih fitur lain di atas.
                   </span>
                 </div>
@@ -516,14 +536,13 @@ export function FeatureTabs({
               return (
                 <div
                   role="status"
-                  className="animate-lv-fade-up mb-5 flex flex-col gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between"
+                  className="animate-lv-fade-up mb-5 flex flex-col gap-3 rounded-2xl border border-[#6DE7C1] bg-[#E8FFF5] px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white">
-                      <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5" />
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[#14A085] px-2.5 py-1 text-[11px] font-bold text-white">
                       <span>Efek Terpasang (Tahap ke-{activeStepIdx + 1})</span>
                     </span>
-                    <span className="font-semibold text-emerald-950">{activeStep.summary}</span>
+                    <span className="font-semibold text-[#0D2B24]">{activeStep.summary}</span>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -531,7 +550,7 @@ export function FeatureTabs({
                       type="button"
                       disabled={disabled}
                       onClick={() => onViewStepResult(activeStep.id)}
-                      className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3.5 py-2 text-xs font-bold text-emerald-900 transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Eye aria-hidden="true" className="h-3.5 w-3.5" />
                       <span>Lihat Hasil</span>
@@ -540,7 +559,7 @@ export function FeatureTabs({
                       type="button"
                       disabled={disabled}
                       onClick={() => onRemoveStep(activeStep.id)}
-                      className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3.5 py-2 text-xs font-bold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/70 px-3.5 py-2 text-xs font-bold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
                       <span>Hapus Efek</span>
@@ -588,7 +607,7 @@ export function FeatureTabs({
                       onClick={() => onTabChange('convert')}
                       className="inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-amber-400 bg-white px-3.5 py-2 text-xs font-bold text-amber-950 transition-colors hover:bg-amber-100 disabled:opacity-50"
                     >
-                      <ArrowLeftRight aria-hidden="true" className="h-3.5 w-3.5 text-blue-600" />
+                      <ArrowLeftRight aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
                       <span>Buka Tab Ubah Ekstensi</span>
                     </button>
                   )
@@ -598,10 +617,10 @@ export function FeatureTabs({
 
         {/* TAB 1: UBAH EKSTENSI */}
         {activeTab === 'convert' && (
-          <div className="animate-lv-fade-up flex flex-col gap-5">
+          <div className="flex flex-col gap-5">
             <div>
-              <h3 className="text-base font-bold text-slate-900">Format Wadah Output</h3>
-              <p className="mt-1 text-xs leading-relaxed text-slate-600 sm:text-sm">
+              <h3 className="text-base font-bold text-[#0D2B24]">Format Wadah Output</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[#4A6B63] sm:text-sm">
                 Pilih ekstensi target yang ingin Anda gunakan.
               </p>
 
@@ -609,39 +628,31 @@ export function FeatureTabs({
                 {OUTPUT_FORMAT_OPTIONS.map((item) => {
                   const selected = outputFormat === item.value
                   return (
-                    <button
+                    <motion.button
                       key={item.value}
                       type="button"
                       disabled={disabled}
+                      whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
+                      whileTap={!disabled ? { scale: 0.98 } : undefined}
+                      transition={CARD_SPRING}
                       onClick={() => onOutputFormatChange(item.value)}
-                      className={`flex min-h-20 cursor-pointer touch-manipulation flex-col items-start justify-between rounded-2xl border p-3.5 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                        selected
-                          ? 'border-blue-500 bg-blue-50/80 shadow-sm ring-1 ring-blue-500/30'
-                          : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                      className={`flex min-h-20 cursor-pointer touch-manipulation flex-col items-start justify-between rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                        selected ? 'mint-option-card-active' : 'mint-option-card'
                       }`}
                     >
                       <div className="flex w-full items-center justify-between gap-2">
                         <span
-                          className={`font-mono text-sm font-bold ${
-                            selected ? 'text-blue-700' : 'text-slate-900'
+                          className={`text-sm font-bold ${
+                            selected ? 'text-[#0D6E5D]' : 'text-[#0D2B24]'
                           }`}
                         >
                           .{item.label}
                         </span>
-                        <span
-                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                            selected
-                              ? 'border-blue-600 bg-blue-600 text-white'
-                              : 'border-slate-300 bg-white'
-                          }`}
-                        >
-                          {selected && <Check aria-hidden="true" className="h-3 w-3" />}
-                        </span>
                       </div>
-                      <span className="mt-2 text-xs leading-snug text-slate-600">
+                      <span className="mt-2 text-xs leading-snug text-[#4A6B63]">
                         {item.description}
                       </span>
-                    </button>
+                    </motion.button>
                   )
                 })}
               </div>
@@ -651,8 +662,8 @@ export function FeatureTabs({
             <div
               className={`rounded-2xl border p-4 transition-colors duration-200 ${
                 fastRemux
-                  ? 'border-emerald-200 bg-emerald-50/70'
-                  : 'border-slate-200 bg-slate-50/80'
+                  ? 'border-[#6DE7C1] bg-[#E8FFF5]'
+                  : 'border-[#E2F3EC] bg-[#F7FFFC]'
               }`}
             >
               <div className="flex items-start justify-between gap-4">
@@ -660,22 +671,22 @@ export function FeatureTabs({
                   <div
                     className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
                       fastRemux
-                        ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/25'
-                        : 'bg-slate-200 text-slate-600'
+                        ? 'bg-[#14A085] text-white shadow-sm shadow-[#0D6E5D]/25'
+                        : 'bg-[#E2F3EC] text-[#4A6B63]'
                     }`}
                   >
                     <Zap aria-hidden="true" className="h-5 w-5" />
                   </div>
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-bold text-slate-900">
+                      <span className="text-sm font-bold text-[#0D2B24]">
                         Mode Kilat / Fast Remux
                       </span>
-                      <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2.5 py-0.5 font-mono text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-200">
+                      <span className="whitespace-nowrap rounded-full bg-[#B5F5DB] px-2.5 py-0.5 text-[11px] font-semibold text-[#0D6E5D]">
                         -c copy
                       </span>
                     </div>
-                    <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                    <p className="mt-1.5 text-xs leading-relaxed text-[#4A6B63]">
                       {selectedVideoExtension
                         ? `Mengubah .${selectedVideoExtension.toUpperCase()} ke .${outputFormat.toUpperCase()}`
                         : `Mengubah format video ke .${outputFormat.toUpperCase()}`}{' '}
@@ -683,7 +694,7 @@ export function FeatureTabs({
                       asli. Jika codec tidak cocok dengan wadah .{outputFormat.toUpperCase()},
                       otomatis fallback ke re-encode{' '}
                       {outputFormat === 'webm' ? 'VP8/Vorbis' : 'H.264/AAC'} (preset{' '}
-                      <code className="rounded bg-white/80 px-1.5 py-0.5 font-mono font-semibold text-slate-800">
+                      <code className="rounded bg-white px-1.5 py-0.5 font-semibold text-[#0D6E5D]">
                         {isMobile ? 'ultrafast' : 'fast'}
                       </code>
                       ).
@@ -698,12 +709,14 @@ export function FeatureTabs({
                   aria-label="Aktifkan Mode Kilat Fast Remux"
                   disabled={disabled}
                   onClick={() => onFastRemuxChange(!fastRemux)}
-                  className={`relative mt-1 inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
-                    fastRemux ? 'bg-emerald-600' : 'bg-slate-300'
+                  className={`relative mt-1 inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+                    fastRemux
+                      ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                      : 'bg-[#B5F5DB]'
                   }`}
                 >
                   <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                    className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
                       fastRemux ? 'translate-x-6' : 'translate-x-1'
                     }`}
                   />
@@ -730,14 +743,14 @@ export function FeatureTabs({
 
         {/* TAB 3: JERNIHKAN & HD + FILTER GAYA KAMERA */}
         {activeTab === 'enhance' && (
-          <div className="animate-lv-fade-up flex flex-col gap-6">
+          <div className="flex flex-col gap-6">
             {/* SUB-PANEL A: PENINGKATAN KUALITAS & UPSCALE 1080p */}
             <div className="flex flex-col gap-3.5">
               <div>
-                <h3 className="text-base font-bold text-slate-900">
+                <h3 className="text-base font-bold text-[#0D2B24]">
                   1. Penjernihan &amp; Upscale 1080p HD
                 </h3>
-                <p className="mt-0.5 text-xs leading-relaxed text-slate-600 sm:text-sm">
+                <p className="mt-0.5 text-xs leading-relaxed text-[#4A6B63] sm:text-sm">
                   Filter cepat yang aman di HP (iOS/Android) maupun Desktop dengan batas thread
                   anti-deadlock.
                 </p>
@@ -778,24 +791,25 @@ export function FeatureTabs({
                 ].map(({ key, title, tag, desc, Icon }) => {
                   const enabled = enhanceOptions[key]
                   return (
-                    <button
+                    <motion.button
                       key={key}
                       type="button"
                       role="checkbox"
                       aria-checked={enabled}
                       disabled={disabled}
+                      whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
+                      whileTap={!disabled ? { scale: 0.98 } : undefined}
+                      transition={CARD_SPRING}
                       onClick={() => toggleEnhanceBool(key)}
-                      className={`flex min-h-22 cursor-pointer touch-manipulation items-start gap-3.5 rounded-2xl border p-4 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                        enabled
-                          ? 'border-orange-400 bg-orange-50/75 shadow-sm ring-1 ring-orange-400/30'
-                          : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                      className={`flex min-h-22 cursor-pointer touch-manipulation items-start gap-3.5 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                        enabled ? 'mint-option-card-active' : 'mint-option-card'
                       }`}
                     >
                       <div
                         className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
                           enabled
-                            ? 'bg-orange-500 text-white shadow-sm shadow-orange-500/25'
-                            : 'bg-slate-200/80 text-slate-600'
+                            ? 'bg-[#14A085] text-white shadow-sm shadow-[#0D6E5D]/20'
+                            : 'bg-[#E8FFF5] text-[#0D6E5D]'
                         }`}
                       >
                         <Icon aria-hidden="true" className="h-5 w-5" />
@@ -803,41 +817,32 @@ export function FeatureTabs({
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-sm font-bold text-slate-900">{title}</span>
+                            <span className="text-sm font-bold text-[#0D2B24]">{title}</span>
                             <span
-                              className={`whitespace-nowrap rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold tabular-nums ${
+                              className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
                                 enabled
-                                  ? 'bg-orange-100 text-orange-800'
-                                  : 'bg-slate-200/80 text-slate-600'
+                                  ? 'bg-[#B5F5DB] text-[#0D6E5D]'
+                                  : 'bg-[#F7FFFC] text-[#4A6B63] ring-1 ring-[#E2F3EC]'
                               }`}
                             >
                               {tag}
                             </span>
                           </div>
-                          <span
-                            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
-                              enabled
-                                ? 'border-orange-600 bg-orange-600 text-white'
-                                : 'border-slate-300 bg-white'
-                            }`}
-                          >
-                            {enabled && <Check aria-hidden="true" className="h-3.5 w-3.5" />}
-                          </span>
                         </div>
-                        <p className="mt-1.5 text-xs leading-relaxed text-slate-600">{desc}</p>
+                        <p className="mt-1.5 text-xs leading-relaxed text-[#4A6B63]">{desc}</p>
                       </div>
-                    </button>
+                    </motion.button>
                   )
                 })}
               </div>
 
               {enhanceOptions.upscale1080p && (
-                <div className="rounded-2xl border border-orange-200/80 bg-orange-50/50 p-3.5">
+                <div className="rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-3.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-slate-800">
+                    <span className="text-xs font-bold text-[#0D2B24]">
                       Algoritma Skala 1080p
                     </span>
-                    <span className="font-mono text-[11px] font-semibold text-orange-800">
+                    <span className="text-[11px] font-semibold text-[#0D6E5D]">
                       CRF {enhanceOptions.upscale1080p ? '23' : '22'} • preset{' '}
                       {isMobile ? 'veryfast' : 'fast'}
                     </span>
@@ -851,14 +856,14 @@ export function FeatureTabs({
                           type="button"
                           disabled={disabled}
                           onClick={() => handleScaleAlgorithmChange(opt.value)}
-                          className={`min-h-11 cursor-pointer touch-manipulation rounded-xl border px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-600 focus-visible:ring-offset-2 disabled:opacity-60 ${
+                          className={`min-h-11 cursor-pointer touch-manipulation rounded-xl border px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-60 ${
                             active
-                              ? 'border-orange-500 bg-white text-orange-900 shadow-xs ring-1 ring-orange-400/40'
-                              : 'border-orange-200/70 bg-white/60 text-slate-700 hover:bg-white'
+                              ? 'border-[#14A085] bg-white text-[#0D6E5D] shadow-xs ring-1 ring-[#6DE7C1]'
+                              : 'border-[#B5F5DB] bg-white/75 text-[#4A6B63] hover:bg-white'
                           }`}
                         >
                           <div className="text-xs font-bold">{opt.label}</div>
-                          <div className="mt-0.5 text-[10px] text-slate-500">{opt.hint}</div>
+                          <div className="mt-0.5 text-[10px] text-[#4A6B63]">{opt.hint}</div>
                         </button>
                       )
                     })}
@@ -868,31 +873,31 @@ export function FeatureTabs({
             </div>
 
             {/* SUB-PANEL B: FILTER & COLOR GRADING (IPHONE 18 PRO MAX & LAINNYA) */}
-            <div className="flex flex-col gap-3.5 border-t border-slate-200/80 pt-5">
+            <div className="flex flex-col gap-3.5 border-t border-[#E2F3EC] pt-5">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <h3 className="inline-flex items-center gap-2 text-base font-bold text-slate-900">
-                    <Palette aria-hidden="true" className="h-4 w-4 text-orange-600" />
+                  <h3 className="inline-flex items-center gap-2 text-base font-bold text-[#0D2B24]">
+                    <Palette aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
                     2. Filter &amp; Color Grading
                   </h3>
-                  <p className="mt-0.5 text-xs leading-relaxed text-slate-600 sm:text-sm">
+                  <p className="mt-0.5 text-xs leading-relaxed text-[#4A6B63] sm:text-sm">
                     Pratinjau warna langsung pada video sebelum render, 100% kompatibel
                     FFmpeg.wasm tanpa file LUT eksternal.
                   </p>
                 </div>
                 {enhanceOptions.colorFilter !== 'none' && (
-                  <span className="whitespace-nowrap rounded-full bg-orange-100 px-3 py-1 text-xs font-bold text-orange-800">
+                  <span className="whitespace-nowrap rounded-full bg-[#E8FFF5] px-3 py-1 text-xs font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
                     {activeColorPreset.name}
                   </span>
                 )}
               </div>
 
               {sourcePreviewUrl && (
-                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-sm">
+                <div className="overflow-hidden rounded-2xl border border-[#B5F5DB] bg-slate-950 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/90 px-3.5 py-2 text-xs">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="inline-flex items-center gap-1.5 font-semibold text-slate-200">
-                        <Eye aria-hidden="true" className="h-3.5 w-3.5 text-sky-400" />
+                        <Eye aria-hidden="true" className="h-3.5 w-3.5 text-[#6DE7C1]" />
                         Pratinjau Langsung:{' '}
                         <strong className="text-white">
                           {compareOriginal ? 'Original (Tanpa Filter)' : activeColorPreset.name}
@@ -908,7 +913,7 @@ export function FeatureTabs({
                             onChange={(e) =>
                               batchModeInfo.onPreviewItemIdChange(e.target.value)
                             }
-                            className="cursor-pointer rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[11px] font-bold text-white focus:outline-none focus:ring-1 focus:ring-sky-400 disabled:opacity-50"
+                            className="cursor-pointer rounded bg-slate-900 px-1.5 py-0.5 text-[11px] font-bold text-white focus:outline-none focus:ring-1 focus:ring-[#6DE7C1] disabled:opacity-50"
                           >
                             {batchModeInfo.items.map((bItem) => (
                               <option key={bItem.id} value={bItem.id}>
@@ -923,7 +928,7 @@ export function FeatureTabs({
                       <button
                         type="button"
                         onClick={() => setCompareOriginal((prev) => !prev)}
-                        className="cursor-pointer touch-manipulation rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+                        className="cursor-pointer touch-manipulation rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6DE7C1]"
                       >
                         {compareOriginal ? 'Lihat Efek Filter' : 'Bandingkan Original'}
                       </button>
@@ -941,7 +946,7 @@ export function FeatureTabs({
                   />
                   {/* [BUG-08] Penjelasan eksplisit cakupan pratinjau langsung */}
                   <div className="flex items-start gap-2 border-t border-slate-800 bg-slate-900/95 px-3.5 py-2 text-[11px] leading-relaxed text-slate-300">
-                    <Info aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-400" />
+                    <Info aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#6DE7C1]" />
                     <span>
                       Pratinjau warna saja. Efek{' '}
                       <strong className="text-white">Kurangi Noise</strong>,{' '}
@@ -957,15 +962,16 @@ export function FeatureTabs({
                 {COLOR_FILTER_PRESETS.map((preset) => {
                   const selected = enhanceOptions.colorFilter === preset.id
                   return (
-                    <button
+                    <motion.button
                       key={preset.id}
                       type="button"
                       disabled={disabled}
+                      whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
+                      whileTap={!disabled ? { scale: 0.98 } : undefined}
+                      transition={CARD_SPRING}
                       onClick={() => handleColorFilterChange(preset.id)}
-                      className={`flex min-h-20 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl border p-3.5 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                        selected
-                          ? 'border-orange-500 bg-orange-50/80 shadow-sm ring-1 ring-orange-400/40'
-                          : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                      className={`flex min-h-20 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                        selected ? 'mint-option-card-active' : 'mint-option-card'
                       }`}
                     >
                       <div className="flex w-full items-start justify-between gap-2">
@@ -975,46 +981,37 @@ export function FeatureTabs({
                             className={`h-7 w-7 shrink-0 rounded-xl bg-gradient-to-br ${preset.swatchGradient} ring-1 ring-black/10`}
                           />
                           <div>
-                            <span className="block text-xs font-bold text-slate-900">
+                            <span className="block text-xs font-bold text-[#0D2B24]">
                               {preset.name}
                             </span>
-                            <span className="mt-0.5 inline-block rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200">
+                            <span className="mt-0.5 inline-block rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
                               {preset.tag}
                             </span>
                           </div>
                         </div>
-                        <span
-                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                            selected
-                              ? 'border-orange-600 bg-orange-600 text-white'
-                              : 'border-slate-300 bg-white'
-                          }`}
-                        >
-                          {selected && <Check aria-hidden="true" className="h-3 w-3" />}
-                        </span>
                       </div>
-                      <p className="text-[11px] leading-relaxed text-slate-600">
+                      <p className="text-[11px] leading-relaxed text-[#4A6B63]">
                         {preset.description}
                       </p>
-                    </button>
+                    </motion.button>
                   )
                 })}
               </div>
             </div>
 
             {/* [BUG-10] Toggle Smart Cap + Estimasi Ukuran Hasil Tab 3 */}
-            <div className="flex flex-col gap-3 border-t border-slate-200/80 pt-5">
-              <div className="flex items-center justify-between gap-4 rounded-2xl border border-orange-200/80 bg-orange-50/45 p-4">
+            <div className="flex flex-col gap-3 border-t border-[#E2F3EC] pt-5">
+              <div className="flex items-center justify-between gap-4 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-bold text-slate-900 sm:text-sm">
+                    <span className="text-xs font-bold text-[#0D2B24] sm:text-sm">
                       Batasi Ukuran Hasil (Smart Cap)
                     </span>
-                    <span className="rounded-full bg-orange-100 px-2 py-0.5 font-mono text-[10px] font-bold text-orange-800">
+                    <span className="rounded-full bg-[#B5F5DB] px-2 py-0.5 text-[10px] font-bold text-[#0D6E5D]">
                       CRF {enhanceOptions.upscale1080p ? '23' : '22'} • {isMobile ? 'veryfast' : 'fast'}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                  <p className="mt-1 text-xs leading-relaxed text-[#4A6B63]">
                     Membatasi bitrate puncak (-maxrate) secara proporsional agar hasil upscale atau
                     penjernihan tetap tajam tanpa membengkak berlebihan.
                   </p>
@@ -1031,12 +1028,14 @@ export function FeatureTabs({
                       smartSizeCap: !enhanceOptions.smartSizeCap,
                     })
                   }
-                  className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-600 focus-visible:ring-offset-2 disabled:opacity-50 ${
-                    enhanceOptions.smartSizeCap ? 'bg-orange-500' : 'bg-slate-300'
+                  className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                    enhanceOptions.smartSizeCap
+                      ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                      : 'bg-[#B5F5DB]'
                   }`}
                 >
                   <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                    className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
                       enhanceOptions.smartSizeCap ? 'translate-x-6' : 'translate-x-1'
                     }`}
                   />
@@ -1044,32 +1043,32 @@ export function FeatureTabs({
               </div>
 
               {enhanceSizeEstimate && selectedVideoSizeBytes !== null && (
-                <div className="grid grid-cols-1 gap-3 rounded-2xl border border-orange-200/80 bg-gradient-to-r from-orange-50/80 via-amber-50/60 to-white p-4 sm:grid-cols-2 sm:items-center">
+                <div className="grid grid-cols-1 gap-3 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4 sm:grid-cols-2 sm:items-center">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-orange-600 ring-1 ring-orange-200">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-[#14A085] ring-1 ring-[#B5F5DB]">
                       <HardDrive aria-hidden="true" className="h-5 w-5" />
                     </div>
                     <div>
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-[#4A6B63]">
                         Ukuran Asli
                       </p>
-                      <p className="font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                      <p className="text-base font-extrabold text-[#0D2B24] tabular-nums">
                         {formatFileSizeMB(selectedVideoSizeBytes)}
                       </p>
                     </div>
                   </div>
-                  <div className="rounded-xl bg-white/95 p-3 ring-1 ring-orange-200/80 sm:text-right">
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-orange-700">
+                  <div className="rounded-xl bg-white p-3 ring-1 ring-[#B5F5DB] sm:text-right">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-[#0D6E5D]">
                       Estimasi Ukuran Hasil (Perkiraan)
                     </p>
-                    <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                    <p className="mt-0.5 text-base font-extrabold text-[#0D2B24] tabular-nums">
                       ~{enhanceSizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
                       {enhanceSizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
-                      <span className="font-sans text-[11px] font-semibold text-slate-500">
+                      <span className="text-[11px] font-semibold text-[#4A6B63]">
                         (perkiraan)
                       </span>
                     </p>
-                    <p className="mt-0.5 font-mono text-[11px] text-slate-500">
+                    <p className="mt-0.5 text-[11px] text-[#4A6B63]">
                       CRF {enhanceOptions.upscale1080p ? '23' : '22'} • preset{' '}
                       {isMobile ? 'veryfast' : 'fast'}
                       {enhanceSizeEstimate.maxRateKbps
@@ -1078,7 +1077,7 @@ export function FeatureTabs({
                     </p>
                     {enhanceSizeEstimate.calibrationSamples !== undefined &&
                       enhanceSizeEstimate.calibrationSamples > 0 && (
-                        <p className="mt-0.5 text-[10px] font-medium text-orange-700">
+                        <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
                           Dikalibrasi dari {enhanceSizeEstimate.calibrationSamples} proses sebelumnya
                         </p>
                       )}
@@ -1107,15 +1106,15 @@ export function FeatureTabs({
             </div>
 
             {enhanceFilterChain.length > 0 ? (
-              <details className="rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-600">
-                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-3.5 py-2.5 font-semibold text-slate-700 transition-colors hover:text-slate-900">
+              <details className="rounded-xl border border-[#E2F3EC] bg-[#F7FFFC] text-xs text-[#4A6B63]">
+                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-3.5 py-2.5 font-semibold text-[#0D6E5D] transition-colors hover:text-[#0D2B24]">
                   <span>Lihat Detail Filter Teknis (-vf)</span>
-                  <span className="font-mono text-[11px] text-slate-500">
+                  <span className="text-[11px] text-[#4A6B63]">
                     {enhanceFilterChain.length} filter
                   </span>
                 </summary>
-                <div className="border-t border-slate-200/80 px-3.5 py-2.5">
-                  <code className="font-mono font-medium text-orange-700 [overflow-wrap:anywhere]">
+                <div className="border-t border-[#E2F3EC] px-3.5 py-2.5">
+                  <code className="font-mono font-medium text-[#0D6E5D] [overflow-wrap:anywhere]">
                     {enhanceFilterChain.join(',')}
                   </code>
                 </div>
@@ -1131,18 +1130,18 @@ export function FeatureTabs({
 
         {/* TAB 4: STABILIZER VIDEO (TAB MANDIRI) */}
         {activeTab === 'stabilize' && (
-          <div className="animate-lv-fade-up flex flex-col gap-5">
-            <div className="flex items-start gap-3 rounded-2xl border border-cyan-200 bg-gradient-to-r from-cyan-50 via-sky-50/80 to-blue-50/50 p-4">
-              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-600 text-white shadow-sm shadow-cyan-600/25">
+          <div className="flex flex-col gap-5">
+            <div className="flex items-start gap-3 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4">
+              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#2EC7A4] to-[#0D6E5D] text-white shadow-sm shadow-[#0D6E5D]/20">
                 <Video aria-hidden="true" className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-slate-900">
+                <h3 className="text-base font-bold text-[#0D2B24]">
                   Stabilizer Video (Anti-Goyang)
                 </h3>
-                <p className="mt-1 text-xs leading-relaxed text-slate-700 sm:text-sm">
+                <p className="mt-1 text-xs leading-relaxed text-[#4A6B63] sm:text-sm">
                   Menstabilkan rekaman tangan goyang memakai filter bawaan FFmpeg{' '}
-                  <code className="rounded bg-white/90 px-1.5 py-0.5 font-mono font-semibold text-cyan-900">
+                  <code className="rounded bg-white px-1.5 py-0.5 font-semibold text-[#0D6E5D]">
                     deshake
                   </code>{' '}
                   yang 100% kompatibel dengan FFmpeg.wasm di Windows, Android, dan iOS.
@@ -1151,47 +1150,39 @@ export function FeatureTabs({
             </div>
 
             <div>
-              <h4 className="text-sm font-bold text-slate-900">Pilih Tingkat Stabilisasi</h4>
+              <h4 className="text-sm font-bold text-[#0D2B24]">Pilih Tingkat Stabilisasi</h4>
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {STABILIZER_OPTIONS.map((opt) => {
                   const selected = stabilizerLevel === opt.id
                   return (
-                    <button
+                    <motion.button
                       key={opt.id}
                       type="button"
                       disabled={disabled}
+                      whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
+                      whileTap={!disabled ? { scale: 0.98 } : undefined}
+                      transition={CARD_SPRING}
                       onClick={() => onStabilizerLevelChange(opt.id)}
-                      className={`flex min-h-28 cursor-pointer touch-manipulation flex-col justify-between gap-3 rounded-2xl border p-4 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                        selected
-                          ? 'border-cyan-500 bg-cyan-50/80 shadow-sm ring-1 ring-cyan-500/30'
-                          : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                      className={`flex min-h-28 cursor-pointer touch-manipulation flex-col justify-between gap-3 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                        selected ? 'mint-option-card-active' : 'mint-option-card'
                       }`}
                     >
                       <div className="flex w-full items-start justify-between gap-2">
                         <div>
                           <span
-                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 font-mono text-[11px] font-bold ${
+                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
                               selected
-                                ? 'bg-cyan-600 text-white'
-                                : 'bg-slate-200/80 text-slate-700'
+                                ? 'bg-[#14A085] text-white'
+                                : 'bg-[#E8FFF5] text-[#0D6E5D]'
                             }`}
                           >
                             {opt.badge}
                           </span>
-                          <p className="mt-2.5 text-sm font-bold text-slate-900">{opt.title}</p>
+                          <p className="mt-2.5 text-sm font-bold text-[#0D2B24]">{opt.title}</p>
                         </div>
-                        <span
-                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                            selected
-                              ? 'border-cyan-600 bg-cyan-600 text-white'
-                              : 'border-slate-300 bg-white'
-                          }`}
-                        >
-                          {selected && <Check aria-hidden="true" className="h-3 w-3" />}
-                        </span>
                       </div>
-                      <p className="text-xs leading-relaxed text-slate-600">{opt.subtitle}</p>
-                    </button>
+                      <p className="text-xs leading-relaxed text-[#4A6B63]">{opt.subtitle}</p>
+                    </motion.button>
                   )
                 })}
               </div>
@@ -1199,32 +1190,32 @@ export function FeatureTabs({
 
             {/* [BUG-11] Estimasi Ukuran Hasil Stabilizer (CRF 22 + Smart Maxrate Proporsional) */}
             {stabilizerSizeEstimate && selectedVideoSizeBytes !== null && (
-              <div className="grid grid-cols-1 gap-3 rounded-2xl border border-cyan-200/80 bg-gradient-to-r from-cyan-50/80 via-sky-50/60 to-white p-4 sm:grid-cols-2 sm:items-center">
+              <div className="grid grid-cols-1 gap-3 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4 sm:grid-cols-2 sm:items-center">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-cyan-700 ring-1 ring-cyan-200">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-[#14A085] ring-1 ring-[#B5F5DB]">
                     <HardDrive aria-hidden="true" className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-[#4A6B63]">
                       Ukuran Asli
                     </p>
-                    <p className="font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                    <p className="text-base font-extrabold text-[#0D2B24] tabular-nums">
                       {formatFileSizeMB(selectedVideoSizeBytes)}
                     </p>
                   </div>
                 </div>
-                <div className="rounded-xl bg-white/95 p-3 ring-1 ring-cyan-200/80 sm:text-right">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-cyan-800">
+                <div className="rounded-xl bg-white p-3 ring-1 ring-[#B5F5DB] sm:text-right">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-[#0D6E5D]">
                     Estimasi Ukuran Hasil (Perkiraan)
                   </p>
-                  <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                  <p className="mt-0.5 text-base font-extrabold text-[#0D2B24] tabular-nums">
                     ~{stabilizerSizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
                     {stabilizerSizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
-                    <span className="font-sans text-[11px] font-semibold text-slate-500">
+                    <span className="text-[11px] font-semibold text-[#4A6B63]">
                       (perkiraan)
                     </span>
                   </p>
-                  <p className="mt-0.5 font-mono text-[11px] text-slate-500">
+                  <p className="mt-0.5 text-[11px] text-[#4A6B63]">
                     CRF 22 • preset {isMobile ? 'veryfast' : 'fast'}
                     {stabilizerSizeEstimate.maxRateKbps
                       ? ` • Cap ≤ ${stabilizerSizeEstimate.maxRateKbps}k`
@@ -1232,7 +1223,7 @@ export function FeatureTabs({
                   </p>
                   {stabilizerSizeEstimate.calibrationSamples !== undefined &&
                     stabilizerSizeEstimate.calibrationSamples > 0 && (
-                      <p className="mt-0.5 text-[10px] font-medium text-cyan-800">
+                      <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
                         Dikalibrasi dari {stabilizerSizeEstimate.calibrationSamples} proses sebelumnya
                       </p>
                     )}
@@ -1240,23 +1231,23 @@ export function FeatureTabs({
               </div>
             )}
 
-            <div className="flex items-start gap-2.5 rounded-xl border border-cyan-200/80 bg-cyan-50/60 px-4 py-3 text-xs leading-relaxed text-cyan-950">
-              <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700" />
+            <div className="flex items-start gap-2.5 rounded-xl border border-[#B5F5DB] bg-[#E8FFF5] px-4 py-3 text-xs leading-relaxed text-[#0D6E5D]">
+              <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[#14A085]" />
               <span>
                 Catatan: fitur stabilizer menganalisis gerakan dan memproses ulang setiap frame
                 video secara lokal, sehingga waktu render sedikit lebih lama dibanding konversi
                 biasa. Setelah selesai, Anda dapat membandingkan hasilnya langsung dengan slider{' '}
-                <strong className="font-bold">Before / After</strong>.
+                <strong className="font-bold text-[#0D2B24]">Before / After</strong>.
               </span>
             </div>
 
-            <details className="rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-600">
-              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-3.5 py-2.5 font-semibold text-slate-700 transition-colors hover:text-slate-900">
+            <details className="rounded-xl border border-[#E2F3EC] bg-[#F7FFFC] text-xs text-[#4A6B63]">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-3.5 py-2.5 font-semibold text-[#0D6E5D] transition-colors hover:text-[#0D2B24]">
                 <span>Lihat Detail Filter Teknis (-vf)</span>
-                <span className="font-mono text-[11px] text-slate-500">deshake</span>
+                <span className="text-[11px] text-[#4A6B63]">deshake</span>
               </summary>
-              <div className="border-t border-slate-200/80 px-3.5 py-2.5">
-                <code className="font-mono font-medium text-cyan-800 [overflow-wrap:anywhere]">
+              <div className="border-t border-[#E2F3EC] px-3.5 py-2.5">
+                <code className="font-mono font-medium text-[#0D6E5D] [overflow-wrap:anywhere]">
                   {stabilizerFilterChain.join(',')}
                 </code>
               </div>
@@ -1266,29 +1257,29 @@ export function FeatureTabs({
 
         {/* TAB 5: AI HD UPSCALER (BETA) - WebGPU ONNX + WebGPU Shader + Fallback Penuh WebGL2 */}
         {activeTab === 'ai-upscale' && (
-          <div className="animate-lv-fade-up flex flex-col gap-4">
+          <div className="flex flex-col gap-4">
             {!aiAnyGpuAvailable ? (
-              <div className="flex flex-col items-start gap-4 rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-orange-50/70 to-white p-5">
+              <div className="flex flex-col items-start gap-4 rounded-2xl border border-amber-200 bg-amber-50/80 p-5">
                 <div className="flex items-start gap-3.5">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-700 ring-1 ring-amber-200">
                     <ShieldAlert aria-hidden="true" className="h-6 w-6" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-slate-900">
+                    <h3 className="text-base font-bold text-[#0D2B24]">
                       GPU Upscaler Membutuhkan WebGPU atau WebGL2
                     </h3>
-                    <p className="mt-1.5 text-xs leading-relaxed text-slate-700 sm:text-sm">
+                    <p className="mt-1.5 text-xs leading-relaxed text-[#4A6B63] sm:text-sm">
                       {webgpuStatus === 'checking'
                         ? 'Sedang memeriksa dukungan akselerasi GPU browser Anda...'
                         : `Browser di perangkat ${deviceType} Anda tidak mendukung WebGPU (navigator.gpu) maupun WebGL2, sehingga fitur GPU Upscaler tidak dapat dijalankan.`}
                     </p>
-                    <p className="mt-2 text-xs leading-relaxed text-slate-600">
+                    <p className="mt-2 text-xs leading-relaxed text-[#4A6B63]">
                       Gunakan{' '}
-                      <strong className="font-bold text-slate-900">
+                      <strong className="font-bold text-[#0D2B24]">
                         Tab Jernihkan &amp; HD
                       </strong>{' '}
                       atau{' '}
-                      <strong className="font-bold text-slate-900">Tab Stabilizer</strong> yang
+                      <strong className="font-bold text-[#0D2B24]">Tab Stabilizer</strong> yang
                       berjalan lancar di semua browser via FFmpeg.wasm.
                     </p>
                   </div>
@@ -1297,7 +1288,7 @@ export function FeatureTabs({
                 <button
                   type="button"
                   onClick={() => onTabChange('enhance')}
-                  className="inline-flex min-h-11 w-full cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-5 py-2.5 text-xs font-bold text-white shadow-sm transition-[filter,transform] duration-150 hover:brightness-105 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-600 focus-visible:ring-offset-2 sm:w-auto sm:text-sm"
+                  className="mint-cta-btn inline-flex min-h-11 w-full cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 sm:w-auto sm:text-sm"
                 >
                   <Sparkles aria-hidden="true" className="h-4 w-4" />
                   <span>Buka Tab Jernihkan &amp; HD</span>
@@ -1308,33 +1299,33 @@ export function FeatureTabs({
               <>
                 {/* [BUG-01] Banner informasi jujur saat berjalan pada Mode Fallback WebGL2 */}
                 {aiCanRunFallbackWebGl2 ? (
-                  <div className="flex flex-col gap-2.5 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 via-orange-50/60 to-white p-4">
+                  <div className="flex flex-col gap-2.5 rounded-2xl border border-amber-200 bg-amber-50/80 p-4">
                     <div className="flex items-start gap-3">
                       <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white shadow-sm shadow-amber-500/25">
                         <Cpu aria-hidden="true" className="h-5 w-5" />
                       </div>
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-sm font-bold text-slate-900">
+                          <h3 className="text-sm font-bold text-[#0D2B24]">
                             Mode Fallback WebGL2 (Lebih lambat dari WebGPU)
                           </h3>
-                          <span className="whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-0.5 font-mono text-[10px] font-bold text-amber-900 ring-1 ring-amber-300">
+                          <span className="whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold text-amber-900 ring-1 ring-amber-300">
                             WebGL2 Aktif • 0 Byte ONNX
                           </span>
-                          <span className="whitespace-nowrap rounded-full bg-white px-2.5 py-0.5 font-mono text-[10px] font-bold text-slate-700 ring-1 ring-amber-200">
+                          <span className="whitespace-nowrap rounded-full bg-white px-2.5 py-0.5 text-[10px] font-bold text-[#0D6E5D] ring-1 ring-amber-200">
                             Maks {MAX_AI_DURATION_DESKTOP_SECONDS} dtk (Desktop) • Maks{' '}
                             {MAX_AI_DURATION_MOBILE_SECONDS} dtk (Mobile)
                           </span>
                         </div>
-                        <p className="mt-1 text-xs leading-relaxed text-slate-700">
+                        <p className="mt-1 text-xs leading-relaxed text-[#4A6B63]">
                           {isMobile
                             ? `Perangkat ${deviceType} tidak memuat model ONNX WebGPU demi menjaga RAM tetap aman. Anda tetap bisa memakai `
                             : 'Browser ini belum mendukung WebGPU (navigator.gpu), namun Anda tetap dapat menjalankan '}
-                          <strong className="font-bold text-slate-900">
+                          <strong className="font-bold text-[#0D2B24]">
                             WebGL2 Fast Enhance Shader (Bicubic 16-tap + Unsharp + Contrast)
                           </strong>{' '}
                           secara penuh di sini (batas aktif perangkat ini:{' '}
-                          <strong className="font-bold text-slate-900">
+                          <strong className="font-bold text-[#0D2B24]">
                             {aiMaxDurationSec} detik
                           </strong>
                           ).
@@ -1343,32 +1334,32 @@ export function FeatureTabs({
                     </div>
                   </div>
                 ) : (
-                  <div className="flex flex-col gap-2 rounded-2xl border border-violet-200 bg-gradient-to-r from-violet-50 via-indigo-50/70 to-sky-50/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-col gap-2 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm shadow-violet-600/25">
+                      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#2EC7A4] to-[#0D6E5D] text-white shadow-sm shadow-[#0D6E5D]/20">
                         <Cpu aria-hidden="true" className="h-5 w-5" />
                       </div>
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-sm font-bold text-slate-900">
+                          <h3 className="text-sm font-bold text-[#0D2B24]">
                             GPU HD Upscaler • Validated Offscreen Readback
                           </h3>
-                          <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2.5 py-0.5 font-mono text-[10px] font-bold text-emerald-800 ring-1 ring-emerald-200">
+                          <span className="whitespace-nowrap rounded-full bg-[#B5F5DB] px-2.5 py-0.5 text-[10px] font-bold text-[#0D6E5D]">
                             WebGPU + WebGL2 Safe
                           </span>
-                          <span className="whitespace-nowrap rounded-full bg-white px-2.5 py-0.5 font-mono text-[10px] font-bold text-violet-800 ring-1 ring-violet-200">
+                          <span className="whitespace-nowrap rounded-full bg-white px-2.5 py-0.5 text-[10px] font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
                             Maks {MAX_AI_DURATION_DESKTOP_SECONDS} dtk (Desktop) • Maks{' '}
                             {MAX_AI_DURATION_MOBILE_SECONDS} dtk (Mobile)
                           </span>
                         </div>
-                        <p className="mt-1 text-xs leading-relaxed text-slate-700">
+                        <p className="mt-1 text-xs leading-relaxed text-[#4A6B63]">
                           Ekstraksi frame native browser + render offscreen{' '}
-                          <code className="font-mono font-semibold text-violet-900">
+                          <code className="font-semibold text-[#0D6E5D]">
                             GPUTexture
                           </code>{' '}
                           tervalidasi dengan fallback otomatis WebGL2 (dijamin jernih, tidak hitam).
                           Batas durasi aktif perangkat ini:{' '}
-                          <strong className="font-bold text-slate-900">
+                          <strong className="font-bold text-[#0D2B24]">
                             {aiMaxDurationSec} detik
                           </strong>
                           .
@@ -1395,7 +1386,7 @@ export function FeatureTabs({
                         </p>
                         <p className="mt-0.5 leading-relaxed text-rose-700">
                           Video terpilih berdurasi{' '}
-                          <strong className="font-mono font-bold text-rose-950 tabular-nums">
+                          <strong className="font-bold text-rose-950 tabular-nums">
                             {formatDuration(selectedVideoDuration)}
                           </strong>
                           . Gunakan klip &le; {aiMaxDurationSec} detik untuk GPU Upscaler di{' '}
@@ -1417,14 +1408,14 @@ export function FeatureTabs({
 
                 <details
                   open={!modelUrlValid || undefined}
-                  className="rounded-2xl border border-slate-200 bg-slate-50/70"
+                  className="rounded-2xl border border-[#E2F3EC] bg-[#F7FFFC]"
                 >
-                  <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-xs font-bold text-slate-800 transition-colors hover:text-slate-950">
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-xs font-bold text-[#0D2B24] transition-colors hover:text-[#0D6E5D]">
                     <span className="inline-flex items-center gap-2">
-                      <SlidersHorizontal aria-hidden="true" className="h-4 w-4 text-violet-600" />
+                      <SlidersHorizontal aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
                       <span>Pengaturan Teknis AI</span>
                     </span>
-                    <span className="rounded-full bg-white px-2.5 py-0.5 font-mono text-[11px] font-semibold text-violet-800 ring-1 ring-slate-200">
+                    <span className="rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
                       {!aiWebGpuAvailable
                         ? 'WebGL2 Shader'
                         : aiSettings.enginePreference === 'webgpu-shader'
@@ -1434,9 +1425,9 @@ export function FeatureTabs({
                             : 'ONNX AI + Auto Fallback'}
                     </span>
                   </summary>
-                  <div className="flex flex-col gap-4 border-t border-slate-200/80 p-4">
+                  <div className="flex flex-col gap-4 border-t border-[#E2F3EC] p-4">
                     <div>
-                      <span className="text-sm font-bold text-slate-900">Mode Mesin GPU</span>
+                      <span className="text-sm font-bold text-[#0D2B24]">Mode Mesin GPU</span>
                   <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
                     {[
                       {
@@ -1484,42 +1475,33 @@ export function FeatureTabs({
                               : undefined
                           }
                           onClick={() => handleAiEnginePreference(mode.id)}
-                          className={`flex touch-manipulation flex-col justify-between gap-2 rounded-2xl border p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-2 ${
+                          className={`flex touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 ${
                             mode.unavailable
-                              ? 'cursor-not-allowed border-slate-200/80 bg-slate-100/80 opacity-45 grayscale-[35%]'
+                              ? 'cursor-not-allowed border border-[#E2F3EC] bg-[#F4FFFA] opacity-45 grayscale-[35%]'
                               : active
-                                ? 'cursor-pointer border-violet-500 bg-violet-50/80 shadow-sm ring-1 ring-violet-500/30 disabled:cursor-not-allowed disabled:opacity-60'
-                                : 'cursor-pointer border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60'
+                                ? 'mint-option-card-active cursor-pointer disabled:cursor-not-allowed disabled:opacity-60'
+                                : 'mint-option-card cursor-pointer disabled:cursor-not-allowed disabled:opacity-60'
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div>
                               <span
-                                className={`inline-block rounded-full px-2 py-0.5 font-mono text-[10px] font-bold ${
+                                className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${
                                   mode.unavailable
-                                    ? 'bg-slate-200 text-slate-500'
+                                    ? 'bg-[#E2F3EC] text-[#4A6B63]'
                                     : active
-                                      ? 'bg-violet-600 text-white'
-                                      : 'bg-slate-200 text-slate-700'
+                                      ? 'bg-[#14A085] text-white'
+                                      : 'bg-[#E8FFF5] text-[#0D6E5D]'
                                 }`}
                               >
                                 {mode.badge}
                               </span>
-                              <p className="mt-1.5 text-xs font-bold text-slate-900">
+                              <p className="mt-1.5 text-xs font-bold text-[#0D2B24]">
                                 {mode.title}
                               </p>
                             </div>
-                            <span
-                              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
-                                active
-                                  ? 'border-violet-600 bg-violet-600 text-white'
-                                  : 'border-slate-300 bg-white'
-                              }`}
-                            >
-                              {active && <Check aria-hidden="true" className="h-3 w-3" />}
-                            </span>
                           </div>
-                          <p className="text-xs leading-relaxed text-slate-600">{mode.desc}</p>
+                          <p className="text-xs leading-relaxed text-[#4A6B63]">{mode.desc}</p>
                         </button>
                       )
                     })}
@@ -1529,10 +1511,10 @@ export function FeatureTabs({
                 {aiWebGpuAvailable && aiSettings.enginePreference === 'auto-onnx' && (
                   <>
                     <div>
-                      <span className="text-sm font-bold text-slate-900">
+                      <span className="text-sm font-bold text-[#0D2B24]">
                         Model Super-Resolution ONNX (CDN Eksternal)
                       </span>
-                      <p className="mt-0.5 text-xs text-slate-600">
+                      <p className="mt-0.5 text-xs text-[#4A6B63]">
                         Model diunduh dari CDN/Hugging Face agar repo GitHub tetap ringan. Jika
                         server memblokir COEP, fallback WebGPU Shader otomatis berjalan.
                       </p>
@@ -1541,51 +1523,43 @@ export function FeatureTabs({
                         {AI_MODEL_PRESETS.map((preset) => {
                           const selected = aiSettings.presetId === preset.id
                           return (
-                            <button
+                            <motion.button
                               key={preset.id}
                               type="button"
                               disabled={disabled}
+                              whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
+                              whileTap={!disabled ? { scale: 0.98 } : undefined}
+                              transition={CARD_SPRING}
                               onClick={() => handleSelectAiPreset(preset.id)}
-                              className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2.5 rounded-2xl border p-3.5 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-2 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-60 ${
-                                selected
-                                  ? 'border-violet-500 bg-violet-50/75 shadow-sm ring-1 ring-violet-500/30'
-                                  : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white'
+                              className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2.5 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                                selected ? 'mint-option-card-active' : 'mint-option-card'
                               }`}
                             >
                               <div className="flex w-full items-start justify-between gap-2">
                                 <div>
                                   <div className="flex flex-wrap items-center gap-1.5">
                                     <span
-                                      className={`whitespace-nowrap rounded-full px-2 py-0.5 font-mono text-[10px] font-bold ${
+                                      className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold ${
                                         selected
-                                          ? 'bg-violet-600 text-white'
-                                          : 'bg-violet-100 text-violet-700'
+                                          ? 'bg-[#14A085] text-white'
+                                          : 'bg-[#E8FFF5] text-[#0D6E5D]'
                                       }`}
                                     >
                                       {preset.scaleLabel}
                                     </span>
-                                    <span className="font-mono text-[11px] font-medium text-slate-500">
+                                    <span className="text-[11px] font-medium text-[#4A6B63]">
                                       {preset.sizeLabel}
                                     </span>
                                   </div>
-                                  <p className="mt-2 text-xs font-bold text-slate-900">
+                                  <p className="mt-2 text-xs font-bold text-[#0D2B24]">
                                     {preset.name}
                                   </p>
                                 </div>
-                                <span
-                                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                                    selected
-                                      ? 'border-violet-600 bg-violet-600 text-white'
-                                      : 'border-slate-300 bg-white'
-                                  }`}
-                                >
-                                  {selected && <Check aria-hidden="true" className="h-3 w-3" />}
-                                </span>
                               </div>
-                              <p className="text-xs leading-snug text-slate-600">
+                              <p className="text-xs leading-snug text-[#4A6B63]">
                                 {preset.description}
                               </p>
-                            </button>
+                            </motion.button>
                           )
                         })}
                       </div>
@@ -1594,9 +1568,9 @@ export function FeatureTabs({
                     <div>
                       <label
                         htmlFor="ai-model-url"
-                        className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-800"
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0D2B24]"
                       >
-                        <Globe aria-hidden="true" className="h-3.5 w-3.5 text-violet-600" />
+                        <Globe aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
                         URL File Model (.onnx)
                       </label>
                       <input
@@ -1612,7 +1586,7 @@ export function FeatureTabs({
                           })
                         }
                         placeholder="https://huggingface.co/.../resolve/main/model.onnx"
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-xs text-slate-900 placeholder-slate-400 transition-colors focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/25 disabled:bg-slate-100 disabled:opacity-60"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-[#B5F5DB] bg-white px-3.5 py-2.5 text-xs text-[#0D2B24] placeholder-[#4A6B63]/60 transition-colors focus:border-[#14A085] focus:outline-none focus:ring-2 focus:ring-[#2EC7A4]/30 disabled:bg-[#F4FFFA] disabled:opacity-60"
                       />
                       {!modelUrlValid && (
                         <p className="mt-1.5 text-xs font-medium text-amber-800">
@@ -1627,14 +1601,14 @@ export function FeatureTabs({
                 </details>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div className="rounded-2xl border border-[#E2F3EC] bg-[#F7FFFC] p-4">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="inline-flex items-center gap-1.5 font-bold text-slate-800">
-                        <Clock aria-hidden="true" className="h-3.5 w-3.5 text-violet-600" />
+                      <span className="inline-flex items-center gap-1.5 font-bold text-[#0D2B24]">
+                        <Clock aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
                         Frame Rate Ekstraksi
                       </span>
                       {estimatedFrames !== null && (
-                        <span className="rounded-full bg-violet-100 px-2 py-0.5 font-mono text-[11px] font-bold text-violet-800 tabular-nums">
+                        <span className="rounded-full bg-[#E8FFF5] px-2 py-0.5 text-[11px] font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB] tabular-nums">
                           ±{estimatedFrames} frame
                         </span>
                       )}
@@ -1650,16 +1624,16 @@ export function FeatureTabs({
                             onClick={() =>
                               onAiSettingsChange({ ...aiSettings, targetFps: opt.value })
                             }
-                            className={`min-h-12 cursor-pointer touch-manipulation rounded-xl border px-2 py-2 text-center transition-[border-color,background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                            className={`min-h-12 cursor-pointer touch-manipulation rounded-xl border px-2 py-2 text-center transition-[border-color,background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                               active
-                                ? 'border-violet-500 bg-violet-600 text-white shadow-sm'
-                                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                                ? 'border-[#14A085] bg-[#14A085] text-white shadow-xs'
+                                : 'border-[#E2F3EC] bg-white text-[#0D2B24] hover:border-[#6DE7C1] hover:bg-[#F7FFFC]'
                             }`}
                           >
-                            <div className="font-mono text-xs font-bold">{opt.label}</div>
+                            <div className="text-xs font-bold">{opt.label}</div>
                             <div
                               className={`mt-0.5 text-[10px] ${
-                                active ? 'text-violet-100' : 'text-slate-500'
+                                active ? 'text-[#E8FFF5]' : 'text-[#4A6B63]'
                               }`}
                             >
                               &le;{aiMaxDurationSec * opt.value} fr
@@ -1670,12 +1644,12 @@ export function FeatureTabs({
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-[#E2F3EC] bg-[#F7FFFC] p-4">
                     <div>
-                      <p className="text-xs font-bold text-slate-900">
+                      <p className="text-xs font-bold text-[#0D2B24]">
                         Kunci Output ke 1080p HD
                       </p>
-                      <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                      <p className="mt-1 text-xs leading-relaxed text-[#4A6B63]">
                         Menyesuaikan hasil upscale GPU ke resolusi standar 1080p HD (landscape
                         maupun portrait) yang optimal di semua perangkat.
                       </p>
@@ -1692,12 +1666,14 @@ export function FeatureTabs({
                           normalizeTo1080p: !aiSettings.normalizeTo1080p,
                         })
                       }
-                      className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
-                        aiSettings.normalizeTo1080p ? 'bg-violet-600' : 'bg-slate-300'
+                      className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+                        aiSettings.normalizeTo1080p
+                          ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                          : 'bg-[#B5F5DB]'
                       }`}
                     >
                       <span
-                        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                        className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
                           aiSettings.normalizeTo1080p ? 'translate-x-6' : 'translate-x-1'
                         }`}
                       />
@@ -1706,18 +1682,18 @@ export function FeatureTabs({
                 </div>
 
                 {/* [NEW-02] Toggle Smart Cap + Estimasi Ukuran Hasil Tab 5 (AI / GPU Upscaler) */}
-                <div className="flex flex-col gap-3 border-t border-slate-200/80 pt-4">
-                  <div className="flex items-center justify-between gap-4 rounded-2xl border border-violet-200/80 bg-violet-50/45 p-4">
+                <div className="flex flex-col gap-3 border-t border-[#E2F3EC] pt-4">
+                  <div className="flex items-center justify-between gap-4 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-bold text-slate-900 sm:text-sm">
+                        <span className="text-xs font-bold text-[#0D2B24] sm:text-sm">
                           Batasi Ukuran Hasil (Smart Cap)
                         </span>
-                        <span className="rounded-full bg-violet-100 px-2 py-0.5 font-mono text-[10px] font-bold text-violet-800">
+                        <span className="rounded-full bg-[#B5F5DB] px-2 py-0.5 text-[10px] font-bold text-[#0D6E5D]">
                           {aiSettings.smartSizeCap ? 'CRF 22 • fast + Cap' : 'CRF 19 • Tanpa Cap'}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                      <p className="mt-1 text-xs leading-relaxed text-[#4A6B63]">
                         Membatasi bitrate perakitan MP4 (-maxrate) secara proporsional agar hasil
                         upscale HD tetap jernih tanpa membengkak 6–7× ukuran asli.
                       </p>
@@ -1734,12 +1710,14 @@ export function FeatureTabs({
                           smartSizeCap: !aiSettings.smartSizeCap,
                         })
                       }
-                      className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-2 disabled:opacity-50 ${
-                        aiSettings.smartSizeCap ? 'bg-violet-600' : 'bg-slate-300'
+                      className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                        aiSettings.smartSizeCap
+                          ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                          : 'bg-[#B5F5DB]'
                       }`}
                     >
                       <span
-                        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                        className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
                           aiSettings.smartSizeCap ? 'translate-x-6' : 'translate-x-1'
                         }`}
                       />
@@ -1747,32 +1725,32 @@ export function FeatureTabs({
                   </div>
 
                   {aiSizeEstimate && selectedVideoSizeBytes !== null && (
-                    <div className="grid grid-cols-1 gap-3 rounded-2xl border border-violet-200/80 bg-gradient-to-r from-violet-50/80 via-indigo-50/50 to-white p-4 sm:grid-cols-2 sm:items-center">
+                    <div className="grid grid-cols-1 gap-3 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] p-4 sm:grid-cols-2 sm:items-center">
                       <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-violet-600 ring-1 ring-violet-200">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-[#14A085] ring-1 ring-[#B5F5DB]">
                           <HardDrive aria-hidden="true" className="h-5 w-5" />
                         </div>
                         <div>
-                          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-[#4A6B63]">
                             Ukuran Asli
                           </p>
-                          <p className="font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                          <p className="text-base font-extrabold text-[#0D2B24] tabular-nums">
                             {formatFileSizeMB(selectedVideoSizeBytes)}
                           </p>
                         </div>
                       </div>
-                      <div className="rounded-xl bg-white/95 p-3 ring-1 ring-violet-200/80 sm:text-right">
-                        <p className="text-[11px] font-bold uppercase tracking-wider text-violet-700">
+                      <div className="rounded-xl bg-white p-3 ring-1 ring-[#B5F5DB] sm:text-right">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-[#0D6E5D]">
                           Estimasi Ukuran Hasil (Perkiraan)
                         </p>
-                        <p className="mt-0.5 font-mono text-base font-extrabold text-slate-900 tabular-nums">
+                        <p className="mt-0.5 text-base font-extrabold text-[#0D2B24] tabular-nums">
                           ~{aiSizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
                           {aiSizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
-                          <span className="font-sans text-[11px] font-semibold text-slate-500">
+                          <span className="text-[11px] font-semibold text-[#4A6B63]">
                             (perkiraan)
                           </span>
                         </p>
-                        <p className="mt-0.5 font-mono text-[11px] text-slate-500">
+                        <p className="mt-0.5 text-[11px] text-[#4A6B63]">
                           CRF {aiSettings.smartSizeCap ? '22' : '19'} • {aiSettings.targetFps} fps
                           {aiSizeEstimate.maxRateKbps
                             ? ` • Cap ≤ ${aiSizeEstimate.maxRateKbps}k`
@@ -1780,7 +1758,7 @@ export function FeatureTabs({
                         </p>
                         {aiSizeEstimate.calibrationSamples !== undefined &&
                           aiSizeEstimate.calibrationSamples > 0 && (
-                            <p className="mt-0.5 text-[10px] font-medium text-violet-700">
+                            <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
                               Dikalibrasi dari {aiSizeEstimate.calibrationSamples} proses sebelumnya
                             </p>
                           )}
@@ -1850,9 +1828,11 @@ export function FeatureTabs({
             onLog={onLog}
           />
         )}
-          </>
-        )}
+              </>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
-    </section>
+    </motion.section>
   )
 }

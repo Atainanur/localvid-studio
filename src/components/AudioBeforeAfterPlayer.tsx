@@ -646,27 +646,27 @@ export function AudioBeforeAfterPlayer({
             onEnded={handleAfterEnded}
             className="hidden"
           />
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-fuchsia-200 bg-gradient-to-r from-fuchsia-50 via-white to-emerald-50/60 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] px-4 py-3">
             <div className="flex items-center gap-2.5">
               <span
                 className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white ${
-                  effectiveSource === 'after' ? 'bg-emerald-600' : 'bg-amber-600'
+                  effectiveSource === 'after' ? 'bg-[#14A085]' : 'bg-amber-600'
                 }`}
               >
                 <AudioLines aria-hidden="true" className={`h-4 w-4 ${isPlaying ? 'animate-pulse' : ''}`} />
               </span>
               <div>
-                <p className="text-xs font-bold text-slate-900 sm:text-sm">
+                <p className="text-xs font-bold text-[#0D2B24] sm:text-sm">
                   Perbandingan Gelombang Audio (.MP3 192 kbps)
                 </p>
-                <p className="text-[11px] text-slate-600">
+                <p className="text-[11px] text-[#4A6B63]">
                   Skala puncak dinormalisasi seragam agar perbedaan redaman noise terlihat langsung.
                 </p>
               </div>
             </div>
             <span
               className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold text-white ${
-                effectiveSource === 'after' ? 'bg-emerald-600' : 'bg-amber-600'
+                effectiveSource === 'after' ? 'bg-[#14A085]' : 'bg-amber-600'
               }`}
             >
               <Volume2 aria-hidden="true" className="h-3.5 w-3.5" />
@@ -692,8 +692,8 @@ export function AudioBeforeAfterPlayer({
       )}
 
       {beforeLoadError && (
-        <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs text-slate-600">
-          <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+        <div className="flex items-start gap-2 rounded-xl border border-[#B5F5DB] bg-[#E8FFF5] px-3.5 py-2 text-xs text-[#0D6E5D]">
+          <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[#14A085]" />
           <span>
             Format media asli tidak dapat didekode langsung oleh browser untuk pembanding, sehingga
             hanya Audio Bersih (After) yang dapat diputar.
@@ -718,11 +718,6 @@ export function AudioBeforeAfterPlayer({
               onClick={() => handleSwitchAudioSource('before')}
               className="inline-flex cursor-pointer touch-manipulation items-center gap-2 text-left disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <span
-                className={`h-2.5 w-2.5 rounded-full ${
-                  effectiveSource === 'before' ? 'bg-amber-500 animate-pulse' : 'bg-slate-400'
-                }`}
-              />
               <span className="text-xs font-bold text-slate-800">Before (Audio Asli)</span>
               {effectiveSource === 'before' && (
                 <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold text-white">
@@ -796,11 +791,6 @@ export function AudioBeforeAfterPlayer({
               onClick={() => handleSwitchAudioSource('after')}
               className="inline-flex cursor-pointer touch-manipulation items-center gap-2 text-left"
             >
-              <span
-                className={`h-2.5 w-2.5 rounded-full ${
-                  effectiveSource === 'after' ? 'bg-emerald-600 animate-pulse' : 'bg-emerald-300'
-                }`}
-              />
               <span className="text-xs font-bold text-slate-900">After (Audio Bersih)</span>
               {effectiveSource === 'after' && (
                 <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white">
@@ -887,7 +877,7 @@ export function AudioBeforeAfterPlayer({
               <RotateCcw aria-hidden="true" className="h-4 w-4" />
             </button>
 
-            <span className="rounded-lg bg-white px-2.5 py-1.5 font-mono text-xs font-bold text-slate-700 ring-1 ring-slate-200 tabular-nums">
+            <span className="rounded-lg bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 ring-1 ring-slate-200 tabular-nums">
               {formatDuration(currentTime)} / {formatDuration(duration > 0 ? duration : null)}
             </span>
           </div>

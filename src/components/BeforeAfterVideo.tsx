@@ -197,8 +197,8 @@ export function BeforeAfterVideo({
     return (
       <div className="flex flex-col gap-2.5">
         {beforeLoadError && (
-          <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600">
-            <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+          <div className="flex items-start gap-2 rounded-xl border border-[#B5F5DB] bg-[#E8FFF5] px-3.5 py-2.5 text-xs text-[#0D6E5D]">
+            <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[#14A085]" />
             <span>
               Format video asli tidak dapat diputar langsung di browser untuk perbandingan, jadi
               hanya video hasil yang ditampilkan.
@@ -223,21 +223,21 @@ export function BeforeAfterVideo({
     <div className="flex flex-col gap-3">
       {/* Header Switch Mode Perbandingan */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-bold text-slate-700">
+        <span className="text-xs font-bold text-[#0D6E5D]">
           Perbandingan Before &amp; After
         </span>
         <div
           role="group"
           aria-label="Mode tampilan perbandingan video"
-          className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1"
+          className="inline-flex rounded-xl border border-[#B5F5DB] bg-[#E8FFF5] p-1"
         >
           <button
             type="button"
             onClick={() => setMode('split')}
-            className={`inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
+            className={`inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] ${
               mode === 'split'
-                ? 'bg-white text-blue-700 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'bg-white text-[#0D6E5D] shadow-xs'
+                : 'text-[#4A6B63] hover:text-[#0D2B24]'
             }`}
           >
             <SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5" />
@@ -246,10 +246,10 @@ export function BeforeAfterVideo({
           <button
             type="button"
             onClick={() => setMode('side-by-side')}
-            className={`inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
+            className={`inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] ${
               mode === 'side-by-side'
-                ? 'bg-white text-blue-700 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'bg-white text-[#0D6E5D] shadow-xs'
+                : 'text-[#4A6B63] hover:text-[#0D2B24]'
             }`}
           >
             <Columns2 aria-hidden="true" className="h-3.5 w-3.5" />
@@ -296,10 +296,10 @@ export function BeforeAfterVideo({
           />
 
           {/* Label Before & After */}
-          <span className="pointer-events-none absolute top-3 left-3 rounded-full bg-slate-900/80 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur-sm ring-1 ring-white/20">
+          <span className="pointer-events-none absolute top-3 left-3 rounded-full bg-slate-900/90 px-2.5 py-1 text-[11px] font-bold text-white ring-1 ring-white/20">
             Before (Asli)
           </span>
-          <span className="pointer-events-none absolute top-3 right-3 rounded-full bg-emerald-600/90 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur-sm ring-1 ring-white/25">
+          <span className="pointer-events-none absolute top-3 right-3 rounded-full bg-[#14A085]/95 px-2.5 py-1 text-[11px] font-bold text-white ring-1 ring-white/25">
             {afterLabel}
           </span>
 
@@ -310,7 +310,7 @@ export function BeforeAfterVideo({
             className="pointer-events-none absolute inset-y-0 -translate-x-1/2"
           >
             <div className="h-full w-0.5 bg-white shadow-[0_0_8px_rgba(0,0,0,0.65)]" />
-            <div className="absolute top-1/2 left-1/2 flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white bg-blue-600/95 text-white shadow-lg">
+            <div className="absolute top-1/2 left-1/2 flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white bg-[#14A085] text-white shadow-lg">
               <GripVertical className="h-5 w-5" />
             </div>
           </div>
@@ -370,13 +370,13 @@ export function BeforeAfterVideo({
       )}
 
       {/* Bar Kontrol Pemutar Sinkron (Play/Pause, Seek Timeline, Restart, Mute) */}
-      <div className="flex flex-wrap items-center gap-2.5 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 sm:flex-nowrap">
+      <div className="flex flex-wrap items-center gap-2.5 rounded-2xl border border-[#B5F5DB] bg-[#F7FFFC] px-3.5 py-2.5 sm:flex-nowrap">
         <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => void handleTogglePlay()}
             aria-label={isPlaying ? 'Jeda kedua video' : 'Putar kedua video bersamaan'}
-            className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl bg-blue-600 text-white shadow-xs transition-[background-color,transform] duration-150 hover:bg-blue-700 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+            className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl bg-[#14A085] text-white shadow-xs transition-[background-color,transform] duration-150 hover:bg-[#0D6E5D] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
           >
             {isPlaying ? (
               <Pause aria-hidden="true" className="h-4 w-4 fill-current" />
@@ -389,7 +389,7 @@ export function BeforeAfterVideo({
             type="button"
             onClick={() => void handleRestart()}
             aria-label="Ulangi dari awal"
-            className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+            className="mint-secondary-btn inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
           >
             <RotateCcw aria-hidden="true" className="h-4 w-4" />
           </button>
@@ -397,7 +397,7 @@ export function BeforeAfterVideo({
 
         {/* Timeline Seek Bar Sinkron */}
         <div className="flex min-w-[160px] flex-1 items-center gap-2.5">
-          <span className="shrink-0 font-mono text-xs font-semibold text-slate-600 tabular-nums">
+          <span className="shrink-0 text-xs font-semibold text-[#0D6E5D] tabular-nums">
             {formatDuration(currentTime)}
           </span>
           <input
@@ -408,9 +408,9 @@ export function BeforeAfterVideo({
             value={Math.min(currentTime, duration > 0 ? duration : 1)}
             onChange={handleSeekChange}
             aria-label="Garis waktu sinkron Before dan After"
-            className="h-2 w-full cursor-pointer accent-blue-600"
+            className="h-2 w-full cursor-pointer accent-[#14A085]"
           />
-          <span className="shrink-0 font-mono text-xs font-semibold text-slate-500 tabular-nums">
+          <span className="shrink-0 text-xs font-semibold text-[#4A6B63] tabular-nums">
             {formatDuration(duration > 0 ? duration : null)}
           </span>
         </div>
@@ -419,21 +419,21 @@ export function BeforeAfterVideo({
           type="button"
           onClick={handleToggleMute}
           aria-label={isMuted ? 'Aktifkan suara video hasil' : 'Bisukan suara video hasil'}
-          className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+          className="mint-secondary-btn inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
         >
           {isMuted ? (
             <VolumeX aria-hidden="true" className="h-4 w-4 text-rose-600" />
           ) : (
-            <Volume2 aria-hidden="true" className="h-4 w-4 text-slate-700" />
+            <Volume2 aria-hidden="true" className="h-4 w-4 text-[#0D6E5D]" />
           )}
         </button>
       </div>
 
       {mode === 'split' && (
-        <p className="text-center text-[11px] text-slate-500">
+        <p className="text-center text-[11px] text-[#4A6B63]">
           Geser garis putih ke kiri atau kanan untuk membandingkan detail video{' '}
-          <strong className="font-semibold text-slate-700">Before (Asli)</strong> dan{' '}
-          <strong className="font-semibold text-slate-700">After (Hasil)</strong>.
+          <strong className="font-semibold text-[#0D2B24]">Before (Asli)</strong> dan{' '}
+          <strong className="font-semibold text-[#0D2B24]">After (Hasil)</strong>.
         </p>
       )}
     </div>

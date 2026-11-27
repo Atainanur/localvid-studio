@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, motion, MotionConfig } from 'motion/react'
 import {
   AlertCircle,
   AlertTriangle,
-  Check,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -144,6 +144,36 @@ const DEFAULT_ENHANCE_OPTIONS: EnhanceOptions = {
   scaleAlgorithm: 'bicubic',
   colorFilter: 'none',
   smartSizeCap: true,
+}
+
+const HEADER_TITLE_WORDS = ['LocalVid', 'Studio']
+const HEADER_SUBTITLE_WORDS =
+  'Ubah ekstensi, kompres, jernihkan, filter warna, stabilizer, GPU upscale, bersihkan audio, dan Auto Green Screen langsung di browser, gratis tanpa unggah ke server.'.split(
+    ' ',
+  )
+const HEADER_WORDS_CONTAINER = {
+  hidden: {},
+  visible: {
+    transition: {
+      staggerChildren: 0.05,
+    },
+  },
+}
+const HEADER_WORD_ITEM = {
+  hidden: { opacity: 0, y: 10 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      duration: 0.4,
+      ease: [0.22, 1, 0.36, 1] as const,
+    },
+  },
+}
+const CTA_SPRING = {
+  type: 'spring' as const,
+  stiffness: 420,
+  damping: 30,
 }
 
 interface UndoRemovedStepState {
@@ -312,7 +342,7 @@ export default function App() {
 
   useEffect(() => {
     if (result || batchResultMeta) {
-      featureCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      featureCardRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' })
     }
   }, [result, batchResultMeta])
 
@@ -1140,7 +1170,7 @@ export default function App() {
         `1 video hasil ${completedTabLabel} siap dilanjutkan. Pilih fitur berikutnya di atas.`,
         4500,
       )
-      featureCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      featureCardRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' })
       return
     }
 
@@ -1165,7 +1195,7 @@ export default function App() {
       4500,
     )
     void readMetadataForBatchItems(nextItems, true)
-    featureCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    featureCardRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' })
   }
 
   const handleClearFile = async () => {
@@ -2958,7 +2988,6 @@ export default function App() {
     }
   }
 
-  const isMultiThread = engineMode === 'Multi-Thread'
   const DeviceIcon = deviceType === 'Desktop' ? Monitor : Smartphone
   const displayError = processError ?? engineError
 
@@ -3109,57 +3138,77 @@ export default function App() {
   const step1Done = Boolean(selectedVideo) || isBatchMode
   const step3Done = Boolean(result) || hasBatchResultView
 
-  const ctaGradientClass =
-    activeTab === 'compress'
-      ? 'from-emerald-600 to-teal-600 shadow-[var(--shadow-mint)] focus-visible:ring-emerald-600'
-      : activeTab === 'enhance'
-        ? 'from-orange-500 to-amber-500 shadow-[0_10px_24px_-8px_rgba(234,88,12,0.42)] focus-visible:ring-orange-600'
-        : activeTab === 'stabilize'
-          ? 'from-cyan-600 to-blue-600 shadow-[0_10px_24px_-8px_rgba(8,145,178,0.4)] focus-visible:ring-cyan-600'
-          : activeTab === 'ai-upscale'
-            ? 'from-violet-600 to-indigo-600 shadow-[0_10px_24px_-8px_rgba(124,58,237,0.42)] focus-visible:ring-violet-600'
-            : activeTab === 'audio-denoise'
-              ? 'from-fuchsia-600 to-pink-600 shadow-[0_10px_24px_-8px_rgba(192,38,211,0.42)] focus-visible:ring-fuchsia-600'
-              : activeTab === 'auto-chroma'
-                ? 'from-green-600 to-emerald-600 shadow-[0_10px_24px_-8px_rgba(22,163,74,0.42)] focus-visible:ring-green-600'
-                : 'from-blue-600 to-indigo-600 shadow-[var(--shadow-cta)] focus-visible:ring-blue-600'
+  const pendingRemoveDialogData = (() => {
+    if (!pendingRemoveStepId) return null
+    const idx = pipelineSteps.findIndex((s) => s.id === pendingRemoveStepId)
+    if (idx < 0) return null
+    const targetStep = pipelineSteps[idx]
+    const dependentNames = pipelineSteps
+      .slice(idx + 1)
+      .map((s) => s.tabLabel)
+      .join(', ')
+    return { targetStep, dependentNames }
+  })()
 
   return (
-    <div className="studio-backdrop min-h-dvh text-slate-900 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <MotionConfig reducedMotion="user">
+    <div className="studio-backdrop min-h-dvh text-[#0D2B24] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Skip link untuk navigasi keyboard */}
       <a
         href="#studio-workspace"
-        className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:rounded-xl focus:bg-blue-600 focus:px-4 focus:py-2.5 focus:text-sm focus:font-bold focus:text-white focus:shadow-lg"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:rounded-xl focus:bg-[#0D6E5D] focus:px-4 focus:py-2.5 focus:text-sm focus:font-bold focus:text-white focus:shadow-lg"
       >
         Langsung ke ruang kerja video
       </a>
 
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-5 sm:gap-6 sm:px-6 sm:py-8">
-        {/* Header Studio Cerah, Segar, & Profesional + Watermark Halus Pembuat */}
-        <header className="bento-card rounded-3xl bg-white/90 p-4 backdrop-blur-md sm:p-6">
+        {/* Header Studio Mint-Emerald Bersih & Profesional + Watermark Halus Pembuat */}
+        <header className="bento-card rounded-3xl bg-white p-4 sm:p-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3.5">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 via-sky-500 to-orange-400 text-white shadow-md shadow-blue-500/25">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#2EC7A4] to-[#0D6E5D] text-white shadow-md shadow-[#0D6E5D]/20">
                 <Film aria-hidden="true" className="h-6 w-6 stroke-[2.2]" />
               </div>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-balance text-xl font-extrabold tracking-tight text-slate-900 sm:text-2xl">
-                    LocalVid Studio
-                  </h1>
-                  <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-bold text-orange-700 ring-1 ring-orange-200">
-                    <Sparkles aria-hidden="true" className="h-3 w-3" />
+                  <motion.h1
+                    variants={HEADER_WORDS_CONTAINER}
+                    initial="hidden"
+                    animate="visible"
+                    className="text-balance text-xl font-extrabold tracking-tight text-[#0D2B24] sm:text-2xl"
+                  >
+                    {HEADER_TITLE_WORDS.map((word, idx) => (
+                      <Fragment key={`${word}-${idx}`}>
+                        <motion.span variants={HEADER_WORD_ITEM} className="inline-block">
+                          {word}
+                        </motion.span>
+                        {idx < HEADER_TITLE_WORDS.length - 1 ? ' ' : null}
+                      </Fragment>
+                    ))}
+                  </motion.h1>
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-[#B5F5DB] bg-[#E8FFF5] px-2.5 py-0.5 text-xs font-bold text-[#0D6E5D]">
+                    <Sparkles aria-hidden="true" className="h-3 w-3 text-[#14A085]" />
                     100% Client-Side
                   </span>
-                  <span className="whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200/80">
+                  <span className="whitespace-nowrap rounded-full border border-[#E2F3EC] bg-[#F7FFFC] px-2.5 py-0.5 text-[11px] font-semibold text-[#4A6B63]">
                     by Atainanur
                   </span>
                 </div>
-                <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-600 sm:text-sm">
-                  Ubah ekstensi, kompres, jernihkan, filter warna, stabilizer, GPU upscale,
-                  bersihkan audio, dan Auto Green Screen langsung di browser, gratis tanpa unggah ke
-                  server.
-                </p>
+                <motion.p
+                  variants={HEADER_WORDS_CONTAINER}
+                  initial="hidden"
+                  animate="visible"
+                  className="mt-1 max-w-xl text-xs leading-relaxed text-[#4A6B63] sm:text-sm"
+                >
+                  {HEADER_SUBTITLE_WORDS.map((word, idx) => (
+                    <Fragment key={`${word}-${idx}`}>
+                      <motion.span variants={HEADER_WORD_ITEM} className="inline-block">
+                        {word}
+                      </motion.span>
+                      {idx < HEADER_SUBTITLE_WORDS.length - 1 ? ' ' : null}
+                    </Fragment>
+                  ))}
+                </motion.p>
               </div>
             </div>
 
@@ -3170,18 +3219,8 @@ export default function App() {
                 onClick={() => setShowSystemInfo((prev) => !prev)}
                 aria-expanded={showSystemInfo}
                 title={`Mode ${engineMode} (${corePackage}, ${recommendedThreads} thread) • ${deviceType}`}
-                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-2 whitespace-nowrap rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-700 transition-colors duration-150 hover:border-slate-300 hover:bg-white hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-2 whitespace-nowrap rounded-full border border-[#6DE7C1] bg-[#E8FFF5] px-4 py-2 text-xs font-semibold text-[#0D6E5D] transition-colors duration-150 hover:border-[#14A085] hover:bg-white hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
               >
-                {isPreparingIsolation || isBusy ? (
-                  <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin text-blue-600" />
-                ) : (
-                  <span
-                    aria-hidden="true"
-                    className={`h-2.5 w-2.5 rounded-full ${
-                      isMultiThread ? 'bg-emerald-500' : 'bg-amber-500'
-                    }`}
-                  />
-                )}
                 <span>
                   {isPreparingIsolation
                     ? 'Menyiapkan...'
@@ -3190,56 +3229,64 @@ export default function App() {
                       : 'Engine Siap'}
                 </span>
                 {showSystemInfo ? (
-                  <ChevronUp aria-hidden="true" className="h-3.5 w-3.5 text-slate-500" />
+                  <ChevronUp aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
                 ) : (
-                  <ChevronDown aria-hidden="true" className="h-3.5 w-3.5 text-slate-500" />
+                  <ChevronDown aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
                 )}
               </button>
             </div>
           </div>
 
           {/* Info Diagnostik Perangkat Ringkas (Collapsible) */}
-          {showSystemInfo && (
-            <div className="animate-lv-fade-up mt-4 grid grid-cols-1 gap-2.5 border-t border-slate-200/80 pt-4 text-xs sm:grid-cols-3">
-              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/80 px-3.5 py-2.5">
-                <span className="inline-flex items-center gap-1.5 font-medium text-slate-600">
+          <AnimatePresence initial={false}>
+            {showSystemInfo && (
+              <motion.div
+                key="system-info-popover"
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                className="mt-4 grid grid-cols-1 gap-2.5 border-t border-[#E2F3EC] pt-4 text-xs sm:grid-cols-3"
+              >
+              <div className="flex items-center justify-between rounded-xl border border-[#E2F3EC] bg-[#F7FFFC] px-3.5 py-2.5">
+                <span className="inline-flex items-center gap-1.5 font-medium text-[#4A6B63]">
                   {crossOriginIsolated ? (
-                    <ShieldCheck aria-hidden="true" className="h-4 w-4 text-emerald-600" />
+                    <ShieldCheck aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
                   ) : (
                     <ShieldAlert aria-hidden="true" className="h-4 w-4 text-rose-600" />
                   )}
                   crossOriginIsolated
                 </span>
                 <span
-                  className={`font-mono font-bold ${
-                    crossOriginIsolated ? 'text-emerald-700' : 'text-rose-700'
+                  className={`font-bold ${
+                    crossOriginIsolated ? 'text-[#0D6E5D]' : 'text-rose-700'
                   }`}
                 >
                   {String(crossOriginIsolated)}
                 </span>
               </div>
 
-              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/80 px-3.5 py-2.5">
-                <span className="inline-flex items-center gap-1.5 font-medium text-slate-600">
-                  <DeviceIcon aria-hidden="true" className="h-4 w-4 text-blue-600" />
+              <div className="flex items-center justify-between rounded-xl border border-[#E2F3EC] bg-[#F7FFFC] px-3.5 py-2.5">
+                <span className="inline-flex items-center gap-1.5 font-medium text-[#4A6B63]">
+                  <DeviceIcon aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
                   Perangkat
                 </span>
-                <span className="font-mono font-semibold text-slate-800">
+                <span className="font-semibold text-[#0D2B24]">
                   {deviceInfo.platformLabel}
                 </span>
               </div>
 
-              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/80 px-3.5 py-2.5">
-                <span className="inline-flex items-center gap-1.5 font-medium text-slate-600">
-                  <Cpu aria-hidden="true" className="h-4 w-4 text-violet-600" />
+              <div className="flex items-center justify-between rounded-xl border border-[#E2F3EC] bg-[#F7FFFC] px-3.5 py-2.5">
+                <span className="inline-flex items-center gap-1.5 font-medium text-[#4A6B63]">
+                  <Cpu aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
                   WebGPU
                 </span>
                 <span
-                  className={`font-mono font-bold ${
+                  className={`font-bold ${
                     webgpu.status === 'supported'
-                      ? 'text-emerald-700'
+                      ? 'text-[#0D6E5D]'
                       : webgpu.status === 'checking'
-                        ? 'text-slate-500'
+                        ? 'text-[#4A6B63]'
                         : 'text-amber-700'
                   }`}
                 >
@@ -3251,26 +3298,26 @@ export default function App() {
                 </span>
               </div>
 
-              <div className="sm:col-span-3 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500">
+              <div className="sm:col-span-3 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-[#4A6B63]">
                 <span>
                   Mode:{' '}
-                  <strong className="font-semibold text-slate-700">{engineMode}</strong> • Core:{' '}
-                  <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-700">
+                  <strong className="font-semibold text-[#0D2B24]">{engineMode}</strong> • Core:{' '}
+                  <code className="rounded bg-[#E8FFF5] px-1.5 py-0.5 text-[#0D6E5D]">
                     {corePackage}
                   </code>{' '}
                   • Threads:{' '}
-                  <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-700">
+                  <code className="rounded bg-[#E8FFF5] px-1.5 py-0.5 text-[#0D6E5D]">
                     -threads {recommendedThreads}
                   </code>{' '}
                   • SharedArrayBuffer:{' '}
-                  <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-700">
+                  <code className="rounded bg-[#E8FFF5] px-1.5 py-0.5 text-[#0D6E5D]">
                     {isolationInfo.sharedArrayBufferAvailable ? 'Aktif' : 'Nonaktif'}
                   </code>
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
                   <span>
                     Status:{' '}
-                    <strong className={isLoaded ? 'text-emerald-700' : 'text-slate-700'}>
+                    <strong className={isLoaded ? 'text-[#0D6E5D]' : 'text-[#0D2B24]'}>
                       {isLoaded ? 'Aktif di Memori' : 'Siap Dimuat Otomatis'}
                     </strong>
                   </span>
@@ -3280,22 +3327,23 @@ export default function App() {
                       setShowSystemInfo(false)
                       setLogOpenTrigger((n) => n + 1)
                     }}
-                    className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+                    className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085]"
                   >
-                    <Terminal aria-hidden="true" className="h-3.5 w-3.5 text-slate-600" />
+                    <Terminal aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
                     <span>Buka Log Teknis FFmpeg</span>
                   </button>
                 </div>
               </div>
-            </div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </header>
 
         {/* [UX #22] Orientasi 3 Langkah Ringkas: tampil sebelum upload saja agar ruang kerja tetap tenang */}
         {!step1Done && (
           <ol
             aria-label="Tahapan olah video"
-            className="grid grid-cols-3 gap-2 rounded-2xl border border-slate-200/80 bg-white/80 p-2 text-xs shadow-xs backdrop-blur-sm"
+            className="grid grid-cols-3 gap-2 rounded-2xl border border-[#B5F5DB] bg-white p-2 text-xs shadow-[0_8px_24px_-14px_rgba(13,110,93,0.14)]"
           >
             {[
               { num: 1, label: 'Pilih Video', done: step1Done, active: !step1Done },
@@ -3305,23 +3353,21 @@ export default function App() {
               <li
                 key={step.num}
                 className={`flex items-center justify-center gap-2 rounded-xl px-2 py-2 font-semibold transition-colors ${
-                  step.done
-                    ? 'bg-emerald-50 text-emerald-800'
-                    : step.active
-                      ? 'bg-blue-50 text-blue-800'
-                      : 'text-slate-500'
+                  step.done || step.active
+                    ? 'bg-[#E8FFF5] text-[#0D6E5D]'
+                    : 'text-[#4A6B63]'
                 }`}
               >
                 <span
-                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-mono text-[11px] font-bold ${
+                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
                     step.done
-                      ? 'bg-emerald-600 text-white'
+                      ? 'bg-[#0D6E5D] text-white'
                       : step.active
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-slate-200 text-slate-600'
+                        ? 'bg-[#14A085] text-white'
+                        : 'bg-[#E2F3EC] text-[#4A6B63]'
                   }`}
                 >
-                  {step.done ? <Check aria-hidden="true" className="h-3 w-3" /> : step.num}
+                  {step.num}
                 </span>
                 <span className="truncate">{step.label}</span>
               </li>
@@ -3354,57 +3400,17 @@ export default function App() {
           />
 
           {/* [BUG-26NOV-04a] Konfirmasi Inline (alertdialog) saat Reset Semua Efek ke Video Asli */}
-          {pendingResetAll && pipelineSteps.length > 0 && (
-            <div
-              role="alertdialog"
-              aria-label="Konfirmasi reset ke video asli"
-              className="animate-lv-fade-up flex flex-col gap-3 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3.5 text-xs leading-relaxed text-rose-950 shadow-xs sm:flex-row sm:items-center sm:justify-between sm:text-sm"
-            >
-              <div className="flex items-start gap-2.5">
-                <AlertTriangle
-                  aria-hidden="true"
-                  className="mt-0.5 h-4 w-4 shrink-0 text-rose-600"
-                />
-                <span>
-                  Menghapus semua{' '}
-                  <strong className="font-bold">{pipelineSteps.length} efek</strong> dan kembali ke
-                  video asli? Lanjutkan?
-                </span>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  disabled={isBusy}
-                  onClick={() => void executeRevertToOriginal()}
-                  className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-2xs transition-colors hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1 disabled:opacity-50"
-                >
-                  <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
-                  <span>Ya, Reset Semua</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPendingResetAll(false)}
-                  className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
-                >
-                  Batal
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Konfirmasi Inline Ringan saat Menghapus Tahap Tengah / Awal yang Memiliki Tahap Lanjutan */}
-          {(() => {
-            if (!pendingRemoveStepId) return null
-            const idx = pipelineSteps.findIndex((s) => s.id === pendingRemoveStepId)
-            if (idx < 0) return null
-            const targetStep = pipelineSteps[idx]
-            const dependentSteps = pipelineSteps.slice(idx + 1)
-            const dependentNames = dependentSteps.map((s) => s.tabLabel).join(', ')
-            return (
-              <div
+          <AnimatePresence initial={false}>
+            {pendingResetAll && pipelineSteps.length > 0 && (
+              <motion.div
+                key="confirm-reset-all"
                 role="alertdialog"
-                aria-label="Konfirmasi hapus efek"
-                className="animate-lv-fade-up flex flex-col gap-3 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3.5 text-xs leading-relaxed text-rose-950 shadow-xs sm:flex-row sm:items-center sm:justify-between sm:text-sm"
+                aria-label="Konfirmasi reset ke video asli"
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                className="flex flex-col gap-3 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3.5 text-xs leading-relaxed text-rose-950 shadow-xs sm:flex-row sm:items-center sm:justify-between sm:text-sm"
               >
                 <div className="flex items-start gap-2.5">
                   <AlertTriangle
@@ -3412,16 +3418,65 @@ export default function App() {
                     className="mt-0.5 h-4 w-4 shrink-0 text-rose-600"
                   />
                   <span>
-                    Menghapus efek <strong className="font-bold">{targetStep.tabLabel}</strong> juga
-                    akan menghapus tahap sesudahnya ({dependentNames}) karena urutannya bergantung
-                    pada hasil ini. Lanjutkan?
+                    Menghapus semua{' '}
+                    <strong className="font-bold">{pipelineSteps.length} efek</strong> dan kembali ke
+                    video asli? Lanjutkan?
                   </span>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <button
                     type="button"
                     disabled={isBusy}
-                    onClick={() => void executeRemoveStep(targetStep.id)}
+                    onClick={() => void executeRevertToOriginal()}
+                    className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-2xs transition-colors hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1 disabled:opacity-50"
+                  >
+                    <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
+                    <span>Ya, Reset Semua</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingResetAll(false)}
+                    className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+                  >
+                    Batal
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Konfirmasi Inline Ringan saat Menghapus Tahap Tengah / Awal yang Memiliki Tahap Lanjutan */}
+          <AnimatePresence initial={false}>
+            {pendingRemoveDialogData && (
+              <motion.div
+                key={`confirm-remove-${pendingRemoveDialogData.targetStep.id}`}
+                role="alertdialog"
+                aria-label="Konfirmasi hapus efek"
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                className="flex flex-col gap-3 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3.5 text-xs leading-relaxed text-rose-950 shadow-xs sm:flex-row sm:items-center sm:justify-between sm:text-sm"
+              >
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle
+                    aria-hidden="true"
+                    className="mt-0.5 h-4 w-4 shrink-0 text-rose-600"
+                  />
+                  <span>
+                    Menghapus efek{' '}
+                    <strong className="font-bold">
+                      {pendingRemoveDialogData.targetStep.tabLabel}
+                    </strong>{' '}
+                    juga akan menghapus tahap sesudahnya ({pendingRemoveDialogData.dependentNames})
+                    karena urutannya bergantung pada hasil ini. Lanjutkan?
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => void executeRemoveStep(pendingRemoveDialogData.targetStep.id)}
                     className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-2xs transition-colors hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1 disabled:opacity-50"
                   >
                     <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
@@ -3435,46 +3490,53 @@ export default function App() {
                     Batal
                   </button>
                 </div>
-              </div>
-            )
-          })()}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Banner/Toast Notifikasi Tipis saat Melanjutkan atau Menghapus Efek (+ Tombol Undo 5 Detik) */}
-          {chainNotice && (
-            <div
-              role="status"
-              aria-live="polite"
-              className="animate-lv-fade-up flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/95 px-4 py-2.5 text-xs font-semibold text-emerald-900 shadow-xs sm:flex-nowrap sm:text-sm"
-            >
-              <div className="flex min-w-0 items-center gap-2.5">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white">
-                  <Check aria-hidden="true" className="h-3.5 w-3.5" />
-                </span>
-                <span className="break-words">{chainNotice}</span>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {undoRemovedStep && (
+          <AnimatePresence initial={false}>
+            {chainNotice && (
+              <motion.div
+                key="chain-notice-toast"
+                role="status"
+                aria-live="polite"
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                className="flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-[#6DE7C1] bg-[#E8FFF5] px-4 py-2.5 text-xs font-semibold text-[#0D2B24] shadow-xs sm:flex-nowrap sm:text-sm"
+              >
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[#14A085] text-white">
+                    <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="break-words">{chainNotice}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {undoRemovedStep && (
+                    <button
+                      type="button"
+                      disabled={isBusy}
+                      onClick={() => void handleUndoRemoveStep()}
+                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold shadow-2xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:opacity-50"
+                    >
+                      <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
+                      <span>Undo / Batalkan</span>
+                    </button>
+                  )}
                   <button
                     type="button"
-                    disabled={isBusy}
-                    onClick={() => void handleUndoRemoveStep()}
-                    className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl border border-emerald-400 bg-white px-3.5 py-2 text-xs font-bold text-emerald-900 shadow-2xs transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:opacity-50"
+                    onClick={dismissChainNotice}
+                    aria-label="Tutup notifikasi alur edit"
+                    className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl text-[#0D6E5D] transition-colors hover:bg-[#B5F5DB]/70 hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085]"
                   >
-                    <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
-                    <span>Undo / Batalkan</span>
+                    <X aria-hidden="true" className="h-4 w-4" />
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={dismissChainNotice}
-                  aria-label="Tutup notifikasi alur edit"
-                  className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl text-emerald-700 transition-colors hover:bg-emerald-100 hover:text-emerald-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
-                >
-                  <X aria-hidden="true" className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* 2. Tujuh Tab Fitur Utama (Pusat Navigasi Tambah, Ubah, & Hapus Efek + Clean Result View) */}
           <div ref={featureCardRef} className="scroll-mt-4">
@@ -3573,14 +3635,14 @@ export default function App() {
             <section aria-label="Eksekusi dan progres pemrosesan" className="flex flex-col gap-3">
               {/* [BUG-09] Ringkasan singkat opsi aktif tepat di atas tombol proses pada Tab 3 */}
               {activeTab === 'enhance' && (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200/90 bg-white/90 px-4 py-2.5 text-xs">
-                  <span className="font-bold text-slate-700">Ringkasan opsi aktif:</span>
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#B5F5DB] bg-white px-4 py-2.5 text-xs">
+                  <span className="font-bold text-[#0D6E5D]">Ringkasan opsi aktif:</span>
                   {enhanceActiveSummaryItems.length > 0 ? (
                     <div className="flex flex-wrap items-center gap-1.5">
                       {enhanceActiveSummaryItems.map((item) => (
                         <span
                           key={item}
-                          className="rounded-full bg-orange-50 px-2.5 py-0.5 font-semibold text-orange-800 ring-1 ring-orange-200"
+                          className="rounded-full bg-[#E8FFF5] px-2.5 py-0.5 font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]"
                         >
                           {item}
                         </span>
@@ -3597,13 +3659,13 @@ export default function App() {
 
               {/* Ringkasan singkat parameter aktif tepat di atas tombol aksi Tab 6 (Bersihkan Audio) */}
               {activeTab === 'audio-denoise' && (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-fuchsia-200/90 bg-white/90 px-4 py-2.5 text-xs">
-                  <span className="font-bold text-slate-700">Ringkasan filter aktif:</span>
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#B5F5DB] bg-white px-4 py-2.5 text-xs">
+                  <span className="font-bold text-[#0D6E5D]">Ringkasan filter aktif:</span>
                   <div className="flex flex-wrap items-center gap-1.5">
                     {audioDenoiseSummaryItems.map((item) => (
                       <span
                         key={item}
-                        className="rounded-full bg-fuchsia-50 px-2.5 py-0.5 font-semibold text-fuchsia-800 ring-1 ring-fuchsia-200"
+                        className="rounded-full bg-[#E8FFF5] px-2.5 py-0.5 font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]"
                       >
                         {item}
                       </span>
@@ -3614,13 +3676,13 @@ export default function App() {
 
               {/* Ringkasan singkat parameter aktif tepat di atas tombol aksi Tab 7 (Auto Green Screen) */}
               {activeTab === 'auto-chroma' && (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-green-200/90 bg-white/90 px-4 py-2.5 text-xs">
-                  <span className="font-bold text-slate-700">Ringkasan Auto Green Screen:</span>
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#B5F5DB] bg-white px-4 py-2.5 text-xs">
+                  <span className="font-bold text-[#0D6E5D]">Ringkasan Auto Green Screen:</span>
                   <div className="flex flex-wrap items-center gap-1.5">
                     {chromaSummaryItems.map((item) => (
                       <span
                         key={item}
-                        className="rounded-full bg-green-50 px-2.5 py-0.5 font-semibold text-green-800 ring-1 ring-green-200"
+                        className="rounded-full bg-[#E8FFF5] px-2.5 py-0.5 font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]"
                       >
                         {item}
                       </span>
@@ -3669,11 +3731,13 @@ export default function App() {
               )}
 
               <div className="flex flex-col gap-2.5 sm:flex-row">
-                <button
+                <motion.button
                   type="button"
                   onClick={() => void (isBatchMode ? handleProcessBatch() : handleProcessVideo())}
                   disabled={!canStartProcess}
-                  className={`inline-flex min-h-14 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r px-6 py-3.5 text-sm font-bold text-white transition-[transform,filter,box-shadow] duration-150 hover:brightness-105 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-none disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none sm:text-base ${ctaGradientClass}`}
+                  whileTap={canStartProcess ? { scale: 0.98 } : undefined}
+                  transition={CTA_SPRING}
+                  className="mint-cta-btn inline-flex min-h-14 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2.5 rounded-2xl px-6 py-3.5 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed sm:text-base"
                 >
                   {isBusy ? (
                     <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />
@@ -3681,7 +3745,7 @@ export default function App() {
                     <Play aria-hidden="true" className="h-5 w-5 fill-current" />
                   )}
                   <span className="truncate">{actionButtonLabel}</span>
-                </button>
+                </motion.button>
 
                 {isBusy && isBatchRunning ? (
                   <div className="flex flex-col gap-2 sm:flex-row">
@@ -3720,7 +3784,7 @@ export default function App() {
               </div>
 
               {isSeparateMp3Export && !isBusy && !nativeFormatWarning ? (
-                <p className="text-center text-xs font-medium text-fuchsia-800">
+                <p className="text-center text-xs font-medium text-[#0D6E5D]">
                   Ekspor MP3 dibuat terpisah dan tidak mengganti stage video di rantai edit.
                 </p>
               ) : (
@@ -3728,9 +3792,9 @@ export default function App() {
                 activeTabStep &&
                 !isBusy &&
                 !nativeFormatWarning && (
-                  <p className="text-center text-xs text-slate-500">
+                  <p className="text-center text-xs text-[#4A6B63]">
                     Akan mengganti hasil{' '}
-                    <strong className="font-semibold text-slate-700">
+                    <strong className="font-semibold text-[#0D6E5D]">
                       {FEATURE_TAB_LABELS[activeTab]}
                     </strong>{' '}
                     sebelumnya tanpa menumpuk efek ganda.
@@ -3759,21 +3823,21 @@ export default function App() {
                 >
                   {/* Header & Progres Global Antrean Multi-Video */}
                   {isBatchRunning && batchActiveItemIndex >= 0 && (
-                    <div className="mb-3.5 rounded-xl border border-blue-200/80 bg-blue-50/70 p-3">
+                    <div className="mb-3.5 rounded-xl border border-[#B5F5DB] bg-[#E8FFF5] p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                        <span className="inline-flex min-w-0 items-center gap-1.5 font-extrabold text-blue-950">
-                          <Layers aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+                        <span className="inline-flex min-w-0 items-center gap-1.5 font-extrabold text-[#0D2B24]">
+                          <Layers aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#14A085]" />
                           <span className="whitespace-nowrap">
                             Memproses Video {batchActiveItemIndex + 1} dari {batchItems.length}
                           </span>
                         </span>
-                        <span className="font-mono font-bold text-blue-700 tabular-nums">
+                        <span className="font-bold text-[#0D6E5D] tabular-nums">
                           Total {batchProgressStats.overallPercent}%
                         </span>
                       </div>
 
                       {batchProgressStats.activeItem && (
-                        <p className="mt-1 truncate text-xs font-semibold text-slate-700">
+                        <p className="mt-1 truncate text-xs font-semibold text-[#4A6B63]">
                           File aktif: {batchProgressStats.activeItem.file.name}
                         </p>
                       )}
@@ -3784,10 +3848,10 @@ export default function App() {
                         aria-valuemax={100}
                         aria-valuenow={batchProgressStats.overallPercent}
                         aria-label="Progres total antrean multi-video"
-                        className="mt-2 h-2 w-full overflow-hidden rounded-full bg-blue-100 ring-1 ring-inset ring-blue-200/80"
+                        className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[#B5F5DB]"
                       >
                         <div
-                          className="h-full rounded-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-[width] duration-200 ease-linear"
+                          className="mint-progress-fill h-full rounded-full transition-[width] duration-200 ease-linear"
                           style={{
                             width: `${batchProgressStats.overallPercent}%`,
                             minWidth: batchProgressStats.overallPercent > 0 ? '6px' : undefined,
@@ -3795,7 +3859,7 @@ export default function App() {
                         />
                       </div>
 
-                      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-medium text-slate-600">
+                      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-medium text-[#4A6B63]">
                         <span>
                           {batchProgressStats.doneCount} selesai •{' '}
                           {batchProgressStats.processingCount} diproses •{' '}
@@ -3807,10 +3871,10 @@ export default function App() {
                       </div>
 
                       {isWakeLockActive ? (
-                        <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-white/85 px-2.5 py-1.5 text-[11px] leading-relaxed font-medium text-blue-900 ring-1 ring-blue-200/70">
+                        <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-[11px] leading-relaxed font-medium text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
                           <SunMedium
                             aria-hidden="true"
-                            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500"
+                            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#14A085]"
                           />
                           <span>
                             Layar dijaga tetap menyala. Jangan tutup browser sampai semua video
@@ -3819,10 +3883,10 @@ export default function App() {
                         </p>
                       ) : (
                         batchWakeLockFallbackNotice && (
-                          <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-white/85 px-2.5 py-1.5 text-[11px] leading-relaxed font-medium text-slate-700 ring-1 ring-slate-200/80">
+                          <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-[11px] leading-relaxed font-medium text-[#4A6B63] ring-1 ring-[#E2F3EC]">
                             <SunMedium
                               aria-hidden="true"
-                              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500"
+                              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#4A6B63]"
                             />
                             <span>
                               Wake Lock tidak didukung browser ini. Jaga layar tetap menyala sampai
@@ -3836,7 +3900,7 @@ export default function App() {
 
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm">
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="truncate font-bold text-slate-800">
+                      <span className="truncate font-bold text-[#0D2B24]">
                         {activeFrameProgress?.label ||
                           (isProcessing && !hasExpectedDuration && ffmpegCurrentFrame !== null
                             ? `Memproses frame ke-${ffmpegCurrentFrame}...`
@@ -3844,19 +3908,13 @@ export default function App() {
                               (isLoaded && displayedPercent === 100 ? 'Selesai' : 'Memproses...'))}
                       </span>
                       {activeFrameProgress && activeFrameProgress.totalFrames > 0 && (
-                        <span
-                          className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-0.5 font-mono text-xs font-bold tabular-nums ${
-                            chromaFrameProgress
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-violet-100 text-violet-800'
-                          }`}
-                        >
+                        <span className="shrink-0 whitespace-nowrap rounded-full bg-[#E8FFF5] px-2.5 py-0.5 text-xs font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB] tabular-nums">
                           Frame {activeFrameProgress.currentFrame} /{' '}
                           {activeFrameProgress.totalFrames}
                         </span>
                       )}
                     </div>
-                    <span className="shrink-0 font-mono font-bold text-blue-700 tabular-nums">
+                    <span className="shrink-0 font-bold text-[#0D6E5D] tabular-nums">
                       {isIndeterminateProgress
                         ? isLoadingEngine || isPreparing
                           ? 'Menyiapkan...'
@@ -3872,13 +3930,13 @@ export default function App() {
                     aria-valuemax={100}
                     aria-valuenow={isIndeterminateProgress ? undefined : displayedPercent}
                     aria-label="Progres pemrosesan video"
-                    className="mt-3 h-3 w-full overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-200/80"
+                    className="mt-3 h-3 w-full overflow-hidden rounded-full bg-[#B5F5DB]"
                   >
                     {isIndeterminateProgress ? (
-                      <div className="animate-lv-indeterminate h-full w-2/5 rounded-full bg-gradient-to-r from-blue-500 via-sky-400 to-indigo-500" />
+                      <div className="animate-lv-indeterminate mint-progress-fill h-full w-2/5 rounded-full" />
                     ) : (
                       <div
-                        className="h-full rounded-full bg-gradient-to-r from-blue-600 via-sky-500 to-emerald-500 transition-[width] duration-150 ease-linear"
+                        className="mint-progress-fill h-full rounded-full transition-[width] duration-150 ease-linear"
                         style={{
                           width: `${displayedPercent}%`,
                           minWidth: displayedPercent > 0 ? '6px' : undefined,
@@ -3889,9 +3947,8 @@ export default function App() {
 
                   {/* [BUG-07] Indikator liveness frame/waktu terakhir & peringatan macet 30 detik */}
                   {isBusy && (
-                    <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
-                      <span className="inline-flex items-center gap-1.5 font-mono tabular-nums">
-                        <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#4A6B63]">
+                      <span className="inline-flex items-center gap-1.5 tabular-nums">
                         {activeFrameProgress && activeFrameProgress.totalFrames > 0 ? (
                           <span>
                             Frame terakhir: {activeFrameProgress.currentFrame} /{' '}
@@ -3920,7 +3977,7 @@ export default function App() {
                         )}
                       </span>
                       {idleSeconds >= 5 && idleSeconds < 30 && (
-                        <span className="font-mono text-slate-400 tabular-nums">
+                        <span className="text-slate-400 tabular-nums">
                           Menunggu frame berikutnya ({idleSeconds} dtk)
                         </span>
                       )}
@@ -3946,7 +4003,7 @@ export default function App() {
                         />
                         <span>
                           Tidak ada kemajuan selama{' '}
-                          <strong className="font-mono">{idleSeconds}</strong> detik, periksa{' '}
+                          <strong >{idleSeconds}</strong> detik, periksa{' '}
                           <strong className="font-bold">Log Teknis FFmpeg</strong> di bawah atau{' '}
                           {isBatchRunning
                             ? 'lewati video ini / batalkan antrean.'
@@ -3995,7 +4052,7 @@ export default function App() {
                       <p className="font-semibold text-rose-900">{displayError}</p>
                       {pinnedLogSummary.firstError &&
                         pinnedLogSummary.firstError !== displayError && (
-                          <p className="mt-1 font-mono text-[11px] leading-snug text-rose-800/90 [overflow-wrap:anywhere]">
+                          <p className="mt-1 text-[11px] leading-snug text-rose-800/90 [overflow-wrap:anywhere]">
                             Penyebab: {pinnedLogSummary.firstError}
                           </p>
                         )}
@@ -4008,10 +4065,7 @@ export default function App() {
                       className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-300 bg-white px-3.5 py-2 text-xs font-bold text-rose-800 transition-colors hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600"
                     >
                       {copiedErrorDetails ? (
-                        <>
-                          <Check aria-hidden="true" className="h-3.5 w-3.5 text-emerald-600" />
-                          <span>Detail Error Tersalin</span>
-                        </>
+                        <span className="text-[#0D6E5D]">Detail Error Tersalin</span>
                       ) : (
                         <>
                           <Copy aria-hidden="true" className="h-3.5 w-3.5" />
@@ -4022,7 +4076,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setLogOpenTrigger((n) => n + 1)}
-                      className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085]"
                     >
                       <Terminal aria-hidden="true" className="h-3.5 w-3.5" />
                       <span>Buka Log Teknis</span>
@@ -4044,9 +4098,9 @@ export default function App() {
         </main>
 
         {/* Footer dengan Credit Pembuat Atainanur */}
-        <footer className="flex flex-col gap-2 rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-4 text-xs text-slate-600 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <footer className="flex flex-col gap-2 rounded-2xl border border-[#B5F5DB] bg-white px-4 py-4 text-xs text-[#4A6B63] shadow-[0_8px_24px_-14px_rgba(13,110,93,0.12)] sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#B5F5DB] bg-[#E8FFF5] text-[#0D6E5D]">
               <Lock aria-hidden="true" className="h-3.5 w-3.5" />
             </span>
             <span className="font-medium">
@@ -4054,11 +4108,12 @@ export default function App() {
               pada hasil unduhan.
             </span>
           </div>
-          <span className="font-mono font-semibold text-slate-600 sm:whitespace-nowrap">
+          <span className="font-semibold text-[#0D6E5D] sm:whitespace-nowrap">
             LocalVid Studio • Open-Source • Created by Atainanur
           </span>
         </footer>
       </div>
     </div>
+    </MotionConfig>
   )
 }
