@@ -23,6 +23,7 @@ import {
   UserSquare2,
   Video,
 } from 'lucide-react'
+import { shareFilesWithPromoCaption } from '../utils/promoShare'
 import {
   canShareVideoFile,
   formatDuration,
@@ -53,6 +54,7 @@ interface ResultPreviewProps {
   onRemoveCurrentStep?: () => void
   onReturnToVideoEditor?: () => void
   onChangeVideo: () => void
+  onPostDownloadOrShare?: () => void
 }
 
 const FEATURE_META: Record<
@@ -107,6 +109,7 @@ export function ResultPreview({
   onRemoveCurrentStep,
   onReturnToVideoEditor,
   onChangeVideo,
+  onPostDownloadOrShare,
 }: ResultPreviewProps) {
   const [shareMessage, setShareMessage] = useState<string | null>(null)
   const [isSharing, setIsSharing] = useState(false)
@@ -167,6 +170,8 @@ export function ResultPreview({
       setDownloadToast(null)
       downloadTimerRef.current = null
     }, 3000)
+
+    onPostDownloadOrShare?.()
   }
 
   const handleShareToGallery = async () => {
@@ -175,19 +180,15 @@ export function ResultPreview({
     setIsSharing(true)
 
     try {
-      const file = new File([result.blob], result.fileName, { type: result.mimeType })
-      await navigator.share({
-        files: [file],
-        title: result.fileName,
-        text: 'Video diproses 100% lokal dengan LocalVid Studio',
-      })
-      setShareMessage('Berhasil membuka menu simpan / bagikan perangkat.')
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        // Pengguna menutup sheet berbagi tanpa memilih tujuan
-      } else {
+      const shareFile = new File([result.blob], result.fileName, { type: result.mimeType })
+      const outcome = await shareFilesWithPromoCaption([shareFile])
+      if (outcome === 'shared') {
+        setShareMessage('Berhasil membuka menu simpan / bagikan perangkat.')
+        onPostDownloadOrShare?.()
+      } else if (outcome === 'error') {
         setShareMessage('Gagal membuka menu bagikan. Silakan gunakan tombol Unduh Video.')
       }
+      // outcome === 'cancelled': pengguna menutup sheet berbagi tanpa memilih tujuan
     } finally {
       setIsSharing(false)
     }

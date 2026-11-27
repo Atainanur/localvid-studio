@@ -30,9 +30,16 @@ import { BatchResultView } from './components/BatchResultView'
 import { CollapsibleLogs } from './components/CollapsibleLogs'
 import { FeatureOverviewSection } from './components/FeatureOverviewSection'
 import { FeatureTabs } from './components/FeatureTabs'
+import { GitHubStarModal } from './components/GitHubStarModal'
 import { ResultPreview } from './components/ResultPreview'
 import { UploadZone } from './components/UploadZone'
 import { useFFmpeg } from './hooks/useFFmpeg'
+import {
+  canShowGitHubStarPrompt,
+  markGitHubStarClicked,
+  markGitHubStarPromptShown,
+  STAR_PROMPT_DELAY_MS,
+} from './utils/promoShare'
 import {
   createBatchQueueItem,
   createScreenWakeLockController,
@@ -280,6 +287,7 @@ export default function App() {
   const [showSystemInfo, setShowSystemInfo] = useState(false)
   const [logOpenTrigger, setLogOpenTrigger] = useState(0)
   const [copiedErrorDetails, setCopiedErrorDetails] = useState(false)
+  const [isStarModalOpen, setIsStarModalOpen] = useState(false)
 
   // State file, snapshot pipeline non-destruktif, antrean multi-video (Batch Queue), & tab fitur
   const [originalSourceFile, setOriginalSourceFile] = useState<File | null>(null)
@@ -368,6 +376,7 @@ export default function App() {
   const activeBatchItemIdRef = useRef<string | null>(null)
   const wakeLockRef = useRef<ScreenWakeLockController | null>(null)
   const chainNoticeTimerRef = useRef<number | null>(null)
+  const starPromptTimerRef = useRef<number | null>(null)
   const cancelledByUserRef = useRef(false)
   const lastProcessedWasAudioOnlyRef = useRef(false)
   const viewedResultBeforeUrlRef = useRef<string | null>(null)
@@ -398,6 +407,9 @@ export default function App() {
     return () => {
       if (chainNoticeTimerRef.current !== null) {
         window.clearTimeout(chainNoticeTimerRef.current)
+      }
+      if (starPromptTimerRef.current !== null) {
+        window.clearTimeout(starPromptTimerRef.current)
       }
       if (viewedResultBeforeUrlRef.current) {
         URL.revokeObjectURL(viewedResultBeforeUrlRef.current)
@@ -3748,6 +3760,27 @@ export default function App() {
   const step1Done = hasUploadedVideo
   const step3Done = Boolean(result) || hasBatchResultView
 
+  // Pop-up ajakan bintang GitHub halus (~900 ms setelah unduh/bagikan selesai, maks 1x/sesi)
+  const scheduleGitHubStarPrompt = () => {
+    if (!canShowGitHubStarPrompt()) return
+    if (starPromptTimerRef.current !== null || isStarModalOpen) return
+    starPromptTimerRef.current = window.setTimeout(() => {
+      starPromptTimerRef.current = null
+      if (!canShowGitHubStarPrompt()) return
+      markGitHubStarPromptShown()
+      setIsStarModalOpen(true)
+    }, STAR_PROMPT_DELAY_MS)
+  }
+
+  const handleCloseStarModal = () => {
+    setIsStarModalOpen(false)
+  }
+
+  const handleClickStarGitHub = () => {
+    markGitHubStarClicked()
+    setIsStarModalOpen(false)
+  }
+
   // [BUG-7R-07] Kartu Empty State terhubung langsung via <label htmlFor="localvid-main-file-input">
   // sehingga browser langsung membuka file picker tanpa klik programatik ganda
   const handleSelectFeatureForUpload = (tabId: FeatureTabId) => {
@@ -4425,6 +4458,7 @@ export default function App() {
                     onContinueBatchWithOutputs={() => void handleContinueBatchWithOutputs()}
                     onEditSettings={handleEditSettingsFromBatchResult}
                     onChangeAllVideos={handleRequestChangeAllVideos}
+                    onPostDownloadOrShare={scheduleGitHubStarPrompt}
                   />
                 ) : result ? (
                   <ResultPreview
@@ -4442,6 +4476,7 @@ export default function App() {
                     }
                     onReturnToVideoEditor={handleReturnToVideoEditor}
                     onChangeVideo={handleChangeVideoFromResult}
+                    onPostDownloadOrShare={scheduleGitHubStarPrompt}
                   />
                 ) : null
               }
@@ -5020,6 +5055,11 @@ export default function App() {
         </footer>
       </div>
     </div>
+    <GitHubStarModal
+      open={isStarModalOpen}
+      onClose={handleCloseStarModal}
+      onStarClick={handleClickStarGitHub}
+    />
     </MotionConfig>
   )
 }

@@ -1,3 +1,4 @@
+import { shareFilesWithPromoCaption } from './promoShare'
 import {
   getFileExtension,
   isSupportedVideoFile,
@@ -382,23 +383,13 @@ export type BatchShareOutcome = 'shared' | 'cancelled' | 'error'
 
 /**
  * WAJIB dipanggil langsung dari event klik pengguna (user gesture) agar iOS Safari tidak memblokir.
+ * Menyertakan auto-caption promosi dengan fallback otomatis ke { files } saja bila browser menolak files+text.
  */
 export async function shareBatchFiles(files: readonly File[]): Promise<BatchShareOutcome> {
   if (!canShareBatchFiles(files)) {
     return 'error'
   }
-  try {
-    await navigator.share({
-      files: [...files],
-      title: 'LocalVid Studio',
-    })
-    return 'shared'
-  } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      return 'cancelled'
-    }
-    return 'error'
-  }
+  return shareFilesWithPromoCaption(files)
 }
 
 export function triggerSingleFileDownload(url: string, fileName: string): void {

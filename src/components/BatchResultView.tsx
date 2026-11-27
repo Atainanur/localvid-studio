@@ -56,6 +56,7 @@ interface BatchResultViewProps {
   onContinueBatchWithOutputs: () => void
   onEditSettings: () => void
   onChangeAllVideos: () => void
+  onPostDownloadOrShare?: () => void
 }
 
 function splitFileNameAndExt(fileName: string): { baseName: string; extLabel: string } {
@@ -80,6 +81,7 @@ export function BatchResultView({
   onContinueBatchWithOutputs,
   onEditSettings,
   onChangeAllVideos,
+  onPostDownloadOrShare,
 }: BatchResultViewProps) {
   const [openPreviewItemId, setOpenPreviewItemId] = useState<string | null>(null)
   const [previewBeforeUrl, setPreviewBeforeUrl] = useState<string | null>(null)
@@ -212,6 +214,8 @@ export function BatchResultView({
       setSingleDownloadToast(null)
       singleToastTimerRef.current = null
     }, 3000)
+
+    onPostDownloadOrShare?.()
   }
 
   const handleShareAllMobile = async () => {
@@ -224,6 +228,7 @@ export function BatchResultView({
         setShareStatusMessage(
           `Menu simpan/bagikan terbuka untuk ${completedFiles.length} ${allCompletedAreAudio ? 'audio' : 'video'}.`,
         )
+        onPostDownloadOrShare?.()
       } else if (outcome === 'error') {
         setShareStatusMessage(
           'Browser menolak menu bagikan banyak file. Gunakan tombol Unduh di masing-masing kartu di bawah.',
@@ -267,6 +272,9 @@ export function BatchResultView({
         setDownloadAllStatus(
           `${triggered} unduhan telah dipicu, periksa folder Unduhan Anda (atau gunakan tombol unduh di tiap video bila ada yang terblokir)`,
         )
+        if (triggered > 0) {
+          onPostDownloadOrShare?.()
+        }
       }
     } finally {
       setIsDownloadingAll(false)
