@@ -1,3 +1,5 @@
+import { getSafeWasmEncoderThreads } from './environment'
+
 export type FeatureTabId =
   | 'convert'
   | 'compress'
@@ -152,6 +154,17 @@ export type ResultContextualDetails =
       delegateLabel: string
     }
 
+export interface OutputVerificationInfo {
+  width: number | null
+  height: number | null
+  durationSec: number | null
+  fpsLabel: string | null
+  codecColorLabel: string
+  bitrateMbps: number | null
+  isHd: boolean
+  showWhatsappHdTip?: boolean
+}
+
 export interface ProcessedVideoResult {
   url: string
   blob: Blob
@@ -161,11 +174,57 @@ export interface ProcessedVideoResult {
   originalSizeBytes: number
   /** [NEW-10] Durasi video (detik) untuk ditampilkan dengan formatDuration (1 angka desimal) */
   durationSeconds?: number | null
+  /** Verifikasi dimensi, FPS, codec/warna BT.709, dan bitrate nyata dari Blob output */
+  verification?: OutputVerificationInfo
   feature: FeatureTabId
   usedFallbackEncode: boolean
   summaryNote: string
   elapsedMs: number
   details: ResultContextualDetails
+}
+
+/**
+ * Standar stream H.264 universal anti-kusam (BT.709 + yuv420p + GOP 2 detik)
+ * agar hasil iPhone Safari, Android, dan Desktop identik dan tahan kompresi ulang platform sosial.
+ */
+export const UNIVERSAL_H264_BT709_ARGS: readonly string[] = [
+  '-profile:v',
+  'high',
+  '-level',
+  '4.1',
+  '-pix_fmt',
+  'yuv420p',
+  '-colorspace',
+  'bt709',
+  '-color_primaries',
+  'bt709',
+  '-color_trc',
+  'bt709',
+  '-color_range',
+  'tv',
+  '-g',
+  '60',
+  '-keyint_min',
+  '30',
+  '-sc_threshold',
+  '0',
+]
+
+export function formatOutputVerificationBadge(v: OutputVerificationInfo): string {
+  const parts: string[] = [v.isHd ? 'Hasil HD' : 'Hasil Terverifikasi']
+  if (v.width && v.height) {
+    parts.push(`${v.width}×${v.height}`)
+  }
+  if (v.fpsLabel) {
+    parts.push(v.fpsLabel)
+  }
+  if (v.codecColorLabel) {
+    parts.push(v.codecColorLabel)
+  }
+  if (v.bitrateMbps !== null && Number.isFinite(v.bitrateMbps) && v.bitrateMbps > 0) {
+    parts.push(`${v.bitrateMbps.toFixed(1).replace('.', ',')} Mbps`)
+  }
+  return parts.join(' • ')
 }
 
 export interface EditPipelineStep {
@@ -476,7 +535,7 @@ function readSizeCalibrationStore(): Record<string, SizeCalibrationEntry> {
     const raw = window.localStorage.getItem(SIZE_CALIBRATION_STORAGE_KEY)
     if (!raw) return {}
     const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object') return {}
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
     return parsed as Record<string, SizeCalibrationEntry>
   } catch {
     return {}
@@ -489,7 +548,9 @@ export function getAdaptiveSizeCalibrationInfo(calibrationKey: string): {
 } {
   if (!calibrationKey) return { factor: 1, samples: 0 }
   const store = readSizeCalibrationStore()
-  const entry = store[calibrationKey]
+  const entry = Object.prototype.hasOwnProperty.call(store, calibrationKey)
+    ? store[calibrationKey]
+    : undefined
   if (!entry || typeof entry.factor !== 'number' || !Number.isFinite(entry.factor)) {
     return { factor: 1, samples: 0 }
   }
@@ -681,36 +742,58 @@ export function getRamWarningInfo(fileSizeBytes: number, isMobile: boolean): Ram
   }
 }
 
-export function readVideoMetadata(file: File): Promise<VideoMetadata> {
+export function readVideoMetadata(file: Blob): Promise<VideoMetadata> {
   return new Promise((resolve) => {
     const tempUrl = URL.createObjectURL(file)
     const video = document.createElement('video')
     video.preload = 'metadata'
     video.muted = true
     video.playsInline = true
+    video.setAttribute('playsinline', '')
+    video.setAttribute('webkit-playsinline', '')
 
     let settled = false
+    let dimWaitTimer: number | null = null
     const finish = (meta: VideoMetadata) => {
       if (settled) return
       settled = true
+      if (dimWaitTimer !== null) {
+        window.clearTimeout(dimWaitTimer)
+        dimWaitTimer = null
+      }
       URL.revokeObjectURL(tempUrl)
       video.removeAttribute('src')
       video.load()
       resolve(meta)
     }
 
-    const timeout = window.setTimeout(() => {
-      finish({ duration: null, width: null, height: null })
-    }, 4500)
+    const readCurrentMeta = (): VideoMetadata => ({
+      duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null,
+      width: video.videoWidth > 0 ? video.videoWidth : null,
+      height: video.videoHeight > 0 ? video.videoHeight : null,
+    })
 
-    video.onloadedmetadata = () => {
-      window.clearTimeout(timeout)
-      finish({
-        duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null,
-        width: video.videoWidth > 0 ? video.videoWidth : null,
-        height: video.videoHeight > 0 ? video.videoHeight : null,
-      })
+    const timeout = window.setTimeout(() => {
+      finish(readCurrentMeta())
+    }, 8500)
+
+    const tryResolveFromEvent = () => {
+      const meta = readCurrentMeta()
+      if (meta.duration !== null && meta.width !== null && meta.height !== null) {
+        window.clearTimeout(timeout)
+        finish(meta)
+        return
+      }
+      if (meta.duration !== null && dimWaitTimer === null) {
+        dimWaitTimer = window.setTimeout(() => {
+          window.clearTimeout(timeout)
+          finish(readCurrentMeta())
+        }, 450)
+      }
     }
+
+    video.onloadedmetadata = tryResolveFromEvent
+    video.onloadeddata = tryResolveFromEvent
 
     video.onerror = () => {
       window.clearTimeout(timeout)
@@ -718,6 +801,7 @@ export function readVideoMetadata(file: File): Promise<VideoMetadata> {
     }
 
     video.src = tempUrl
+    video.load()
   })
 }
 
@@ -798,7 +882,7 @@ export function formatEnhanceUpscaleLabel(
         ? 'bilinear'
         : 'bicubic'
   return smartSizeCap
-    ? `Upscale 1080p (${algoLabel} • skala fast_bilinear)`
+    ? `Upscale 1080p (${algoLabel} • Smart Cap)`
     : `Upscale 1080p (${algoLabel})`
 }
 
@@ -819,10 +903,11 @@ export function buildConvertReencodeArgs(
   inputName: string,
   outputName: string,
   targetFormat: OutputFormat,
-  isMobile: boolean,
+  _isMobile: boolean,
   threads = 2,
 ): string[] {
-  const safeThreads = String(Math.max(1, Math.min(2, Math.floor(threads) || 1)))
+  void _isMobile
+  const safeThreads = String(getSafeWasmEncoderThreads(threads))
 
   if (targetFormat === 'webm') {
     return [
@@ -832,6 +917,8 @@ export function buildConvertReencodeArgs(
       '0:v:0',
       '-map',
       '0:a?',
+      '-vf',
+      'scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos,setsar=1,format=yuv420p',
       '-c:v',
       'libvpx',
       '-crf',
@@ -841,7 +928,7 @@ export function buildConvertReencodeArgs(
       '-deadline',
       'realtime',
       '-cpu-used',
-      isMobile ? '6' : '4',
+      '4',
       '-threads',
       safeThreads,
       '-c:a',
@@ -852,7 +939,6 @@ export function buildConvertReencodeArgs(
     ]
   }
 
-  const preset = isMobile ? 'ultrafast' : 'fast'
   const args = [
     '-i',
     inputName,
@@ -860,20 +946,25 @@ export function buildConvertReencodeArgs(
     '0:v:0',
     '-map',
     '0:a?',
+    '-vf',
+    'scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos,setsar=1,format=yuv420p',
     '-c:v',
     'libx264',
     '-preset',
-    preset,
+    'veryfast',
     '-crf',
-    '23',
-    '-pix_fmt',
-    'yuv420p',
+    '21',
+    ...UNIVERSAL_H264_BT709_ARGS,
     '-threads',
     safeThreads,
     '-c:a',
     'aac',
     '-b:a',
     '128k',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
   ]
 
   if (targetFormat === 'mp4' || targetFormat === 'mov') {
@@ -888,12 +979,13 @@ export function buildCompressArgs(
   inputName: string,
   outputName: string,
   presetId: CompressionPresetId,
-  isMobile: boolean,
+  _isMobile: boolean,
   threads = 2,
 ): string[] {
+  void _isMobile
   const selected =
     COMPRESSION_PRESETS.find((preset) => preset.id === presetId) ?? COMPRESSION_PRESETS[1]
-  const safeThreads = String(Math.max(1, Math.min(2, Math.floor(threads) || 1)))
+  const safeThreads = String(getSafeWasmEncoderThreads(threads))
 
   return [
     '-i',
@@ -902,20 +994,25 @@ export function buildCompressArgs(
     '0:v:0',
     '-map',
     '0:a?',
+    '-vf',
+    'scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos,setsar=1,format=yuv420p',
     '-c:v',
     'libx264',
     '-preset',
-    isMobile ? 'ultrafast' : 'veryfast',
+    'veryfast',
     '-crf',
     String(selected.crf),
-    '-pix_fmt',
-    'yuv420p',
+    ...UNIVERSAL_H264_BT709_ARGS,
     '-threads',
     safeThreads,
     '-c:a',
     'aac',
     '-b:a',
     selected.audioBitrate,
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
     '-movflags',
     '+faststart',
     outputName,
@@ -935,18 +1032,17 @@ export function buildEnhanceFilterChain(
     filters.push('hqdn3d=1.5:1.5:6:6')
   }
 
-  // 2. Upscale ke 1080p HD dengan angka lebar:tinggi genap yang dihitung di JavaScript
-  // Saat Smart Cap aktif, gunakan skala fast_bilinear pada filter scale
-  const scaleFlags = options.smartSizeCap
-    ? 'fast_bilinear'
-    : options.scaleAlgorithm || 'bicubic'
+  // 2. Upscale ke 1080p HD dengan angka lebar:tinggi genap dan skala tajam lanczos (hindari fast_bilinear)
+  const scaleFlags = options.scaleAlgorithm || 'lanczos'
   if (options.upscale1080p) {
     const target = computeTarget1080pResolution(srcW, srcH)
     if (target) {
-      filters.push(`scale=${target.width}:${target.height}:flags=${scaleFlags}`)
+      filters.push(`scale=${target.width}:${target.height}:flags=${scaleFlags}`, 'setsar=1')
     } else {
-      filters.push(`scale=-2:1080:flags=${scaleFlags}`)
+      filters.push(`scale=-2:1080:flags=${scaleFlags}`, 'setsar=1')
     }
+  } else {
+    filters.push('scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos', 'setsar=1')
   }
 
   // 3. Pertajam detail secara halus
@@ -1117,21 +1213,23 @@ export function buildEnhanceArgs(
   inputName: string,
   outputName: string,
   options: EnhanceOptions,
-  isMobile: boolean,
+  _isMobile: boolean,
   threads = 2,
   videoDimensions?: { width: number | null; height: number | null },
   sourceInfo?: { sizeBytes: number | null; durationSec: number | null },
 ): string[] {
+  void _isMobile
   const filterChain = buildEnhanceFilterChain(options, videoDimensions)
-  const safeThreads = String(Math.max(1, Math.min(2, Math.floor(threads) || 1)))
+  const safeThreads = String(getSafeWasmEncoderThreads(threads))
   const args = ['-i', inputName, '-map', '0:v:0', '-map', '0:a?']
 
   if (filterChain.length > 0) {
     args.push('-vf', filterChain.join(','))
   }
 
-  // [BUG-10 & BUG-4R-01] Stabil di @ffmpeg/core-mt@0.12.6: tanpa flag filter-thread dan tanpa tune tambahan
-  const crfValue = options.upscale1080p ? '23' : '22'
+  // [BUG-10 & BUG-4R-01] Stabil di @ffmpeg/core-mt@0.12.6: tanpa flag filter-thread dan tanpa tune tambahan,
+  // kualitas preset veryfast + BT.709 identik antara Mobile dan Desktop.
+  const crfValue = options.upscale1080p ? '21' : '20'
   const maxRateKbps = computeEnhanceSmartMaxRateKbps(
     options,
     sourceInfo?.sizeBytes,
@@ -1142,7 +1240,7 @@ export function buildEnhanceArgs(
     '-c:v',
     'libx264',
     '-preset',
-    isMobile ? 'veryfast' : 'fast',
+    'veryfast',
     '-crf',
     crfValue,
   )
@@ -1152,14 +1250,17 @@ export function buildEnhanceArgs(
   }
 
   args.push(
-    '-pix_fmt',
-    'yuv420p',
+    ...UNIVERSAL_H264_BT709_ARGS,
     '-threads',
     safeThreads,
     '-c:a',
     'aac',
     '-b:a',
     '128k',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
     '-movflags',
     '+faststart',
     outputName,
@@ -1170,9 +1271,9 @@ export function buildEnhanceArgs(
 
 /**
  * Membangun rantai filter FFmpeg `deshake` yang 100% valid & cepat:
- * - Ringan : deshake=rx=16:ry=16:edge=mirror:search=less
- * - Sedang : deshake=rx=32:ry=32:edge=mirror:search=less
- * - Kuat   : deshake=rx=48:ry=48:edge=mirror:search=less + auto-crop 8% & scale dimensi genap
+ * - Ringan : deshake=rx=16:ry=16:edge=mirror:search=less + dimensi genap lanczos + setsar=1
+ * - Sedang : deshake=rx=32:ry=32:edge=mirror:search=less + dimensi genap lanczos + setsar=1
+ * - Kuat   : deshake=rx=48:ry=48:edge=mirror:search=less + auto-crop 8% & scale dimensi genap lanczos + setsar=1
  * Selalu diakhiri dengan `format=yuv420p`.
  */
 export function buildStabilizerFilterChain(
@@ -1184,9 +1285,17 @@ export function buildStabilizerFilterChain(
   const srcH = videoDimensions?.height ?? null
 
   if (level === 'light') {
-    filters.push('deshake=rx=16:ry=16:edge=mirror:search=less')
+    filters.push(
+      'deshake=rx=16:ry=16:edge=mirror:search=less',
+      'scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos',
+      'setsar=1',
+    )
   } else if (level === 'medium') {
-    filters.push('deshake=rx=32:ry=32:edge=mirror:search=less')
+    filters.push(
+      'deshake=rx=32:ry=32:edge=mirror:search=less',
+      'scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos',
+      'setsar=1',
+    )
   } else {
     filters.push('deshake=rx=48:ry=48:edge=mirror:search=less')
     if (srcW && srcH && srcW > 64 && srcH > 64) {
@@ -1195,10 +1304,10 @@ export function buildStabilizerFilterChain(
       const targetW = toEvenDimension(srcW)
       const targetH = toEvenDimension(srcH)
       filters.push(`crop=${cropW}:${cropH}`)
-      filters.push(`scale=${targetW}:${targetH}:flags=bicubic`)
+      filters.push(`scale=${targetW}:${targetH}:flags=lanczos`, 'setsar=1')
     } else {
       filters.push('crop=trunc(iw*0.92/2)*2:trunc(ih*0.92/2)*2')
-      filters.push('scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=bicubic')
+      filters.push('scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos', 'setsar=1')
     }
   }
 
@@ -1292,13 +1401,14 @@ export function buildStabilizerArgs(
   inputName: string,
   outputName: string,
   level: StabilizerLevel,
-  isMobile: boolean,
+  _isMobile: boolean,
   threads = 2,
   videoDimensions?: { width: number | null; height: number | null },
   sourceInfo?: { sizeBytes: number | null; durationSec: number | null },
 ): string[] {
+  void _isMobile
   const filterChain = buildStabilizerFilterChain(level, videoDimensions)
-  const safeThreads = String(Math.max(1, Math.min(2, Math.floor(threads) || 1)))
+  const safeThreads = String(getSafeWasmEncoderThreads(threads))
   const maxRateKbps = computeStabilizerMaxRateKbps(
     sourceInfo?.sizeBytes,
     sourceInfo?.durationSec,
@@ -1316,9 +1426,9 @@ export function buildStabilizerArgs(
     '-c:v',
     'libx264',
     '-preset',
-    isMobile ? 'veryfast' : 'fast',
+    'veryfast',
     '-crf',
-    '22',
+    '21',
   ]
 
   if (maxRateKbps !== undefined) {
@@ -1326,14 +1436,17 @@ export function buildStabilizerArgs(
   }
 
   args.push(
-    '-pix_fmt',
-    'yuv420p',
+    ...UNIVERSAL_H264_BT709_ARGS,
     '-threads',
     safeThreads,
     '-c:a',
     'aac',
     '-b:a',
     '128k',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
     '-movflags',
     '+faststart',
     outputName,

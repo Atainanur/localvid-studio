@@ -87,6 +87,7 @@ import {
   estimateCompressedSize,
   getCompressOutputTag,
   getEffectiveCrf,
+  normalizeCompressOptions,
   resolveCodecPair,
   resolveCompressOptionsForVideo,
   SOCIAL_TEMPLATES,
@@ -132,6 +133,7 @@ import {
   type EnhanceOptions,
   type FeatureTabId,
   type OutputFormat,
+  type OutputVerificationInfo,
   type ProcessedVideoResult,
   type ResultContextualDetails,
   type SelectedVideo,
@@ -144,7 +146,7 @@ const DEFAULT_ENHANCE_OPTIONS: EnhanceOptions = {
   sharpen: false,
   colorFix: false,
   upscale1080p: false,
-  scaleAlgorithm: 'bicubic',
+  scaleAlgorithm: 'lanczos',
   colorFilter: 'none',
   smartSizeCap: true,
 }
@@ -594,13 +596,14 @@ export default function App() {
   }
 
   const syncCompressBoundsForFile = (fileSize: number, durationSec: number | null) => {
-    setCompressOptions((prev) => {
+    setCompressOptions((rawPrev) => {
+      const prev = normalizeCompressOptions(rawPrev)
       const trimCheck = validateTrimSettings(prev.trimStart, prev.trimEnd, durationSec)
       const basePrev: CompressOptions = trimCheck.isValid
         ? prev
         : { ...prev, trimStart: '', trimEnd: '' }
       if (basePrev.socialTemplate !== 'custom') {
-        return applySocialTemplate(basePrev.socialTemplate, basePrev, fileSize, durationSec)
+        return applySocialTemplate(basePrev.socialTemplate, basePrev, fileSize, durationSec, true)
       }
       const trim = validateTrimSettings(basePrev.trimStart, basePrev.trimEnd, durationSec)
       const bounds = computeTargetSizeBounds(
@@ -652,7 +655,7 @@ export default function App() {
         setFastRemux(snap.fastRemux)
         break
       case 'compress':
-        setCompressOptions({ ...snap.compressOptions })
+        setCompressOptions(normalizeCompressOptions(snap.compressOptions))
         break
       case 'enhance':
         setEnhanceOptions({ ...snap.enhanceOptions })
@@ -2084,6 +2087,37 @@ export default function App() {
       return { url, blob }
     }
 
+    const buildOutputVerification = async (
+      outputBlob: Blob,
+      fallbackDurationSec: number | null,
+      fpsLabel: string | null,
+      codecColorLabel: string,
+      showWhatsappHdTip = false,
+      fallbackDims?: { width: number | null; height: number | null },
+    ): Promise<OutputVerificationInfo> => {
+      const meta = await readVideoMetadata(outputBlob)
+      const width = meta.width ?? fallbackDims?.width ?? null
+      const height = meta.height ?? fallbackDims?.height ?? null
+      const verifiedDur = meta.duration ?? fallbackDurationSec
+      const bitrateMbps =
+        verifiedDur !== null && Number.isFinite(verifiedDur) && verifiedDur > 0
+          ? Number(((outputBlob.size * 8) / (verifiedDur * 1_000_000)).toFixed(1))
+          : null
+      const isHd = Boolean(
+        width && height && (Math.min(width, height) >= 720 || Math.max(width, height) >= 1280),
+      )
+      return {
+        width,
+        height,
+        durationSec: verifiedDur,
+        fpsLabel,
+        codecColorLabel,
+        bitrateMbps,
+        isHd,
+        showWhatsappHdTip,
+      }
+    }
+
     const throwIfCancelled = () => {
       if (cancelledByUserRef.current) {
         throw new DOMException('Proses dibatalkan oleh pengguna.', 'AbortError')
@@ -2209,6 +2243,15 @@ export default function App() {
           `Selesai: ${aiOutcome.backendName} • ${aiOutcome.totalFrames} frame (${aiOutcome.targetWidth}×${aiOutcome.targetHeight})`,
         )
 
+        const aiVerification = await buildOutputVerification(
+          blob,
+          aiEffectiveDur,
+          `${effectiveAiSettings.targetFps} fps`,
+          'H.264 BT.709',
+          false,
+          { width: aiOutcome.targetWidth, height: aiOutcome.targetHeight },
+        )
+
         return {
           url,
           blob,
@@ -2216,7 +2259,8 @@ export default function App() {
           mimeType: finalMimeType,
           outputSizeBytes: blob.size,
           originalSizeBytes: workVideo.sizeBytes,
-          durationSeconds: aiEffectiveDur,
+          durationSeconds: aiVerification.durationSec ?? aiEffectiveDur,
+          verification: aiVerification,
           feature: 'ai-upscale',
           usedFallbackEncode: false,
           summaryNote: `${aiOutcome.backendName} • ${aiOutcome.totalFrames} frame (${aiOutcome.targetWidth}×${aiOutcome.targetHeight})`,
@@ -2337,6 +2381,15 @@ export default function App() {
           `Selesai: ${templateOrModeLabel} • ${chromaOutcome.totalFrames} frame (${resLabel})`,
         )
 
+        const chromaVerification = await buildOutputVerification(
+          blob,
+          chromaOutcome.effectiveDurationSec,
+          `${chromaKeyOptions.targetFps} fps`,
+          'H.264 BT.709',
+          false,
+          { width: chromaOutcome.targetWidth, height: chromaOutcome.targetHeight },
+        )
+
         return {
           url,
           blob,
@@ -2344,7 +2397,8 @@ export default function App() {
           mimeType: 'video/mp4',
           outputSizeBytes: blob.size,
           originalSizeBytes: workVideo.sizeBytes,
-          durationSeconds: chromaOutcome.effectiveDurationSec,
+          durationSeconds: chromaVerification.durationSec ?? chromaOutcome.effectiveDurationSec,
+          verification: chromaVerification,
           feature: 'auto-chroma',
           usedFallbackEncode: false,
           summaryNote: `${templateOrModeLabel} • ${chromaOutcome.totalFrames} frame (${resLabel})`,
@@ -2380,6 +2434,9 @@ export default function App() {
       let summaryNote = 'Diproses dengan LocalVid Studio'
       let resultDurationSec: number | null = durationSec
       let calibrationToRecord: { key: string; midBytes: number } | null = null
+      let verifyFpsLabel: string | null = null
+      let verifyCodecColorLabel = 'H.264 BT.709'
+      let verifyShowWhatsappHdTip = false
       let resultDetails: ResultContextualDetails = {
         kind: 'convert',
         sourceFormat: `.${inputExt.toUpperCase()}`,
@@ -2416,6 +2473,7 @@ export default function App() {
             undefined,
             durationSec,
           )
+          verifyCodecColorLabel = 'VP8'
           summaryNote = 'Konversi ke .WEBM (Re-encode VP8/Vorbis)'
           resultDetails = {
             kind: 'convert',
@@ -2468,7 +2526,7 @@ export default function App() {
             const fallbackCodecLabel =
               targetFormat === 'webm'
                 ? 'VP8/Vorbis'
-                : `H.264/AAC (preset ${isMobile ? 'ultrafast' : 'fast'}, ${recommendedThreads} thread)`
+                : `H.264 BT.709 (preset veryfast, ${recommendedThreads} thread)`
 
             setStatusStage(`Fallback otomatis: Re-encode ${fallbackCodecLabel}...`)
             addLog(
@@ -2493,6 +2551,11 @@ export default function App() {
           }
 
           const fallbackShort = targetFormat === 'webm' ? 'VP8/Vorbis' : 'H.264/AAC'
+          verifyCodecColorLabel = usedFallbackEncode
+            ? targetFormat === 'webm'
+              ? 'VP8'
+              : 'H.264 BT.709'
+            : 'Stream Copy'
           summaryNote = usedFallbackEncode
             ? `Konversi ke .${targetFormat.toUpperCase()} (Fallback Re-encode ${fallbackShort})`
             : `Fast Remux ke .${targetFormat.toUpperCase()} (-c copy)`
@@ -2518,6 +2581,7 @@ export default function App() {
             undefined,
             durationSec,
           )
+          verifyCodecColorLabel = targetFormat === 'webm' ? 'VP8' : 'H.264 BT.709'
           summaryNote = `Konversi ke .${targetFormat.toUpperCase()} (Re-encode)`
           resultDetails = {
             kind: 'convert',
@@ -2563,6 +2627,7 @@ export default function App() {
           durationSec,
           workDimensions,
           inputExt,
+          isMobile,
         )
         if (
           effectiveCompressOptions.compressionMode === 'crf' &&
@@ -2653,6 +2718,11 @@ export default function App() {
           formatLabel: `.${targetFormat.toUpperCase()}`,
           codecSummary: `${videoCodecPretty} / ${audioCodecPretty}`,
         }
+        verifyFpsLabel = built.fpsCapLabel
+        verifyCodecColorLabel = built.isBt709H264 ? 'H.264 BT.709' : videoCodecPretty
+        verifyShowWhatsappHdTip =
+          effectiveCompressOptions.socialTemplate === 'whatsapp' ||
+          effectiveCompressOptions.socialTemplate === 'whatsapp-status'
       } else if (activeTab === 'stabilize') {
         const preStabEst = estimateStabilizerOutputSize(
           stabilizerLevel,
@@ -2788,12 +2858,12 @@ export default function App() {
           finalMimeType = 'video/mp4'
           registerTempFile(finalOutputName)
 
-          const fallbackPreset = isMobile ? 'veryfast' : 'fast'
+          const fallbackPreset = 'veryfast'
           setStatusStage(
-            `Fallback otomatis: Re-encode H.264/AAC (preset ${fallbackPreset}) + audio bersih...`,
+            `Fallback otomatis: Re-encode H.264 BT.709/AAC (preset ${fallbackPreset}) + audio bersih...`,
           )
           addLog(
-            `[LocalVid] Video Copy (-c:v copy) tidak kompatibel dengan wadah target. Dialihkan otomatis ke re-encode H.264/AAC (CRF 22, preset ${fallbackPreset}, ${recommendedThreads} thread).`,
+            `[LocalVid] Video Copy (-c:v copy) tidak kompatibel dengan wadah target. Dialihkan otomatis ke re-encode H.264 BT.709/AAC (CRF 21, preset ${fallbackPreset}, ${recommendedThreads} thread).`,
           )
 
           // [BUG-5R-01] Pengaman wajib: pastikan file input tetap ada di MEMFS sebelum retry fallback
@@ -2858,6 +2928,7 @@ export default function App() {
               ? `Bersihkan Audio (${presetDef.title} • Fallback H.264/AAC)`
               : `Bersihkan Audio (${presetDef.title} • Video Copy)`
 
+        verifyCodecColorLabel = usedFallbackEncode ? 'H.264 BT.709' : 'Video Copy'
         resultDetails = {
           kind: 'audio-denoise',
           presetLabel: presetDef.title,
@@ -2962,7 +3033,7 @@ export default function App() {
         )
       }
 
-      setStatusStage('Menyiapkan pratinjau & membersihkan RAM...')
+      setStatusStage('Menyiapkan pratinjau & memverifikasi hasil HD...')
       const { url, blob } = await finalizeOutput(finalOutputName, finalMimeType)
 
       if (calibrationToRecord) {
@@ -2973,6 +3044,18 @@ export default function App() {
         )
       }
 
+      const isAudioOnlyOutput =
+        resultDetails.kind === 'audio-denoise' && resultDetails.outputMode === 'audio-mp3'
+      const outputVerification = !isAudioOnlyOutput
+        ? await buildOutputVerification(
+            blob,
+            resultDurationSec,
+            verifyFpsLabel,
+            verifyCodecColorLabel,
+            verifyShowWhatsappHdTip,
+          )
+        : undefined
+
       const downloadFileName = buildBrandedFilename(suffix, finalOutputExt, batchIndex)
 
       return {
@@ -2982,7 +3065,8 @@ export default function App() {
         mimeType: finalMimeType,
         outputSizeBytes: blob.size,
         originalSizeBytes: workVideo.sizeBytes,
-        durationSeconds: resultDurationSec,
+        durationSeconds: outputVerification?.durationSec ?? resultDurationSec,
+        verification: outputVerification,
         feature: activeTab,
         usedFallbackEncode,
         summaryNote,

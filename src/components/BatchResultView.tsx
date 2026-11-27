@@ -31,6 +31,7 @@ import {
   FEATURE_TAB_LABELS,
   formatDuration,
   formatFileSizeMB,
+  formatOutputVerificationBadge,
   isAudioOnlyResultFile,
   type FeatureTabId,
 } from '../utils/videoProcessing'
@@ -267,6 +268,9 @@ export function BatchResultView({
 
   const elapsedSec = (totalElapsedMs / 1000).toFixed(1)
   const mediaUnit = allCompletedAreAudio ? 'Audio' : 'Video'
+  const showBatchWhatsappHdTip = completedItems.some(
+    (item) => item.result?.verification?.showWhatsappHdTip,
+  )
 
   return (
     <motion.div
@@ -456,6 +460,20 @@ export function BatchResultView({
         </div>
       )}
 
+      {showBatchWhatsappHdTip && (
+        <div
+          role="status"
+          className="flex items-start gap-2.5 rounded-2xl border border-[#6DE7C1] bg-[#E8FFF5] px-4 py-3 text-xs leading-relaxed text-[#0D6E5D]"
+        >
+          <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[#14A085]" />
+          <span>
+            <strong className="font-bold text-[#0D2B24]">Tips WhatsApp:</strong> Simpan video
+            terlebih dahulu, lalu kirim lewat WhatsApp dengan ikon HD aktif agar ketajaman 1080p
+            terjaga.
+          </span>
+        </div>
+      )}
+
       {/* [BUG-5R-21] Toast singkat umpan balik unduhan per-kartu */}
       {singleDownloadToast && (
         <div
@@ -580,6 +598,14 @@ export function BatchResultView({
 
                     {isDone && res.summaryNote && (
                       <p className="mt-1 text-[11px] text-[#4A6B63]">{res.summaryNote}</p>
+                    )}
+                    {isDone && !isAudioResult && res.verification && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[#6DE7C1] bg-[#E8FFF5] px-2.5 py-0.5 text-[10px] font-bold text-[#0D6E5D] tabular-nums">
+                          <Sparkles aria-hidden="true" className="h-3 w-3 shrink-0 text-[#14A085]" />
+                          <span>{formatOutputVerificationBadge(res.verification)}</span>
+                        </span>
+                      </div>
                     )}
                   </div>
                 </div>

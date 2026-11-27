@@ -1,4 +1,5 @@
-import type { SimpleSizeEstimate } from './videoProcessing'
+import { getSafeWasmEncoderThreads } from './environment'
+import { UNIVERSAL_H264_BT709_ARGS, type SimpleSizeEstimate } from './videoProcessing'
 
 export type AudioDenoisePresetId = 'light' | 'medium' | 'strong' | 'custom'
 
@@ -395,11 +396,12 @@ export function buildAudioDenoiseFallbackArgs(
   inputName: string,
   outputName: string,
   options: AudioDenoiseOptions,
-  isMobile: boolean,
+  _isMobile: boolean,
   threads = 2,
 ): string[] {
+  void _isMobile
   const afChain = buildAudioDenoiseFilterChain(options)
-  const safeThreads = String(Math.max(1, Math.min(2, Math.floor(threads) || 1)))
+  const safeThreads = String(getSafeWasmEncoderThreads(threads))
 
   return [
     '-i',
@@ -408,14 +410,15 @@ export function buildAudioDenoiseFallbackArgs(
     '0:v:0',
     '-map',
     '0:a:0',
+    '-vf',
+    'scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos,setsar=1,format=yuv420p',
     '-c:v',
     'libx264',
     '-preset',
-    isMobile ? 'veryfast' : 'fast',
+    'veryfast',
     '-crf',
-    '22',
-    '-pix_fmt',
-    'yuv420p',
+    '21',
+    ...UNIVERSAL_H264_BT709_ARGS,
     '-threads',
     safeThreads,
     '-af',
@@ -424,6 +427,10 @@ export function buildAudioDenoiseFallbackArgs(
     'aac',
     '-b:a',
     '192k',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
     '-movflags',
     '+faststart',
     outputName,

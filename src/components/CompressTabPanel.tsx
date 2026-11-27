@@ -24,6 +24,7 @@ import {
   ASPECT_RATIO_OPTIONS,
   AUDIO_CODEC_OPTIONS,
   buildAdvancedCompressArgs,
+  CLARITY_MODEL_OPTIONS,
   computeTargetSizeBounds,
   estimateCompressedSize,
   FLIP_OPTIONS,
@@ -32,6 +33,7 @@ import {
   getEffectiveAudioBitrateKbps,
   getEffectiveCrf,
   getPreservedAdvancedLabels,
+  normalizeCompressOptions,
   resetPreservedAdvancedOptions,
   RESOLUTION_PRESET_OPTIONS,
   resolveCodecPair,
@@ -41,6 +43,7 @@ import {
   validateTrimSettings,
   VIDEO_CODEC_OPTIONS,
   type AspectRatioPreset,
+  type ClarityModelId,
   type CompressAudioCodec,
   type CompressOptions,
   type CompressVideoCodec,
@@ -77,7 +80,7 @@ interface CompressTabPanelProps {
 }
 
 export function CompressTabPanel({
-  options,
+  options: rawOptions,
   onChange,
   isMobile,
   recommendedThreads,
@@ -87,6 +90,7 @@ export function CompressTabPanel({
   sourceExtension,
   sourceDimensions,
 }: CompressTabPanelProps) {
+  const options = normalizeCompressOptions(rawOptions)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [targetOutOfRangeNotice, setTargetOutOfRangeNotice] = useState<string | null>(null)
   const [isEditingTargetText, setIsEditingTargetText] = useState(false)
@@ -125,6 +129,7 @@ export function CompressTabPanel({
           sourceDurationSec,
           sourceDimensions,
           sourceExtension,
+          isMobile,
         )
       : null
 
@@ -301,23 +306,134 @@ export function CompressTabPanel({
     crop.isActive,
   ].filter(Boolean).length
 
+  const activeClarityModel =
+    CLARITY_MODEL_OPTIONS.find((m) => m.id === options.clarityModel) ?? CLARITY_MODEL_OPTIONS[0]
+  const effectiveTemplateResolutionLabel =
+    isMobile &&
+    options.mobileRamSaver720p &&
+    options.resolutionPreset === '1080p'
+      ? 'Maks 720p (Hemat RAM HP)'
+      : options.resolutionPreset === '720p'
+        ? 'Maks 720p (No Upscale)'
+        : 'Maks 1080p True HD (No Upscale)'
+  const supportsDesktop60FpsToggle =
+    !isMobile &&
+    (options.socialTemplate === 'instagram' || options.socialTemplate === 'tiktok-reels')
+  const showMobileRamSaverToggle =
+    isMobile && !isCustomMode && options.resolutionPreset === '1080p'
+
   // Daftar badge ringkas parameter otomatis yang diterapkan oleh Template Media Sosial aktif
   const templateAutoBadges: string[] = !isCustomMode
     ? [
         `.${options.outputFormat.toUpperCase()}`,
-        'H.264 (veryfast)',
-        options.resolutionPreset === '720p' ? 'Maks 720p (No Upscale)' : 'Maks 1080p (No Upscale)',
-        options.frameRate === 'no-change' ? 'FPS Asli (≤60)' : `${options.frameRate} fps`,
+        'H.264 BT.709 (veryfast)',
+        effectiveTemplateResolutionLabel,
+        commandPreview.fpsCapLabel
+          ? `Maks ${commandPreview.fpsCapLabel}`
+          : options.frameRate === 'no-change'
+            ? 'FPS Asli'
+            : `${options.frameRate} fps`,
         options.compressionMode === 'target-size'
           ? `Target ≤ ${clampedTargetMB.toFixed(1)} MB`
           : commandPreview.smartCapVideoKbps
             ? `CRF ${effectiveCrf} • Cap ≤${commandPreview.smartCapVideoKbps}k`
             : `CRF ${effectiveCrf}`,
-        commandPreview.usedSmartAudioCopy ? 'Audio Copy' : `AAC ${effectiveAudioKbps}k`,
+        options.clarityModel !== 'original' && options.clarityStrength > 0
+          ? `${activeClarityModel.name} (${options.clarityStrength}%)`
+          : 'Penjernih: Asli',
+        commandPreview.usedSmartAudioCopy ? 'Audio Copy' : `AAC ${effectiveAudioKbps}k 48kHz`,
         'Hapus Metadata',
         '+faststart',
       ]
     : []
+
+  const clarityModelSection = (
+    <div className="flex flex-col gap-3 rounded-2xl border border-[#B5F5DB] bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h4 className="inline-flex items-center gap-1.5 text-sm font-bold text-[#0D2B24]">
+            <Sparkles aria-hidden="true" className="h-4 w-4 text-[#14A085]" />
+            Model Penjernih Video (Anti-Buram)
+          </h4>
+          <p className="mt-0.5 text-xs text-[#4A6B63]">
+            Pilih karakter ketajaman dan atur kekuatan filter secara proporsional (0% melewati
+            filter penjernih).
+          </p>
+        </div>
+        <span className="whitespace-nowrap rounded-full bg-[#E8FFF5] px-2.5 py-1 text-[11px] font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
+          {activeClarityModel.name}
+          {options.clarityModel !== 'original' ? ` • ${options.clarityStrength}%` : ''}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {CLARITY_MODEL_OPTIONS.map((model) => {
+          const selected = options.clarityModel === model.id
+          return (
+            <motion.button
+              key={model.id}
+              type="button"
+              disabled={disabled || isVideoCopy}
+              onClick={() => update({ clarityModel: model.id as ClarityModelId }, false)}
+              whileHover={!isMobile && !disabled && !isVideoCopy ? { y: -1 } : undefined}
+              whileTap={!disabled && !isVideoCopy ? { scale: 0.985 } : undefined}
+              transition={CARD_SPRING}
+              className={`flex min-h-14 cursor-pointer touch-manipulation flex-col justify-between gap-1.5 rounded-xl p-3 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-55 ${
+                selected ? 'mint-option-card-active' : 'mint-option-card'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
+                <span className="text-xs font-bold text-[#0D2B24]">{model.name}</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                    selected
+                      ? 'bg-[#0D6E5D] text-white'
+                      : 'bg-[#E8FFF5] text-[#0D6E5D] ring-1 ring-[#B5F5DB]'
+                  }`}
+                >
+                  {model.badge}
+                </span>
+              </div>
+              <p className="text-[11px] leading-snug text-[#4A6B63]">{model.description}</p>
+            </motion.button>
+          )
+        })}
+      </div>
+
+      <div className="rounded-xl border border-[#E2F3EC] bg-[#F7FFFC] px-3.5 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <label
+            htmlFor="compress-clarity-strength"
+            className="text-xs font-bold text-[#0D2B24]"
+          >
+            Kekuatan Penjernih
+          </label>
+          <span className="rounded-full bg-[#E8FFF5] px-2.5 py-0.5 text-xs font-extrabold text-[#0D6E5D] ring-1 ring-[#B5F5DB] tabular-nums">
+            {options.clarityModel === 'original' ? 'Nonaktif (Asli)' : `${options.clarityStrength}%`}
+          </span>
+        </div>
+        <input
+          id="compress-clarity-strength"
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={options.clarityStrength}
+          disabled={disabled || isVideoCopy || options.clarityModel === 'original'}
+          aria-label="Kekuatan model penjernih video dari 0 sampai 100 persen"
+          onChange={(e) =>
+            update({ clarityStrength: Number.parseInt(e.target.value, 10) || 0 }, false)
+          }
+          className="mt-2.5 min-h-11 w-full cursor-pointer accent-[#14A085] disabled:cursor-not-allowed disabled:opacity-45"
+        />
+        <div className="flex items-center justify-between text-[11px] font-medium text-[#0D6E5D]">
+          <span>0% (Lewati)</span>
+          <span>80% (Disarankan)</span>
+          <span>100% (Maksimal)</span>
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <div className="flex flex-col gap-6">
@@ -487,6 +603,53 @@ export function CompressTabPanel({
               </span>
             ))}
           </div>
+
+          {/* 4 Model Penjernih Anti-Buram + Slider Kekuatan (0% - 100%) */}
+          {clarityModelSection}
+
+          {/* Toggle Opt-In Khusus Mobile: Mode Hemat RAM HP (720p), Default OFF agar 1080p True HD konsisten */}
+          {showMobileRamSaverToggle && (
+            <label className="flex min-h-14 cursor-pointer touch-manipulation items-center justify-between gap-3 rounded-xl border border-[#B5F5DB] bg-white px-3.5 py-3 transition-colors hover:border-[#6DE7C1]">
+              <div>
+                <span className="block text-xs font-bold text-[#0D2B24]">
+                  Mode Hemat RAM HP (720p)
+                </span>
+                <span className="mt-0.5 block text-[11px] leading-snug text-[#0D6E5D]">
+                  Aktifkan hanya jika video berdurasi panjang &gt; 60 detik agar memori HP tetap
+                  ringan.
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={options.mobileRamSaver720p}
+                disabled={disabled}
+                onChange={(e) => update({ mobileRamSaver720p: e.target.checked }, false)}
+                className="h-5 w-5 shrink-0 cursor-pointer accent-[#0D6E5D]"
+              />
+            </label>
+          )}
+
+          {/* Toggle Opsional Khusus Desktop: Izinkan 60 fps pada Instagram & TikTok */}
+          {supportsDesktop60FpsToggle && (
+            <label className="flex min-h-12 cursor-pointer touch-manipulation items-center justify-between gap-3 rounded-xl border border-[#B5F5DB] bg-white px-3.5 py-2.5 transition-colors hover:border-[#6DE7C1]">
+              <div>
+                <span className="block text-xs font-bold text-[#0D2B24]">
+                  Izinkan hingga 60 fps (Opsional Desktop)
+                </span>
+                <span className="mt-0.5 block text-[11px] text-[#0D6E5D]">
+                  Default dibatasi maks 30 fps agar stabil; aktifkan jika sumber video 60 fps dan
+                  ingin dipertahankan di Desktop.
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={options.allow60FpsDesktop}
+                disabled={disabled}
+                onChange={(e) => update({ allow60FpsDesktop: e.target.checked }, false)}
+                className="h-5 w-5 shrink-0 cursor-pointer accent-[#0D6E5D]"
+              />
+            </label>
+          )}
 
           {/* [BUG-15] Tampilkan opsi lanjutan non-konflik yang tetap dipertahankan */}
           {preservedAdvancedLabels.length > 0 && (
@@ -867,6 +1030,9 @@ export function CompressTabPanel({
               </div>
             </div>
           )}
+
+          {/* === 4. MODEL PENJERNIH VIDEO (CUSTOM MODE) === */}
+          {!isVideoCopy && clarityModelSection}
 
           {/* === ACCORDION PENGATURAN LANJUTAN (ADVANCED SETTINGS - DEFAULT TERTUTUP) === */}
           <div className="overflow-hidden rounded-2xl border border-[#B5F5DB] bg-[#F7FFFC]">

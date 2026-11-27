@@ -1,19 +1,24 @@
+import { getSafeWasmEncoderThreads } from './environment'
 import {
   COMPRESSION_PRESETS,
   getAdaptiveSizeCalibrationInfo,
   toEvenDimension,
+  UNIVERSAL_H264_BT709_ARGS,
   type CompressionPresetId,
   type OutputFormat,
 } from './videoProcessing'
 
 export type SocialTemplateId =
   | 'custom'
-  | 'tiktok-reels'
   | 'whatsapp'
-  | 'youtube'
+  | 'whatsapp-status'
   | 'instagram'
+  | 'tiktok-reels'
   | 'discord'
+  | 'youtube'
   | 'email'
+
+export type ClarityModelId = 'original' | 'natural-hd' | 'sharp-1080p' | 'low-light'
 
 export type CompressionMode = 'crf' | 'target-size'
 
@@ -122,6 +127,105 @@ export interface CompressOptions {
   // 4E. Privasi & Optimasi Tambahan
   stripMetadata: boolean
   fastStart: boolean
+
+  // 4F. Model Penjernih Video Anti-Buram & Opsi RAM/FPS Sadar Perangkat
+  clarityModel: ClarityModelId
+  /** Skala kekuatan filter penjernih 0 - 100% (default 80%; 0% = lewati filter penjernih) */
+  clarityStrength: number
+  /** Toggle opt-in khusus Mobile (default OFF) untuk menurunkan target Sosial-HD 1080p menjadi 720p pada video panjang > 60 detik */
+  mobileRamSaver720p: boolean
+  /** Opsi opsional khusus Desktop untuk mengizinkan hingga 60 fps pada preset Instagram & TikTok */
+  allow60FpsDesktop: boolean
+}
+
+export interface ClarityModelDef {
+  id: ClarityModelId
+  name: string
+  badge: string
+  description: string
+}
+
+export const CLARITY_MODEL_OPTIONS: ReadonlyArray<ClarityModelDef> = [
+  {
+    id: 'original',
+    name: 'Asli (Hemat)',
+    badge: 'Lanczos + BT.709',
+    description:
+      'Encode bersih dengan skala lanczos dan kunci warna BT.709 tanpa filter sharpen/denoise tambahan.',
+  },
+  {
+    id: 'natural-hd',
+    name: 'Natural HD',
+    badge: 'Default Sosial-HD',
+    description:
+      'Pembersihan halus dan penajaman luminans anti-halo agar tahan kompresi ulang WA, IG, dan TikTok.',
+  },
+  {
+    id: 'sharp-1080p',
+    name: 'Tajam 1080p',
+    badge: 'Anti-Buram',
+    description:
+      'Pemulihan detail tegas plus kontras/saturasi seimbang untuk menyelamatkan rekaman HP yang lembut.',
+  },
+  {
+    id: 'low-light',
+    name: 'Malam & Minim Cahaya',
+    badge: 'Anti-Noise Gelap',
+    description:
+      'Reduksi noise gelap, angkat bayangan bersih, dan penajaman terkendali agar adegan malam tetap jernih.',
+  },
+]
+
+export interface SocialPresetVbvSpec {
+  crf: number
+  maxrateKbps: number
+  bufsizeKbps: number
+  audioBitrateKbps: number
+  maxFpsMobile: 30
+  allowDesktop60Fps: boolean
+}
+
+export const SOCIAL_PRESET_VBV_CONFIG: Partial<Record<SocialTemplateId, SocialPresetVbvSpec>> = {
+  whatsapp: {
+    crf: 19,
+    maxrateKbps: 7500,
+    bufsizeKbps: 15000,
+    audioBitrateKbps: 128,
+    maxFpsMobile: 30,
+    allowDesktop60Fps: false,
+  },
+  'whatsapp-status': {
+    crf: 20,
+    maxrateKbps: 4800,
+    bufsizeKbps: 9600,
+    audioBitrateKbps: 128,
+    maxFpsMobile: 30,
+    allowDesktop60Fps: false,
+  },
+  instagram: {
+    crf: 19,
+    maxrateKbps: 8000,
+    bufsizeKbps: 16000,
+    audioBitrateKbps: 160,
+    maxFpsMobile: 30,
+    allowDesktop60Fps: true,
+  },
+  'tiktok-reels': {
+    crf: 19,
+    maxrateKbps: 8500,
+    bufsizeKbps: 17000,
+    audioBitrateKbps: 160,
+    maxFpsMobile: 30,
+    allowDesktop60Fps: true,
+  },
+  discord: {
+    crf: 24,
+    maxrateKbps: 2400,
+    bufsizeKbps: 4800,
+    audioBitrateKbps: 128,
+    maxFpsMobile: 30,
+    allowDesktop60Fps: false,
+  },
 }
 
 export interface SocialTemplateDef {
@@ -195,49 +299,61 @@ export const SOCIAL_TEMPLATES: ReadonlyArray<SocialTemplateDef> = [
     name: 'Custom / Manual',
     shortLabel: 'Manual',
     badge: 'Pengaturan Bebas',
-    description: 'Atur format, kualitas CRF atau target MB, serta opsi lanjutan sesuai kebutuhan.',
-  },
-  {
-    id: 'tiktok-reels',
-    name: 'TikTok & Reels HD',
-    shortLabel: 'TikTok / Reels',
-    badge: 'Maks 1080p • FPS Asli • CRF 20 • Anti-Burik',
-    description: 'MP4 H.264 maks 1080p (tanpa upscale), FPS asli, CRF 20 + Smart Bitrate Cap, +faststart.',
+    description: 'Hormati penuh resolusi, FPS, CRF, atau target MB pilihan Anda tanpa batas preset.',
   },
   {
     id: 'whatsapp',
-    name: 'WhatsApp Status & Chat HD',
+    name: 'WhatsApp HD',
     shortLabel: 'WhatsApp HD',
-    badge: 'Maks 720p • FPS Asli • Target < 15 MB',
-    description: 'MP4 H.264 maks 720p, FPS asli, ukuran otomatis di bawah 15 MB agar tidak diburikkan WA.',
+    badge: '1080p • Maks 30 fps • CRF 19 • 7,5 Mbps',
+    description:
+      'MP4 H.264 BT.709 maks 1080p, CRF 19 (cap 7500k), AAC 128k 48kHz agar tajam saat kirim ikon HD.',
+  },
+  {
+    id: 'whatsapp-status',
+    name: 'Status WA HD',
+    shortLabel: 'Status WA HD',
+    badge: '1080p • Maks 30 fps • CRF 20 • 4,8 Mbps',
+    description:
+      'MP4 H.264 BT.709 maks 1080p, 30 fps, CRF 20 (cap 4800k) di titik optimal kompresor Status WA.',
+  },
+  {
+    id: 'instagram',
+    name: 'Instagram Reels / Story',
+    shortLabel: 'Instagram HD',
+    badge: '1080p • CRF 19 • 8 Mbps • AAC 160k',
+    description:
+      'MP4 H.264 BT.709 maks 1080p, CRF 19 (cap 8000k), AAC 160k stereo siap upload Reels & Story.',
+  },
+  {
+    id: 'tiktok-reels',
+    name: 'TikTok HD',
+    shortLabel: 'TikTok HD',
+    badge: '1080p • CRF 19 • 8,5 Mbps • AAC 160k',
+    description:
+      'MP4 H.264 BT.709 maks 1080p, CRF 19 (cap 8500k), AAC 160k stereo tahan kompresi ulang TikTok.',
+  },
+  {
+    id: 'discord',
+    name: 'Ringan / Discord',
+    shortLabel: 'Ringan / Discord',
+    badge: '720p • Maks 30 fps • CRF 24 • 2,4 Mbps',
+    description:
+      'MP4 H.264 BT.709 maks 720p, 30 fps, CRF 24 (cap 2400k) tetap bersih dan hemat ukuran.',
   },
   {
     id: 'youtube',
     name: 'YouTube 1080p Optimal',
     shortLabel: 'YouTube 1080p',
-    badge: 'Maks 1080p • FPS Asli • CRF 18 • HD',
-    description: 'Visually lossless CRF 18 + Smart Cap, pertahankan FPS asli (≤60 fps), +faststart.',
-  },
-  {
-    id: 'instagram',
-    name: 'Instagram Feed / Story',
-    shortLabel: 'Instagram',
-    badge: 'Maks 1080p • FPS Asli • CRF 21 • H.264',
-    description: 'MP4 H.264 maks 1080p, FPS asli, CRF 21 + Smart Bitrate Cap, siap upload Feed & Story.',
-  },
-  {
-    id: 'discord',
-    name: 'Discord Free (< 10 MB)',
-    shortLabel: 'Discord <10MB',
-    badge: 'Maks 720p • FPS Asli • Target 9.5 MB',
-    description: 'MP4 H.264 maks 720p dengan Custom Target Size otomatis ≤ 9.5 MB untuk upload gratis.',
+    badge: '1080p • FPS Asli • CRF 18 • AAC 192k',
+    description: 'Visually lossless CRF 18 + BT.709, pertahankan FPS asli, AAC 192k, +faststart.',
   },
   {
     id: 'email',
     name: 'Email / Lampiran Ringan',
     shortLabel: 'Email <25MB',
-    badge: 'Maks 720p • Target < 24 MB',
-    description: 'MP4 H.264 maks 720p dengan target ukuran maksimal 24 MB agar aman dikirim lewat email.',
+    badge: '720p • Target < 24 MB • BT.709',
+    description: 'MP4 H.264 BT.709 maks 720p dengan target maksimal 24 MB agar aman dikirim lewat email.',
   },
 ]
 
@@ -247,6 +363,8 @@ export function getCompressOutputTag(options: CompressOptions): string {
       return 'tiktok-hd'
     case 'whatsapp':
       return 'wa-hd'
+    case 'whatsapp-status':
+      return 'status-wa-hd'
     case 'youtube':
       return 'youtube-hd'
     case 'instagram':
@@ -404,6 +522,92 @@ export const DEFAULT_COMPRESS_OPTIONS: CompressOptions = {
   cropY: '',
   stripMetadata: true,
   fastStart: true,
+  clarityModel: 'original',
+  clarityStrength: 80,
+  mobileRamSaver720p: false,
+  allow60FpsDesktop: false,
+}
+
+const VALID_SOCIAL_TEMPLATE_IDS = new Set<string>(SOCIAL_TEMPLATES.map((t) => t.id))
+const VALID_CLARITY_MODEL_IDS = new Set<string>(CLARITY_MODEL_OPTIONS.map((m) => m.id))
+
+/**
+ * Normalisasi defensif CompressOptions agar state lama (dari HMR, snapshot pipeline, atau cache browser)
+ * yang belum memiliki properti baru (clarityModel, clarityStrength, mobileRamSaver720p, allow60FpsDesktop)
+ * tidak pernah menyebabkan runtime crash.
+ */
+export function normalizeCompressOptions(
+  raw?: Partial<CompressOptions> | null,
+): CompressOptions {
+  if (!raw || typeof raw !== 'object') {
+    return { ...DEFAULT_COMPRESS_OPTIONS }
+  }
+  const merged: CompressOptions = {
+    ...DEFAULT_COMPRESS_OPTIONS,
+    ...raw,
+  }
+  const safeTemplate: SocialTemplateId =
+    typeof merged.socialTemplate === 'string' && VALID_SOCIAL_TEMPLATE_IDS.has(merged.socialTemplate)
+      ? (merged.socialTemplate as SocialTemplateId)
+      : 'custom'
+  const safeClarityModel: ClarityModelId =
+    typeof merged.clarityModel === 'string' && VALID_CLARITY_MODEL_IDS.has(merged.clarityModel)
+      ? (merged.clarityModel as ClarityModelId)
+      : 'original'
+  const safeClarityStrength =
+    typeof merged.clarityStrength === 'number' && Number.isFinite(merged.clarityStrength)
+      ? Math.max(0, Math.min(100, Math.round(merged.clarityStrength)))
+      : DEFAULT_COMPRESS_OPTIONS.clarityStrength
+
+  return {
+    ...merged,
+    socialTemplate: safeTemplate,
+    clarityModel: safeClarityModel,
+    clarityStrength: safeClarityStrength,
+    mobileRamSaver720p: Boolean(merged.mobileRamSaver720p),
+    allow60FpsDesktop: Boolean(merged.allow60FpsDesktop),
+  }
+}
+
+/**
+ * Membangun rantai filter penjernih anti-buram proporsional terhadap slider kekuatan 0 - 100%.
+ * Jika model kosong/'original' atau kekuatan = 0%, tidak ada filter sharpen/denoise tambahan.
+ */
+export function buildClarityFilterChain(
+  model: ClarityModelId | undefined | null,
+  strengthPercent: number | undefined | null,
+): string[] {
+  const numericStrength =
+    typeof strengthPercent === 'number' && Number.isFinite(strengthPercent) ? strengthPercent : 80
+  const clamped = Math.max(0, Math.min(100, Math.round(numericStrength)))
+  if (!model || model === 'original' || clamped <= 0) {
+    return []
+  }
+  const s = clamped / 100
+  const fmt2 = (n: number) => n.toFixed(2)
+  const fmt3 = (n: number) => n.toFixed(3)
+
+  switch (model) {
+    case 'natural-hd':
+      return [
+        `hqdn3d=${fmt2(1.2 * s)}:${fmt2(1.0 * s)}:${fmt2(2.5 * s)}:${fmt2(2.0 * s)}`,
+        `unsharp=5:5:${fmt2(0.45 * s)}:5:5:0.0`,
+      ]
+    case 'sharp-1080p':
+      return [
+        `hqdn3d=${fmt2(1.4 * s)}:${fmt2(1.1 * s)}:${fmt2(3.0 * s)}:${fmt2(2.4 * s)}`,
+        `unsharp=5:5:${fmt2(0.78 * s)}:5:5:0.0`,
+        `eq=contrast=${fmt3(1 + 0.04 * s)}:saturation=${fmt3(1 + 0.05 * s)}`,
+      ]
+    case 'low-light':
+      return [
+        `hqdn3d=${fmt2(2.8 * s)}:${fmt2(2.2 * s)}:${fmt2(4.5 * s)}:${fmt2(3.5 * s)}`,
+        `eq=gamma=${fmt3(1 + 0.08 * s)}:contrast=${fmt3(1 + 0.03 * s)}:saturation=${fmt3(1 + 0.04 * s)}`,
+        `unsharp=5:5:${fmt2(0.35 * s)}:5:5:0.0`,
+      ]
+    default:
+      return []
+  }
 }
 
 /* ============================================================================
@@ -805,13 +1009,17 @@ export function computeSourceBitrateProfile(
       options.outputFormat === 'mkv') &&
     (ext === 'mp4' || ext === 'mov' || ext === 'm4v')
 
+  const presetVbv = SOCIAL_PRESET_VBV_CONFIG[options.socialTemplate]
+
+  // Preset Sosial-HD selalu memakai audio standar universal AAC 48kHz stereo (128k/160k)
+  // agar kompatibel penuh di WhatsApp, Instagram, TikTok, iOS, dan Android.
   const allowAutoAudioCopy =
     !options.removeAudio &&
     !hasAudioEdits &&
     !isUltraTightTarget &&
+    options.socialTemplate === 'custom' &&
     containerCompatibleForAudioCopy &&
-    (options.audioCodec === 'auto' ||
-      (options.audioCodec === 'aac' && options.socialTemplate !== 'custom')) &&
+    options.audioCodec === 'auto' &&
     sourceTotalKbps < 1400
 
   let effectiveAudioKbps = 0
@@ -819,8 +1027,10 @@ export function computeSourceBitrateProfile(
     effectiveAudioKbps = 0
   } else if (options.audioCodec === 'copy' || allowAutoAudioCopy) {
     effectiveAudioKbps = estimatedSourceAudioKbps
+  } else if (presetVbv) {
+    effectiveAudioKbps = presetVbv.audioBitrateKbps
   } else {
-    // Jangan memaksa naikkan audio ke 192k/128k pada file sumber yang sudah terkompresi kecil
+    // Jangan memaksa naikkan audio ke 192k/128k pada file sumber yang sudah terkompresi kecil (mode non-Sosial-HD)
     let desiredAudio = options.audioBitrateKbps || 128
     if (options.socialTemplate === 'youtube') {
       desiredAudio = 192
@@ -891,6 +1101,9 @@ export function getEffectiveAudioBitrateKbps(
     return Math.min(options.audioBitrateKbps || 128, 128)
   }
 
+  const presetVbv = SOCIAL_PRESET_VBV_CONFIG[options.socialTemplate]
+  if (presetVbv) return presetVbv.audioBitrateKbps
+
   if (options.socialTemplate === 'youtube') return 192
   if (options.socialTemplate !== 'custom') return 128
 
@@ -923,6 +1136,7 @@ function computeTargetDimensions(
   options: CompressOptions,
   workW: number | null,
   workH: number | null,
+  isMobile = false,
 ): { width: number; height: number } | null {
   if (options.videoCodec === 'copy' || options.resizeMode === 'no-change') {
     return null
@@ -938,7 +1152,18 @@ function computeTargetDimensions(
       return null
     }
 
-    const preset = RESOLUTION_PRESET_OPTIONS.find((r) => r.value === options.resolutionPreset)
+    // Opt-in sadar RAM HP: hanya turunkan target Sosial-HD 1080p menjadi 720p jika pengguna Mobile secara eksplisit menyalakan toggle
+    const effectiveResolutionPreset: ResolutionPreset =
+      isMobile &&
+      options.mobileRamSaver720p &&
+      options.socialTemplate !== 'custom' &&
+      (options.resolutionPreset === '1080p' ||
+        options.resolutionPreset === '1440p' ||
+        options.resolutionPreset === '2160p')
+        ? '720p'
+        : options.resolutionPreset
+
+    const preset = RESOLUTION_PRESET_OPTIONS.find((r) => r.value === effectiveResolutionPreset)
     const maxShort = preset?.shortSidePx
     const maxLong = preset?.longSidePx
     if (!maxShort || !maxLong) return null
@@ -999,12 +1224,14 @@ function computeTargetDimensions(
  * CRF, perubahan resolusi (hanya jika downscale), FPS, durasi Trim, dan status audio.
  */
 export function estimateCompressedSize(
-  options: CompressOptions,
+  rawOptions: CompressOptions,
   originalSizeBytes: number,
   sourceDurationSec: number | null,
   sourceDims: { width: number | null; height: number | null },
   sourceExtension?: string | null,
+  isMobile = false,
 ): SizeEstimate {
+  const options = normalizeCompressOptions(rawOptions)
   const originalMB = originalSizeBytes / (1024 * 1024)
   const trim = validateTrimSettings(options.trimStart, options.trimEnd, sourceDurationSec)
   const bounds = computeTargetSizeBounds(
@@ -1111,7 +1338,7 @@ export function estimateCompressedSize(
   const crop = validateCropSettings(options, sourceDims.width, sourceDims.height)
   const workW = crop.isActive && crop.isValid && crop.width ? crop.width : sourceDims.width
   const workH = crop.isActive && crop.isValid && crop.height ? crop.height : sourceDims.height
-  const targetDims = computeTargetDimensions(options, workW, workH)
+  const targetDims = computeTargetDimensions(options, workW, workH, isMobile)
 
   let pixelFactor = 1
   if (sourceDims.width && sourceDims.height) {
@@ -1143,8 +1370,15 @@ export function estimateCompressedSize(
 
   const spread = isShortClip ? 0.32 : 0.2
 
+  const presetVbv = SOCIAL_PRESET_VBV_CONFIG[options.socialTemplate]
+
   if (sourceProfile) {
-    const minFloorKbps = Math.min(64, sourceProfile.maxVideoKbps)
+    const effectiveCapKbps = presetVbv
+      ? presetVbv.maxrateKbps
+      : options.socialTemplate === 'custom'
+        ? Math.max(sourceProfile.sourceVideoKbps, 12000)
+        : sourceProfile.maxVideoKbps
+    const minFloorKbps = Math.min(64, effectiveCapKbps)
     const rawProjectedVideoKbps =
       sourceProfile.sourceVideoKbps *
       crfBitrateScale *
@@ -1153,7 +1387,7 @@ export function estimateCompressedSize(
       fpsFactor *
       codecFactor
     const cappedMidVideoKbps = Math.min(
-      sourceProfile.maxVideoKbps,
+      effectiveCapKbps,
       Math.max(minFloorKbps, rawProjectedVideoKbps),
     )
 
@@ -1164,22 +1398,24 @@ export function estimateCompressedSize(
       containerOverhead *
       adaptiveFactor
     const vbvMaxMB =
-      (((Math.round(sourceProfile.maxVideoKbps * 1.08) + audioKbps) * trim.effectiveDurationSec) /
+      (((Math.round(effectiveCapKbps * 1.08) + audioKbps) * trim.effectiveDurationSec) /
         8192) *
       containerOverhead
 
-    const minEst = Number(Math.max(0.1, Math.min(originalMB, rawMidMB * (1 - spread))).toFixed(2))
+    const minEst = Number(Math.max(0.1, Math.min(originalMB * 1.25, rawMidMB * (1 - spread))).toFixed(2))
     const rawMaxEst = Math.min(vbvMaxMB * 1.05, rawMidMB * (1 + spread))
-    // [BUG-4R-14b] Non-upscale compress: clamp batas atas agar masuk akal terhadap ukuran input
-    const cappedMaxEst = pixelFactor <= 1.01 ? Math.min(originalMB, rawMaxEst) : rawMaxEst
-    const maxEst = Number(Math.max(minEst, cappedMaxEst).toFixed(2))
+    const maxEst = Number(Math.max(minEst, rawMaxEst).toFixed(2))
 
     return {
       mode: 'crf',
       originalMB,
       minEstimatedMB: minEst,
       maxEstimatedMB: maxEst,
-      smartCapVideoKbps: sourceProfile.maxVideoKbps,
+      smartCapVideoKbps: presetVbv
+        ? presetVbv.maxrateKbps
+        : options.socialTemplate === 'custom'
+          ? undefined
+          : sourceProfile.maxVideoKbps,
       sourceTotalKbps: sourceProfile.sourceTotalKbps,
       savingsPercentMin: originalMB > 0 ? ((originalMB - maxEst) / originalMB) * 100 : 0,
       savingsPercentMax: originalMB > 0 ? ((originalMB - minEst) / originalMB) * 100 : 0,
@@ -1274,10 +1510,12 @@ export function resetPreservedAdvancedOptions(options: CompressOptions): Compres
 
 export function applySocialTemplate(
   templateId: SocialTemplateId,
-  current: CompressOptions,
+  rawCurrent: CompressOptions,
   originalSizeBytes: number | null,
   sourceDurationSec: number | null,
+  preserveClaritySelection = false,
 ): CompressOptions {
+  const current = normalizeCompressOptions(rawCurrent)
   if (templateId === 'custom') {
     return {
       ...current,
@@ -1291,7 +1529,7 @@ export function applySocialTemplate(
     }
   }
 
-  // [BUG-15] Pertahankan opsi lanjutan non-konflik (Trim, Crop, Volume, Fade, Rotate, Flip, Hapus Audio)
+  // [BUG-15] Pertahankan opsi lanjutan non-konflik & pilihan opt-in perangkat
   const preservedNonConflicting = {
     rotate: current.rotate,
     flip: current.flip,
@@ -1305,6 +1543,9 @@ export function applySocialTemplate(
     cropHeight: current.cropHeight,
     cropX: current.cropX,
     cropY: current.cropY,
+    clarityStrength: current.clarityStrength,
+    mobileRamSaver720p: current.mobileRamSaver720p,
+    allow60FpsDesktop: current.allow60FpsDesktop,
   }
 
   const trim = validateTrimSettings(current.trimStart, current.trimEnd, sourceDurationSec)
@@ -1329,10 +1570,25 @@ export function applySocialTemplate(
     aspectRatio: 'no-change',
   }
 
-  // [BUG-4R-02] Hindari memaksa filter `fps=30` pada seluruh template media sosial
-  // agar sumber <= 30 fps tidak memicu crash filter/encode di @ffmpeg/core-mt@0.12.6
+  const resolveClarity = (defaultModel: ClarityModelId): ClarityModelId =>
+    preserveClaritySelection ? current.clarityModel : defaultModel
+
   switch (templateId) {
-    case 'tiktok-reels':
+    case 'whatsapp':
+      return {
+        ...commonBase,
+        compressionMode: 'crf',
+        crfPreset: 'lossless',
+        customCrf: 19,
+        resizeMode: 'resolution',
+        resolutionPreset: '1080p',
+        maxResolutionOnly: true,
+        frameRate: 'no-change',
+        audioBitrateKbps: 128,
+        clarityModel: resolveClarity('natural-hd'),
+      }
+
+    case 'whatsapp-status':
       return {
         ...commonBase,
         compressionMode: 'crf',
@@ -1343,21 +1599,50 @@ export function applySocialTemplate(
         maxResolutionOnly: true,
         frameRate: 'no-change',
         audioBitrateKbps: 128,
+        clarityModel: resolveClarity('natural-hd'),
       }
 
-    case 'whatsapp': {
-      const target = Number(Math.max(bounds.minMB, Math.min(14.5, bounds.maxMB)).toFixed(1))
+    case 'instagram':
       return {
         ...commonBase,
-        compressionMode: 'target-size',
-        targetSizeMB: target,
+        compressionMode: 'crf',
+        crfPreset: 'lossless',
+        customCrf: 19,
+        resizeMode: 'resolution',
+        resolutionPreset: '1080p',
+        maxResolutionOnly: true,
+        frameRate: 'no-change',
+        audioBitrateKbps: 160,
+        clarityModel: resolveClarity('natural-hd'),
+      }
+
+    case 'tiktok-reels':
+      return {
+        ...commonBase,
+        compressionMode: 'crf',
+        crfPreset: 'lossless',
+        customCrf: 19,
+        resizeMode: 'resolution',
+        resolutionPreset: '1080p',
+        maxResolutionOnly: true,
+        frameRate: 'no-change',
+        audioBitrateKbps: 160,
+        clarityModel: resolveClarity('natural-hd'),
+      }
+
+    case 'discord':
+      return {
+        ...commonBase,
+        compressionMode: 'crf',
+        crfPreset: 'balanced',
+        customCrf: 24,
         resizeMode: 'resolution',
         resolutionPreset: '720p',
         maxResolutionOnly: true,
         frameRate: 'no-change',
         audioBitrateKbps: 128,
+        clarityModel: resolveClarity('original'),
       }
-    }
 
     case 'youtube':
       return {
@@ -1370,34 +1655,8 @@ export function applySocialTemplate(
         maxResolutionOnly: true,
         frameRate: 'no-change',
         audioBitrateKbps: 192,
+        clarityModel: resolveClarity('natural-hd'),
       }
-
-    case 'instagram':
-      return {
-        ...commonBase,
-        compressionMode: 'crf',
-        crfPreset: 'balanced',
-        customCrf: 21,
-        resizeMode: 'resolution',
-        resolutionPreset: '1080p',
-        maxResolutionOnly: true,
-        frameRate: 'no-change',
-        audioBitrateKbps: 128,
-      }
-
-    case 'discord': {
-      const target = Number(Math.max(bounds.minMB, Math.min(9.5, bounds.maxMB)).toFixed(1))
-      return {
-        ...commonBase,
-        compressionMode: 'target-size',
-        targetSizeMB: target,
-        resizeMode: 'resolution',
-        resolutionPreset: '720p',
-        maxResolutionOnly: true,
-        frameRate: 'no-change',
-        audioBitrateKbps: 128,
-      }
-    }
 
     case 'email': {
       const target = Number(Math.max(bounds.minMB, Math.min(24, bounds.maxMB)).toFixed(1))
@@ -1410,13 +1669,14 @@ export function applySocialTemplate(
         maxResolutionOnly: true,
         frameRate: 'no-change',
         audioBitrateKbps: 128,
+        clarityModel: resolveClarity('original'),
       }
     }
   }
 }
 
 /* ============================================================================
- * BUILDER ARGUMEN FFMPEG.WASM (ANTI-BENGKAK, ANTI-ERROR & ANTI-DEADLOCK)
+ * BUILDER ARGUMEN FFMPEG.WASM (TRUE HD 1080P, BT.709, ANTI-DEADLOCK)
  * ========================================================================== */
 
 export interface BuildAdvancedCompressResult {
@@ -1429,6 +1689,10 @@ export interface BuildAdvancedCompressResult {
   targetVideoBitrateKbps?: number
   smartCapVideoKbps?: number
   usedSmartAudioCopy: boolean
+  /** Label FPS batas atas bila diterapkan (mis. "30 fps" atau "60 fps") untuk verifikasi hasil HD */
+  fpsCapLabel: string | null
+  /** True bila output memakai standar warna H.264 BT.709 universal */
+  isBt709H264: boolean
 }
 
 /**
@@ -1436,16 +1700,18 @@ export interface BuildAdvancedCompressResult {
  * oleh mode Tunggal dan mode Antrean Batch agar argumen perintah selalu konsisten).
  */
 export function resolveCompressOptionsForVideo(
-  options: CompressOptions,
+  rawOptions: CompressOptions,
   originalSizeBytes: number,
   sourceDurationSec: number | null,
 ): CompressOptions {
+  const options = normalizeCompressOptions(rawOptions)
   if (options.socialTemplate !== 'custom') {
     return applySocialTemplate(
       options.socialTemplate,
       options,
       originalSizeBytes,
       sourceDurationSec,
+      true,
     )
   }
   if (options.compressionMode === 'target-size') {
@@ -1467,7 +1733,7 @@ export function resolveCompressOptionsForVideo(
 export function buildAdvancedCompressArgs(
   inputName: string,
   outputName: string,
-  options: CompressOptions,
+  rawOptions: CompressOptions,
   isMobile: boolean,
   threads: number,
   originalSizeBytes: number | null,
@@ -1475,8 +1741,9 @@ export function buildAdvancedCompressArgs(
   sourceDims: { width: number | null; height: number | null },
   sourceExtension?: string | null,
 ): BuildAdvancedCompressResult {
-  // [BUG-4R-01] Batas aman encoder WASM MT: maks 2 thread tanpa flag filter-thread atau tune tambahan
-  const safeThreads = Math.max(1, Math.min(2, Math.floor(threads) || 1))
+  const options = normalizeCompressOptions(rawOptions)
+  // [BUG-4R-01] Batas aman encoder WASM: Mobile selalu 1 thread, Desktop maks 2 thread, tanpa flag filter-thread atau tune tambahan
+  const safeThreads = isMobile ? 1 : getSafeWasmEncoderThreads(threads)
   const { videoCodec, audioCodec } = resolveCodecPair(options)
   const trim = validateTrimSettings(options.trimStart, options.trimEnd, sourceDurationSec)
   const crop = validateCropSettings(options, sourceDims.width, sourceDims.height)
@@ -1487,6 +1754,7 @@ export function buildAdvancedCompressArgs(
     sourceDurationSec !== null && sourceDurationSec > 0,
   )
 
+  const presetVbv = SOCIAL_PRESET_VBV_CONFIG[options.socialTemplate]
   const isTargetSize = options.compressionMode === 'target-size'
   const clampedMB = Math.min(bounds.maxMB, Math.max(bounds.minMB, options.targetSizeMB))
   const sourceProfile = computeSourceBitrateProfile(
@@ -1517,14 +1785,16 @@ export function buildAdvancedCompressArgs(
   }
 
   // Urutan rantai Video Filter (-vf):
-  // 1. crop -> 2. scale/aspect-ratio (downscale-only pada template) -> 3. transpose -> 4. flip -> 5. fps -> 6. format=yuv420p
+  // 1. crop -> 2. scale (lanczos, dimensi genap) + setsar=1 -> 3. transpose -> 4. flip -> 5. model penjernih -> 6. fps -> 7. format=yuv420p
   const vfChain: string[] = []
   let targetVideoBitrateKbps: number | undefined
   let smartCapVideoKbps: number | undefined
+  let fpsCapLabel: string | null = null
+  const isBt709H264 = videoCodec === 'libx264'
 
-  // Preset encoder optimal: `veryfast` pada seluruh Template Media Sosial & Mobile agar 20-30% lebih cepat, `fast` pada Custom Desktop
-  const x264Preset =
-    options.socialTemplate !== 'custom' || isMobile ? 'veryfast' : 'fast'
+  // Kualitas preset 100% identik antara Mobile dan Desktop (ultrafast & superfast dilarang):
+  // `veryfast` pada seluruh preset Sosial-HD (CABAC & deblocking aktif) dan `fast` pada Custom.
+  const x264Preset = options.socialTemplate === 'custom' ? 'fast' : 'veryfast'
 
   if (videoCodec === 'copy') {
     args.push('-c:v', 'copy')
@@ -1539,12 +1809,12 @@ export function buildAdvancedCompressArgs(
       workH = crop.height
     }
 
-    // 2. Scale / Aspect Ratio (selalu genap kelipatan 2, dan HANYA downscale pada template)
-    const targetDims = computeTargetDimensions(options, workW, workH)
+    // 2. Scale / Aspect Ratio: selalu dimensi genap kelipatan 2, skala lanczos, dan setsar=1
+    const targetDims = computeTargetDimensions(options, workW, workH, isMobile)
     if (targetDims) {
-      vfChain.push(`scale=${targetDims.width}:${targetDims.height}:flags=bicubic`)
-    } else if (workW && workH && (workW % 2 !== 0 || workH % 2 !== 0)) {
-      vfChain.push(`scale=${toEvenDimension(workW)}:${toEvenDimension(workH)}:flags=bicubic`)
+      vfChain.push(`scale=${targetDims.width}:${targetDims.height}:flags=lanczos`, 'setsar=1')
+    } else {
+      vfChain.push('scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos', 'setsar=1')
     }
 
     // 3. Rotate (transpose)
@@ -1563,15 +1833,29 @@ export function buildAdvancedCompressArgs(
       vfChain.push('vflip')
     }
 
-    // 5. FPS
-    if (options.frameRate !== 'no-change') {
-      vfChain.push(`fps=${options.frameRate}`)
+    // 5. Model Penjernih Video (Asli / Natural HD / Tajam 1080p / Malam & Minim Cahaya) sesuai slider 0 - 100%
+    const clarityFilters = buildClarityFilterChain(options.clarityModel, options.clarityStrength)
+    if (clarityFilters.length > 0) {
+      vfChain.push(...clarityFilters)
     }
 
-    // 6. format=yuv420p (wajib di akhir jika bukan mode Copy)
+    // 6. FPS (explicit frameRate di Custom)
+    if (options.frameRate !== 'no-change') {
+      vfChain.push(`fps=${options.frameRate}`)
+      fpsCapLabel = `${options.frameRate} fps`
+    }
+
+    // 7. format=yuv420p (wajib di akhir jika bukan mode Copy)
     vfChain.push('format=yuv420p')
 
     args.push('-vf', vfChain.join(','))
+
+    // Batas maks FPS pintar (-fpsmax) khusus preset Sosial-HD: pertahankan FPS asli <= 30, potong otomatis jika > 30
+    if (presetVbv && options.frameRate === 'no-change') {
+      const capFps = !isMobile && presetVbv.allowDesktop60Fps && options.allow60FpsDesktop ? 60 : 30
+      args.push('-fpsmax', String(capFps))
+      fpsCapLabel = `${capFps} fps`
+    }
 
     const audioKbps = getEffectiveAudioBitrateKbps(
       options,
@@ -1588,8 +1872,9 @@ export function buildAdvancedCompressArgs(
         trim.effectiveDurationSec,
         audioKbps,
       )
-    } else if (sourceProfile) {
-      // Smart Bitrate Cap (Anti-Bengkak) pada semua mode CRF & Template Media Sosial
+    } else if (presetVbv) {
+      smartCapVideoKbps = presetVbv.maxrateKbps
+    } else if (options.socialTemplate === 'youtube' && sourceProfile) {
       smartCapVideoKbps = sourceProfile.maxVideoKbps
     }
 
@@ -1597,10 +1882,10 @@ export function buildAdvancedCompressArgs(
       targetVideoBitrateKbps !== undefined
         ? sourceProfile
           ? Math.min(
-              Math.round(targetVideoBitrateKbps * 1.15),
+              Math.round(targetVideoBitrateKbps * 1.25),
               Math.max(targetVideoBitrateKbps, sourceProfile.sourceVideoKbps),
             )
-          : Math.round(targetVideoBitrateKbps * 1.15)
+          : Math.round(targetVideoBitrateKbps * 1.25)
         : undefined
 
     if (videoCodec === 'libx264') {
@@ -1614,6 +1899,15 @@ export function buildAdvancedCompressArgs(
           '-bufsize',
           `${Math.round(targetMaxRateKbps * 2)}k`,
         )
+      } else if (presetVbv) {
+        args.push(
+          '-crf',
+          String(presetVbv.crf),
+          '-maxrate',
+          `${presetVbv.maxrateKbps}k`,
+          '-bufsize',
+          `${presetVbv.bufsizeKbps}k`,
+        )
       } else {
         args.push('-crf', String(getEffectiveCrf(options)))
         if (smartCapVideoKbps !== undefined) {
@@ -1625,7 +1919,7 @@ export function buildAdvancedCompressArgs(
           )
         }
       }
-      args.push('-pix_fmt', 'yuv420p', '-threads', String(safeThreads))
+      args.push(...UNIVERSAL_H264_BT709_ARGS, '-threads', String(safeThreads))
     } else if (videoCodec === 'libx265') {
       args.push(
         '-c:v',
@@ -1666,7 +1960,7 @@ export function buildAdvancedCompressArgs(
         '-deadline',
         'realtime',
         '-cpu-used',
-        isMobile ? '6' : '4',
+        '4',
       )
       if (safeThreads > 1) {
         args.push('-row-mt', '1')
@@ -1681,7 +1975,6 @@ export function buildAdvancedCompressArgs(
           `${Math.round(targetMaxRateKbps * 2)}k`,
         )
       } else if (smartCapVideoKbps !== undefined) {
-        // VP9 Constrained Quality mode: -crf + -b:v sebagai ceiling + -maxrate/-bufsize
         args.push(
           '-crf',
           String(Math.min(40, getEffectiveCrf(options) + 7)),
@@ -1699,7 +1992,7 @@ export function buildAdvancedCompressArgs(
     }
   }
 
-  // Audio Options (-an / -c:a copy [smart atau manual] / -c:a proporsional)
+  // Audio Options (-an / -c:a copy [smart pada Custom atau manual] / -c:a standar universal 48kHz stereo)
   const afChain: string[] = []
   let usedSmartAudioCopy = false
 
@@ -1735,7 +2028,7 @@ export function buildAdvancedCompressArgs(
       args.push('-af', afChain.join(','))
     }
 
-    args.push('-c:a', audioCodec, '-b:a', `${audioKbps}k`)
+    args.push('-c:a', audioCodec, '-b:a', `${audioKbps}k`, '-ar', '48000', '-ac', '2')
   }
 
   // Privasi: Hapus Metadata Pribadi
@@ -1764,5 +2057,7 @@ export function buildAdvancedCompressArgs(
     targetVideoBitrateKbps,
     smartCapVideoKbps,
     usedSmartAudioCopy,
+    fpsCapLabel,
+    isBt709H264,
   }
 }

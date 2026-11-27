@@ -262,11 +262,10 @@ export function resolveEngineProfile(forceSingleThread = false): EngineProfile {
     typeof window !== 'undefined' && window.crossOriginIsolated === true
   const useMultiThread = !forceSingleThread && isDesktop && crossOriginIsolated
 
-  // Batasi thread secara eksplisit hingga maks 6 agar libx264/filter cepat tanpa pthread deadlock di WASM
-  const recommendedThreads = getRecommendedFFmpegThreads(
-    useMultiThread,
-    deviceInfo.hardwareConcurrency,
-  )
+  // Kunci -threads 1 di Mobile (Single-Thread Hemat RAM) dan batasi aman di Desktop Multi-Thread
+  const recommendedThreads = isMobile
+    ? 1
+    : getRecommendedFFmpegThreads(useMultiThread, deviceInfo.hardwareConcurrency)
 
   return {
     deviceType: deviceInfo.type,
@@ -915,10 +914,32 @@ export function useFFmpeg(): UseFFmpegReturn {
       if (typeof fileData === 'string') {
         blob = new Blob([fileData], { type: mimeType })
       } else {
-        // Salin ke ArrayBuffer non-shared agar aman dari TypeError SharedArrayBuffer di mode Multi-Thread
-        const safeBytes = new Uint8Array(fileData.byteLength)
-        safeBytes.set(fileData)
-        blob = new Blob([safeBytes], { type: mimeType })
+        const isShared =
+          typeof SharedArrayBuffer !== 'undefined' && fileData.buffer instanceof SharedArrayBuffer
+        const isExactNonSharedView =
+          !isShared &&
+          fileData.byteOffset === 0 &&
+          fileData.byteLength === fileData.buffer.byteLength
+        if (isExactNonSharedView) {
+          // Hemat puncak RAM HP (Single-Thread): hindari duplikasi penuh Uint8Array saat buffer non-shared
+          blob = new Blob([fileData.buffer as ArrayBuffer], { type: mimeType })
+        } else {
+          // Salin ke ArrayBuffer non-shared agar aman dari TypeError SharedArrayBuffer di mode Multi-Thread
+          const safeBytes = new Uint8Array(fileData.byteLength)
+          safeBytes.set(fileData)
+          blob = new Blob([safeBytes], { type: mimeType })
+        }
+      }
+
+      // Higiene RAM HP & Desktop: segera hapus file output & input di MEMFS sesaat setelah Uint8Array dibaca ke Blob
+      const memfsToPurge = new Set<string>([fileName, ...trackedFilesRef.current])
+      for (const memPath of memfsToPurge) {
+        try {
+          await ffmpeg.deleteFile(memPath)
+        } catch {
+          // Abaikan jika file sudah dihapus atau tidak ada
+        }
+        trackedFilesRef.current.delete(memPath)
       }
 
       const url = URL.createObjectURL(blob)
