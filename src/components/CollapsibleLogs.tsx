@@ -31,23 +31,21 @@ const FAILURE_INDICATION_REGEX =
   /(error|fail|exception|invalid|cannot|no such file|denied|corrupt|unable)/i
 
 /**
- * [BUG-05, NEW-03, NEW-09, BUG-4R-12] Saring noise teknis bawaan FFmpeg.wasm di tampilan default:
- * 1. Peringatan non-error `[swscaler ...]` (termasuk `deprecated pixel format used` dan
- *    `No accelerated colorspace conversion`), tanpa pernah membuang error asli.
- * 2. Baris progress yang diawali `frame=` (atau `[stderr] frame=`) dengan timestamp negatif (`time=-...`),
- *    tanpa pernah menyembunyikan baris error asli.
+ * [BUG-05, NEW-03, NEW-09, BUG-4R-12, BUG-7R-24, BUG-7R-25] Saring noise teknis bawaan FFmpeg.wasm di tampilan default:
+ * 1. Jangan pernah menyembunyikan baris yang cocok FAILURE_INDICATION_REGEX atau Aborted.
+ * 2. Peringatan non-error `[swscaler ...]` (termasuk `deprecated pixel format used` dan
+ *    `No accelerated colorspace conversion`).
+ * 3. Baris progres FFmpeg (`frame=...` atau `size=...` termasuk ekspor audio MP3) dengan timestamp negatif palsu (`time=-...`).
  */
 export function isNoisyTechnicalLogLine(line: string): boolean {
   if (typeof line !== 'string') return false
   const trimmed = line.trim()
   if (/\bAborted\b/i.test(trimmed)) return false
-  if (
-    /\[swscaler\b[^\]]*\]/i.test(trimmed) &&
-    !/\b(error|failed|invalid|cannot|fatal)\b/i.test(trimmed)
-  ) {
+  if (FAILURE_INDICATION_REGEX.test(trimmed)) return false
+  if (/\[swscaler\b[^\]]*\]/i.test(trimmed)) {
     return true
   }
-  if (/^(\[(?:stderr|stdout)\]\s*)?frame=\s*\d+.*\btime=-\d+/i.test(trimmed)) {
+  if (/^(\[(?:stderr|stdout)\]\s*)?(?:frame|size)=\s*\S+.*\btime=-\d+/i.test(trimmed)) {
     return true
   }
   return false
@@ -342,11 +340,17 @@ export function CollapsibleLogs({
           )}
 
           {!showRawLogs && hiddenNoiseCount > 0 && (
-            <div className="border-b border-slate-800/80 bg-slate-900/60 px-4 py-1.5 text-[11px] text-slate-400">
-              Menyembunyikan {hiddenNoiseCount} baris noise teknis (swscaler, timestamp negatif,
-              abort cleanup sukses). Aktifkan{' '}
-              <strong className="text-slate-200">Tampilkan Log Mentah</strong> untuk melihat
-              seluruh output.
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 bg-slate-900/60 px-4 py-1.5 text-[11px] text-slate-300">
+              <span>
+                Menyembunyikan {hiddenNoiseCount} baris (bukan error) -{' '}
+                <button
+                  type="button"
+                  onClick={() => setShowRawLogs(true)}
+                  className="cursor-pointer font-bold text-[#6DE7C1] underline underline-offset-2 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6DE7C1]"
+                >
+                  Tampilkan Log Mentah
+                </button>
+              </span>
             </div>
           )}
 

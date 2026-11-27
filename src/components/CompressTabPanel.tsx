@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { motion } from 'motion/react'
 import {
   AlertTriangle,
@@ -25,6 +25,7 @@ import {
   AUDIO_CODEC_OPTIONS,
   buildAdvancedCompressArgs,
   CLARITY_MODEL_OPTIONS,
+  computeTargetDimensions,
   computeTargetSizeBounds,
   estimateCompressedSize,
   FLIP_OPTIONS,
@@ -37,6 +38,7 @@ import {
   resetPreservedAdvancedOptions,
   RESOLUTION_PRESET_OPTIONS,
   resolveCodecPair,
+  resolveCompressOptionsForVideo,
   ROTATE_OPTIONS,
   SOCIAL_TEMPLATES,
   validateCropSettings,
@@ -58,6 +60,7 @@ import {
   COMPRESSION_PRESETS,
   formatFileSizeMB,
   OUTPUT_FORMAT_OPTIONS,
+  resetAdaptiveSizeCalibration,
   type OutputFormat,
 } from '../utils/videoProcessing'
 
@@ -94,6 +97,8 @@ export function CompressTabPanel({
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [targetOutOfRangeNotice, setTargetOutOfRangeNotice] = useState<string | null>(null)
   const [isEditingTargetText, setIsEditingTargetText] = useState(false)
+  const [calibrationVersion, setCalibrationVersion] = useState(0)
+  const targetCommitTimerRef = useRef<number | null>(null)
 
   const isCustomMode = options.socialTemplate === 'custom'
 
@@ -111,8 +116,8 @@ export function CompressTabPanel({
     Math.min(bounds.maxMB, Math.max(bounds.minMB, options.targetSizeMB)).toFixed(1),
   )
 
-  // [BUG-02] State teks lokal agar pengguna bebas mengetik angka desimal parsial ("0.", "0.5")
-  // dan baru dilakukan parsing + clamping saat onBlur atau Enter
+  // [BUG-02 & BUG-7R-10] State teks lokal agar pengguna bebas mengetik angka desimal parsial ("0.", "0.5")
+  // dengan commit otomatis (debounce ~250ms) saat valid, plus parsing + clamping pada onBlur atau Enter
   const [targetSizeText, setTargetSizeText] = useState<string>(() => clampedTargetMB.toFixed(1))
 
   useEffect(() => {
@@ -121,10 +126,27 @@ export function CompressTabPanel({
     }
   }, [clampedTargetMB, isEditingTargetText])
 
+  useEffect(() => {
+    return () => {
+      if (targetCommitTimerRef.current !== null) {
+        window.clearTimeout(targetCommitTimerRef.current)
+      }
+    }
+  }, [])
+
+  // [BUG-7R-04] Pakai pipeline normalisasi yang 100% identik dengan eksekusi aktual
+  // (resolveCompressOptionsForVideo -> buildAdvancedCompressArgs) agar preview dan eksekusi selalu sama persis
+  const basePreviewOptions: CompressOptions = { ...options, targetSizeMB: clampedTargetMB }
+  const resolvedPreviewOptions: CompressOptions =
+    originalSizeBytes !== null
+      ? resolveCompressOptionsForVideo(basePreviewOptions, originalSizeBytes, sourceDurationSec)
+      : basePreviewOptions
+
+  void calibrationVersion
   const sizeEstimate =
     originalSizeBytes !== null
       ? estimateCompressedSize(
-          { ...options, targetSizeMB: clampedTargetMB },
+          resolvedPreviewOptions,
           originalSizeBytes,
           sourceDurationSec,
           sourceDimensions,
@@ -135,8 +157,8 @@ export function CompressTabPanel({
 
   const commandPreview = buildAdvancedCompressArgs(
     `input.${sourceExtension || 'mp4'}`,
-    `output.${options.outputFormat}`,
-    { ...options, targetSizeMB: clampedTargetMB },
+    `output.${resolvedPreviewOptions.outputFormat}`,
+    resolvedPreviewOptions,
     isMobile,
     recommendedThreads,
     originalSizeBytes,
@@ -258,11 +280,19 @@ export function CompressTabPanel({
   const handleTargetSizeKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {
       event.preventDefault()
+      if (targetCommitTimerRef.current !== null) {
+        window.clearTimeout(targetCommitTimerRef.current)
+        targetCommitTimerRef.current = null
+      }
       setIsEditingTargetText(false)
       commitTargetSizeValue(targetSizeText)
       event.currentTarget.blur()
     } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
       event.preventDefault()
+      if (targetCommitTimerRef.current !== null) {
+        window.clearTimeout(targetCommitTimerRef.current)
+        targetCommitTimerRef.current = null
+      }
       const currentNum = Number.parseFloat(targetSizeText.replace(',', '.'))
       const base = Number.isFinite(currentNum) ? currentNum : clampedTargetMB
       const delta = event.key === 'ArrowUp' ? 0.1 : -0.1
@@ -275,6 +305,10 @@ export function CompressTabPanel({
 
   const handleTargetSizeSliderChange = (rawValue: string) => {
     if (disabled) return
+    if (targetCommitTimerRef.current !== null) {
+      window.clearTimeout(targetCommitTimerRef.current)
+      targetCommitTimerRef.current = null
+    }
     const parsed = Number.parseFloat(rawValue)
     if (!Number.isFinite(parsed)) return
     const rounded = Number(Math.min(bounds.maxMB, Math.max(bounds.minMB, parsed)).toFixed(1))
@@ -308,38 +342,88 @@ export function CompressTabPanel({
 
   const activeClarityModel =
     CLARITY_MODEL_OPTIONS.find((m) => m.id === options.clarityModel) ?? CLARITY_MODEL_OPTIONS[0]
-  const effectiveTemplateResolutionLabel =
-    isMobile &&
-    options.mobileRamSaver720p &&
-    options.resolutionPreset === '1080p'
+
+  // [BUG-7R-02] Hitung dimensi output efektif aktual agar kartu preset jujur pada sumber sub-HD
+  const workDimW = crop.isActive && crop.isValid && crop.width ? crop.width : sourceDimensions.width
+  const workDimH = crop.isActive && crop.isValid && crop.height ? crop.height : sourceDimensions.height
+  const rotated90or270 = options.rotate === '90' || options.rotate === '270'
+  const orientedW = rotated90or270 ? workDimH : workDimW
+  const orientedH = rotated90or270 ? workDimW : workDimH
+  const computedTargetDims = computeTargetDimensions(
+    resolvedPreviewOptions,
+    orientedW,
+    orientedH,
+    isMobile,
+  )
+  const effectiveOutW = computedTargetDims?.width ?? orientedW
+  const effectiveOutH = computedTargetDims?.height ?? orientedH
+  const supportsMobileRamSaverPreset =
+    options.resolutionPreset === '1080p' ||
+    options.resolutionPreset === '1440p' ||
+    options.resolutionPreset === '2160p'
+  const maxTemplateCapLabel =
+    isMobile && options.mobileRamSaver720p && supportsMobileRamSaverPreset
       ? 'Maks 720p (Hemat RAM HP)'
       : options.resolutionPreset === '720p'
-        ? 'Maks 720p (No Upscale)'
-        : 'Maks 1080p True HD (No Upscale)'
+        ? 'Maks 720p'
+        : options.resolutionPreset === '1440p'
+          ? 'Maks 1440p'
+          : options.resolutionPreset === '2160p'
+            ? 'Maks 4K'
+            : 'Maks 1080p'
+  const effectiveTemplateResolutionLabel =
+    effectiveOutW && effectiveOutH
+      ? computedTargetDims === null
+        ? `Output: ${effectiveOutW}×${effectiveOutH} (sesuai sumber) • ${maxTemplateCapLabel}`
+        : `Output: ${effectiveOutW}×${effectiveOutH} • ${maxTemplateCapLabel}`
+      : `${maxTemplateCapLabel} (No Upscale)`
+
   const supportsDesktop60FpsToggle =
     !isMobile &&
     (options.socialTemplate === 'instagram' || options.socialTemplate === 'tiktok-reels')
-  const showMobileRamSaverToggle =
-    isMobile && !isCustomMode && options.resolutionPreset === '1080p'
+  // [BUG-7R-29] Selaras dengan computeTargetDimensions: tampilkan Hemat RAM HP (720p) untuk 1080p, 1440p, 2160p
+  const showMobileRamSaverToggle = isMobile && !isCustomMode && supportsMobileRamSaverPreset
+
+  // [BUG-7R-03] Peringatan pra-render untuk preset sosial saat estimasi lebih besar dari asli atau melebihi 16 MB di WhatsApp
+  const showPreRenderSizeIncreaseWarning =
+    !isCustomMode &&
+    sizeEstimate !== null &&
+    sizeEstimate.maxEstimatedMB > sizeEstimate.originalMB
+  const isWhatsappTemplate =
+    options.socialTemplate === 'whatsapp' || options.socialTemplate === 'whatsapp-status'
+  const showWhatsapp16MbWarning =
+    isWhatsappTemplate && sizeEstimate !== null && sizeEstimate.maxEstimatedMB > 16
+
+  // [BUG-7R-17] Badge codec template reaktif terhadap resolvedVideoCodec & isBt709H264
+  const templateCodecBadge =
+    commandPreview.resolvedVideoCodec === 'copy'
+      ? 'Video Copy'
+      : commandPreview.isBt709H264
+        ? 'H.264 BT.709 (veryfast)'
+        : commandPreview.resolvedVideoCodec === 'libx265'
+          ? 'H.265 / HEVC'
+          : commandPreview.resolvedVideoCodec === 'libvpx-vp9'
+            ? 'VP9'
+            : commandPreview.resolvedVideoCodec
 
   // Daftar badge ringkas parameter otomatis yang diterapkan oleh Template Media Sosial aktif
   const templateAutoBadges: string[] = !isCustomMode
     ? [
-        `.${options.outputFormat.toUpperCase()}`,
-        'H.264 BT.709 (veryfast)',
+        `.${resolvedPreviewOptions.outputFormat.toUpperCase()}`,
+        templateCodecBadge,
         effectiveTemplateResolutionLabel,
         commandPreview.fpsCapLabel
           ? `Maks ${commandPreview.fpsCapLabel}`
-          : options.frameRate === 'no-change'
+          : resolvedPreviewOptions.frameRate === 'no-change'
             ? 'FPS Asli'
-            : `${options.frameRate} fps`,
-        options.compressionMode === 'target-size'
+            : `${resolvedPreviewOptions.frameRate} fps`,
+        resolvedPreviewOptions.compressionMode === 'target-size'
           ? `Target ≤ ${clampedTargetMB.toFixed(1)} MB`
           : commandPreview.smartCapVideoKbps
             ? `CRF ${effectiveCrf} • Cap ≤${commandPreview.smartCapVideoKbps}k`
             : `CRF ${effectiveCrf}`,
-        options.clarityModel !== 'original' && options.clarityStrength > 0
-          ? `${activeClarityModel.name} (${options.clarityStrength}%)`
+        resolvedPreviewOptions.clarityModel !== 'original' && resolvedPreviewOptions.clarityStrength > 0
+          ? `${activeClarityModel.name} (${resolvedPreviewOptions.clarityStrength}%)`
           : 'Penjernih: Asli',
         commandPreview.usedSmartAudioCopy ? 'Audio Copy' : `AAC ${effectiveAudioKbps}k 48kHz`,
         'Hapus Metadata',
@@ -401,16 +485,42 @@ export function CompressTabPanel({
       </div>
 
       <div className="rounded-xl border border-[#E2F3EC] bg-[#F7FFFC] px-3.5 py-3">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <label
             htmlFor="compress-clarity-strength"
             className="text-xs font-bold text-[#0D2B24]"
           >
             Kekuatan Penjernih
           </label>
-          <span className="rounded-full bg-[#E8FFF5] px-2.5 py-0.5 text-xs font-extrabold text-[#0D6E5D] ring-1 ring-[#B5F5DB] tabular-nums">
-            {options.clarityModel === 'original' ? 'Nonaktif (Asli)' : `${options.clarityStrength}%`}
-          </span>
+          <div className="flex items-center gap-2">
+            {options.clarityModel === 'original' ? (
+              <span className="rounded-full bg-[#E8FFF5] px-2.5 py-0.5 text-xs font-extrabold text-[#0D6E5D] ring-1 ring-[#B5F5DB] tabular-nums">
+                Nonaktif (Asli)
+              </span>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <input
+                  id="compress-clarity-strength-num"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={options.clarityStrength}
+                  disabled={disabled || isVideoCopy}
+                  aria-label="Input angka kekuatan penjernih 0 sampai 100 persen"
+                  onChange={(e) => {
+                    const parsed = Number.parseInt(e.target.value, 10)
+                    const clamped = Number.isFinite(parsed)
+                      ? Math.max(0, Math.min(100, parsed))
+                      : 0
+                    update({ clarityStrength: clamped }, false)
+                  }}
+                  className="min-h-11 w-20 rounded-lg border border-[#6DE7C1] bg-white px-2.5 py-1 text-right text-xs font-extrabold text-[#0D6E5D] tabular-nums focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] disabled:opacity-50"
+                />
+                <span className="text-xs font-extrabold text-[#0D6E5D]">%</span>
+              </div>
+            )}
+          </div>
         </div>
         <input
           id="compress-clarity-strength"
@@ -576,9 +686,23 @@ export function CompressTabPanel({
                 )}
                 {sizeEstimate.calibrationSamples !== undefined &&
                   sizeEstimate.calibrationSamples > 0 && (
-                    <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
-                      Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
-                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-medium text-[#0D6E5D] sm:justify-end">
+                      <span>
+                        Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
+                        (tersimpan di browser ini)
+                      </span>
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          resetAdaptiveSizeCalibration(`compress:${options.socialTemplate}`)
+                          setCalibrationVersion((v) => v + 1)
+                        }}
+                        className="cursor-pointer rounded px-1.5 py-0.5 font-bold text-[#0D6E5D] underline underline-offset-2 hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:opacity-50"
+                      >
+                        Reset kalibrasi
+                      </button>
+                    </div>
                   )}
               </div>
             </div>
@@ -588,6 +712,41 @@ export function CompressTabPanel({
               <span>
                 Pilih file video di atas untuk melihat estimasi ukuran hasil real-time sebelum
                 kompresi.
+              </span>
+            </div>
+          )}
+
+          {/* [BUG-7R-03] Peringatan pra-render jika estimasi preset sosial melebihi ukuran file asli atau batas 16 MB WhatsApp */}
+          {showPreRenderSizeIncreaseWarning && (
+            <div
+              role="status"
+              className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-3 text-xs leading-relaxed text-amber-950"
+            >
+              <AlertTriangle
+                aria-hidden="true"
+                className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
+              />
+              <span>
+                Video asli sudah terkompresi ketat; preset ini dapat memperbesar ukuran file demi
+                menjaga ketajaman. Pilih <strong className="font-bold">Custom Target Size (MB)</strong>{' '}
+                jika ingin mengecilkan ukuran file.
+              </span>
+            </div>
+          )}
+
+          {showWhatsapp16MbWarning && (
+            <div
+              role="status"
+              className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-3 text-xs leading-relaxed text-amber-950"
+            >
+              <AlertTriangle
+                aria-hidden="true"
+                className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
+              />
+              <span>
+                Estimasi melebihi batas media WhatsApp 16 MB; pertimbangkan{' '}
+                <strong className="font-bold">Status WA HD</strong> atau{' '}
+                <strong className="font-bold">Custom Target Size</strong>.
               </span>
             </div>
           )}
@@ -607,7 +766,7 @@ export function CompressTabPanel({
           {/* 4 Model Penjernih Anti-Buram + Slider Kekuatan (0% - 100%) */}
           {clarityModelSection}
 
-          {/* Toggle Opt-In Khusus Mobile: Mode Hemat RAM HP (720p), Default OFF agar 1080p True HD konsisten */}
+          {/* Toggle Opt-In Khusus Mobile: Mode Hemat RAM HP (720p), Default OFF agar 1080p konsisten */}
           {showMobileRamSaverToggle && (
             <label className="flex min-h-14 cursor-pointer touch-manipulation items-center justify-between gap-3 rounded-xl border border-[#B5F5DB] bg-white px-3.5 py-3 transition-colors hover:border-[#6DE7C1]">
               <div>
@@ -615,8 +774,8 @@ export function CompressTabPanel({
                   Mode Hemat RAM HP (720p)
                 </span>
                 <span className="mt-0.5 block text-[11px] leading-snug text-[#0D6E5D]">
-                  Aktifkan hanya jika video berdurasi panjang &gt; 60 detik agar memori HP tetap
-                  ringan.
+                  Turunkan resolusi ke 720p agar memori HP tetap ringan, disarankan untuk video
+                  panjang &gt; 60 detik.
                 </span>
               </div>
               <input
@@ -793,9 +952,17 @@ export function CompressTabPanel({
                   disabled={disabled || isVideoCopy}
                   onClick={() => {
                     setTargetOutOfRangeNotice(null)
+                    const shouldResetInheritedResize =
+                      options.maxResolutionOnly ||
+                      (options.derivedFromTemplate !== null &&
+                        options.resizeMode === 'resolution' &&
+                        options.resolutionPreset !== 'custom')
                     update({
                       compressionMode: 'target-size',
                       targetSizeMB: clampedTargetMB,
+                      ...(shouldResetInheritedResize
+                        ? { resizeMode: 'no-change' as ResizeMode, maxResolutionOnly: false }
+                        : {}),
                     })
                   }}
                   className={`min-h-11 cursor-pointer touch-manipulation rounded-lg px-3.5 py-2 text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
@@ -912,9 +1079,33 @@ export function CompressTabPanel({
                         const raw = e.target.value
                         if (/^[0-9]*[.,]?[0-9]*$/.test(raw)) {
                           setTargetSizeText(raw)
+                          if (targetCommitTimerRef.current !== null) {
+                            window.clearTimeout(targetCommitTimerRef.current)
+                            targetCommitTimerRef.current = null
+                          }
+                          const normalized = raw.trim().replace(',', '.')
+                          const parsed = Number.parseFloat(normalized)
+                          if (
+                            normalized &&
+                            !normalized.endsWith('.') &&
+                            Number.isFinite(parsed) &&
+                            parsed >= bounds.minMB &&
+                            parsed <= bounds.maxMB
+                          ) {
+                            const rounded = Number(parsed.toFixed(1))
+                            targetCommitTimerRef.current = window.setTimeout(() => {
+                              setTargetOutOfRangeNotice(null)
+                              update({ targetSizeMB: rounded })
+                              targetCommitTimerRef.current = null
+                            }, 250)
+                          }
                         }
                       }}
                       onBlur={() => {
+                        if (targetCommitTimerRef.current !== null) {
+                          window.clearTimeout(targetCommitTimerRef.current)
+                          targetCommitTimerRef.current = null
+                        }
                         setIsEditingTargetText(false)
                         commitTargetSizeValue(targetSizeText)
                       }}
@@ -1023,9 +1214,23 @@ export function CompressTabPanel({
                 </p>
                 {sizeEstimate.calibrationSamples !== undefined &&
                   sizeEstimate.calibrationSamples > 0 && (
-                    <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
-                      Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
-                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-medium text-[#0D6E5D] sm:justify-end">
+                      <span>
+                        Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
+                        (tersimpan di browser ini)
+                      </span>
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          resetAdaptiveSizeCalibration(`compress:${options.socialTemplate}`)
+                          setCalibrationVersion((v) => v + 1)
+                        }}
+                        className="cursor-pointer rounded px-1.5 py-0.5 font-bold text-[#0D6E5D] underline underline-offset-2 hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:opacity-50"
+                      >
+                        Reset kalibrasi
+                      </button>
+                    </div>
                   )}
               </div>
             </div>

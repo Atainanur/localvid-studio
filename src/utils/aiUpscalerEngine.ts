@@ -7,7 +7,11 @@ import {
   type AiFrameProgress,
   type AiUpscaleSettings,
 } from './aiUpscalerConfig'
-import { computeTarget1080pResolution, toEvenDimension } from './videoProcessing'
+import {
+  buildUniversalH264Bt709Args,
+  computeTarget1080pResolution,
+  toEvenDimension,
+} from './videoProcessing'
 import type { WebCodecsFrameReader } from './webCodecsFrameReader'
 
 type OrtWebGpuModule = typeof import('onnxruntime-web/webgpu')
@@ -1853,7 +1857,7 @@ export async function runAiUpscalePipeline({
       '-t',
       effectiveDuration.toFixed(2),
       '-vf',
-      'format=yuv420p',
+      'setsar=1,format=yuv420p',
       '-c:v',
       'libx264',
       '-preset',
@@ -1866,7 +1870,12 @@ export async function runAiUpscalePipeline({
       baseAssembleArgs.push('-maxrate', `${smartMaxRateKbps}k`, '-bufsize', `${smartMaxRateKbps * 2}k`)
     }
 
-    baseAssembleArgs.push('-pix_fmt', 'yuv420p', '-threads', safeThreads)
+    // [BUG-7R-01 & BUG-7R-05] Pasang tag BT.709 nyata + level H.264 dinamis (4.2 bila > 8192 macroblock)
+    baseAssembleArgs.push(
+      ...buildUniversalH264Bt709Args(targetDims.width, targetDims.height),
+      '-threads',
+      safeThreads,
+    )
 
     let assembleExit = await ffmpeg.exec(
       [...baseAssembleArgs, '-c:a', 'copy', '-shortest', '-movflags', '+faststart', outputFileName],

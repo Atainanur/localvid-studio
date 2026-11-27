@@ -508,7 +508,10 @@ export function AudioDenoiseTabPanel({
                 id: 'video-copy' as AudioDenoiseOutputMode,
                 title: 'Video + Audio Bersih (Cepat, Tanpa Render Ulang Video)',
                 badge: 'Video Copy (-c:v copy) • Cepat & Kualitas Asli',
-                desc: `Output .${outputTarget.ext.toUpperCase()} (${outputTarget.codecLabel}) dengan kualitas video 100% identik aslinya dan proses sangat cepat.`,
+                desc:
+                  options.outputMode === 'audio-mp3'
+                    ? `Pilih mode ini jika ingin menyimpan kembali sebagai file video .${outputTarget.ext.toUpperCase()} (${outputTarget.codecLabel}) tanpa render ulang gambar.`
+                    : `Output .${outputTarget.ext.toUpperCase()} (${outputTarget.codecLabel}) dengan kualitas video 100% identik aslinya dan proses sangat cepat.`,
                 Icon: Film,
               },
               {

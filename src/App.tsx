@@ -100,6 +100,7 @@ import {
   detectIsolationInfo,
   detectWebGL2Support,
   detectWebGPUInfo,
+  getSafeWasmEncoderThreads,
   type WebGPUInfo,
 } from './utils/environment'
 import {
@@ -115,6 +116,7 @@ import {
   estimateStabilizerOutputSize,
   FEATURE_TAB_LABELS,
   formatDuration,
+  formatDurationSecondsLabel,
   formatEnhanceUpscaleLabel,
   formatFileSizeMB,
   getChainStepSummary,
@@ -811,11 +813,11 @@ export default function App() {
   const handleTabChange = (nextTab: FeatureTabId) => {
     if (isBusy) return
     // [BUG-6R-11] Cegah race condition: jika konfirmasi Reset ke Video Asli sedang terbuka,
-    // batalkan state konfirmasi reset secara eksplisit dengan toast singkat lalu tahan navigasi.
-    if (pendingResetAll) {
+    // batalkan state konfirmasi reset secara eksplisit dengan toast singkat DAN tetap lanjutkan perpindahan tab.
+    const cancelledPendingReset = pendingResetAll
+    if (cancelledPendingReset) {
       setPendingResetAll(false)
       showChainNotice('Reset dibatalkan', 3000)
-      return
     }
     setPendingRemoveStepId(null)
     setPendingClearConfirm(null)
@@ -876,7 +878,12 @@ export default function App() {
     } else if (pipelineSteps.length > 0) {
       // Tab baru: otomatis lanjutkan dari hasil tahap terakhir di pipelineSteps
       const latestStep = pipelineSteps[pipelineSteps.length - 1]
-      showChainNotice(`Melanjutkan edit dari hasil ${latestStep.tabLabel}.`, 4000)
+      showChainNotice(
+        cancelledPendingReset
+          ? `Reset dibatalkan. Melanjutkan edit dari hasil ${latestStep.tabLabel}.`
+          : `Melanjutkan edit dari hasil ${latestStep.tabLabel}.`,
+        4000,
+      )
       if (nextTab === 'compress' && selectedVideo) {
         syncCompressBoundsForFile(selectedVideo.sizeBytes, selectedVideo.metadata.duration)
       }
@@ -890,6 +897,11 @@ export default function App() {
     }
     lastProcessedWasAudioOnlyRef.current = false
     void clearCurrentResult()
+    // [BUG-7R-15] Beri umpan balik toast singkat agar perpindahan kembali ke form pengaturan terasa jelas
+    showChainNotice(
+      `Kembali ke pengaturan ${FEATURE_TAB_LABELS[activeTab]}. Ubah setelan lalu proses ulang.`,
+      3200,
+    )
   }
 
   const handleReturnToVideoEditor = () => {
@@ -1124,6 +1136,9 @@ export default function App() {
           tabLabel: step.tabLabel,
           summary: `${step.summary} (Video #1)`,
           timestamp: step.timestamp,
+          isPartial: true,
+          appliedCount: 1,
+          totalCount: validated.acceptedFiles.length,
         }))
       : []
 
@@ -1224,6 +1239,9 @@ export default function App() {
             tabLabel: step.tabLabel,
             summary: `${step.summary} (Video #1)`,
             timestamp: step.timestamp,
+            isPartial: true,
+            appliedCount: 1,
+            totalCount: combined.length,
           }))
         : []
 
@@ -1450,6 +1468,8 @@ export default function App() {
     )
 
     if (prevStageEntry) {
+      // [BUG-6R-10] Pindah benar-benar ke tab tahap sebelumnya sesuai teks dialog & toast
+      setActiveTab(prevStageEntry.tabId)
       showChainNotice(
         `Kembali ke tahap ${prevStageEntry.tabLabel}, hasil ${discardedStageLabel} dibuang`,
         4500,
@@ -1492,14 +1512,24 @@ export default function App() {
       getChainStepSummary(completedVideoItems[0].result!) || completedTabLabel
 
     // Simpan HANYA metadata teks ringan ke riwayat batch (tanpa snapshot File/Blob agar RAM HP hemat)
+    // [BUG-7R-12, BUG-7R-13 & BUG-7R-14] Ganti entri terakhir jika menjalankan ulang fitur sama, dan catat cakupan parsial
+    const isPartialCompletion = completedVideoItems.length < batchItems.length
     const historyEntry: BatchAppliedHistoryEntry = {
       id: `batch-hist-${Date.now()}-${completedTabId}`,
       tabId: completedTabId,
       tabLabel: completedTabLabel,
       summary: completedSummary,
       timestamp: Date.now(),
+      isPartial: isPartialCompletion || undefined,
+      appliedCount: completedVideoItems.length,
+      totalCount: batchItems.length,
     }
-    const nextHistory = [...batchAppliedHistory, historyEntry]
+    const lastHistoryEntry =
+      batchAppliedHistory.length > 0 ? batchAppliedHistory[batchAppliedHistory.length - 1] : null
+    const nextHistory =
+      lastHistoryEntry && lastHistoryEntry.tabId === completedTabId
+        ? [...batchAppliedHistory.slice(0, -1), historyEntry]
+        : [...batchAppliedHistory, historyEntry]
 
     revokeAllBatchResultUrls()
     setBatchResultMeta(null)
@@ -1574,6 +1604,15 @@ export default function App() {
     setPipelineSteps([])
     setIsReadingMetadata(false)
     setExpectedDuration(null)
+    // [BUG-7R-23] Reset seluruh opsi tab ke default bersih agar Mode Tunggal dan Mode Antrean selalu mulai dari setelan identik
+    setOutputFormat('mp4')
+    setFastRemux(true)
+    setCompressOptions(DEFAULT_COMPRESS_OPTIONS)
+    setEnhanceOptions(DEFAULT_ENHANCE_OPTIONS)
+    setStabilizerLevel('medium')
+    setAiSettings(DEFAULT_AI_UPSCALE_SETTINGS)
+    setAudioDenoiseOptions(DEFAULT_AUDIO_DENOISE_OPTIONS)
+    setChromaKeyOptions(getDefaultChromaKeyOptions(isMobile))
     await clearCurrentResult()
   }
 
@@ -2178,7 +2217,7 @@ export default function App() {
             : null
         setPinnedDurationLine(
           aiEffectiveDur !== null
-            ? `Durasi video sumber: ${formatDuration(aiEffectiveDur)} (${aiEffectiveDur.toFixed(1)} detik)`
+            ? `Durasi video sumber: ${formatDuration(aiEffectiveDur)} (${formatDurationSecondsLabel(aiEffectiveDur)})`
             : 'Tidak terdeteksi',
         )
 
@@ -2307,7 +2346,7 @@ export default function App() {
             : null
         setPinnedDurationLine(
           chromaEffectiveDur !== null
-            ? `Durasi video sumber: ${formatDuration(chromaEffectiveDur)} (${chromaEffectiveDur.toFixed(1)} detik)`
+            ? `Durasi video sumber: ${formatDuration(chromaEffectiveDur)} (${formatDurationSecondsLabel(chromaEffectiveDur)})`
             : 'Tidak terdeteksi',
         )
 
@@ -2423,6 +2462,8 @@ export default function App() {
       )
       await writeInputFile(inputName, workVideo.file)
       registerTempFile(finalOutputName)
+      const prepDoneAt = performance.now()
+      const prepElapsedSec = (prepDoneAt - startedAt) / 1000
       setIsPreparing(false)
 
       throwIfCancelled()
@@ -2469,10 +2510,12 @@ export default function App() {
               targetFormat,
               isMobile,
               recommendedThreads,
+              workDimensions,
             ),
             undefined,
             durationSec,
           )
+          verifyFpsLabel = 'FPS Asli'
           verifyCodecColorLabel = 'VP8'
           summaryNote = 'Konversi ke .WEBM (Re-encode VP8/Vorbis)'
           resultDetails = {
@@ -2544,6 +2587,7 @@ export default function App() {
                 targetFormat,
                 isMobile,
                 recommendedThreads,
+                workDimensions,
               ),
               undefined,
               durationSec,
@@ -2551,6 +2595,7 @@ export default function App() {
           }
 
           const fallbackShort = targetFormat === 'webm' ? 'VP8/Vorbis' : 'H.264/AAC'
+          verifyFpsLabel = 'FPS Asli'
           verifyCodecColorLabel = usedFallbackEncode
             ? targetFormat === 'webm'
               ? 'VP8'
@@ -2577,10 +2622,12 @@ export default function App() {
               targetFormat,
               isMobile,
               recommendedThreads,
+              workDimensions,
             ),
             undefined,
             durationSec,
           )
+          verifyFpsLabel = 'FPS Asli'
           verifyCodecColorLabel = targetFormat === 'webm' ? 'VP8' : 'H.264 BT.709'
           summaryNote = `Konversi ke .${targetFormat.toUpperCase()} (Re-encode)`
           resultDetails = {
@@ -2668,11 +2715,17 @@ export default function App() {
           })...`,
         )
         addLog(
-          `[LocalVid] Kompres (${built.resolvedVideoCodec}, ${recommendedThreads} thread): ffmpeg ${built.args.join(
+          `[LocalVid] Kompres (${built.resolvedVideoCodec}, ${isMobile ? 1 : getSafeWasmEncoderThreads(recommendedThreads)} thread): ffmpeg ${built.args.join(
             ' ',
           )}`,
         )
+        const encodeStartAt = performance.now()
         exitCode = await exec(built.args, undefined, built.effectiveDurationSec)
+        const encodeElapsedSec = (performance.now() - encodeStartAt) / 1000
+        const totalElapsedSec = (performance.now() - startedAt) / 1000
+        addLog(
+          `[LocalVid] [timing] Tab 2 Kompres - Engine Load / Prep: ${prepElapsedSec.toFixed(2)} dtk | Encode FFmpeg: ${encodeElapsedSec.toFixed(2)} dtk | Total: ${totalElapsedSec.toFixed(2)} dtk`,
+        )
         resultDurationSec = built.effectiveDurationSec
         summaryNote =
           activeTpl && activeTpl.id !== 'custom'
@@ -2718,7 +2771,12 @@ export default function App() {
           formatLabel: `.${targetFormat.toUpperCase()}`,
           codecSummary: `${videoCodecPretty} / ${audioCodecPretty}`,
         }
-        verifyFpsLabel = built.fpsCapLabel
+        // [BUG-7R-09] Satukan format badge HD & selalu sertakan FPS secara konsisten antara preset & Custom
+        verifyFpsLabel =
+          built.fpsCapLabel ??
+          (effectiveCompressOptions.frameRate !== 'no-change'
+            ? `${effectiveCompressOptions.frameRate} fps`
+            : 'FPS Asli')
         verifyCodecColorLabel = built.isBt709H264 ? 'H.264 BT.709' : videoCodecPretty
         verifyShowWhatsappHdTip =
           effectiveCompressOptions.socialTemplate === 'whatsapp' ||
@@ -2759,6 +2817,7 @@ export default function App() {
           durationSec,
         )
         summaryNote = `Stabilizer Video (${stabOpt.title} • deshake)`
+        verifyFpsLabel = 'FPS Asli'
         const srcW = workDimensions.width
         const srcH = workDimensions.height
         resultDetails = {
@@ -2878,6 +2937,7 @@ export default function App() {
               sanitizedAudio,
               isMobile,
               recommendedThreads,
+              workDimensions,
             ),
             undefined,
             durationSec,
@@ -2928,6 +2988,7 @@ export default function App() {
               ? `Bersihkan Audio (${presetDef.title} • Fallback H.264/AAC)`
               : `Bersihkan Audio (${presetDef.title} • Video Copy)`
 
+        verifyFpsLabel = 'FPS Asli'
         verifyCodecColorLabel = usedFallbackEncode ? 'H.264 BT.709' : 'Video Copy'
         resultDetails = {
           kind: 'audio-denoise',
@@ -2979,6 +3040,7 @@ export default function App() {
           )}"`,
         )
 
+        const enhanceEncodeStartAt = performance.now()
         exitCode = await exec(
           buildEnhanceArgs(
             inputName,
@@ -2992,6 +3054,12 @@ export default function App() {
           undefined,
           durationSec,
         )
+        const enhanceEncodeSec = (performance.now() - enhanceEncodeStartAt) / 1000
+        const enhanceTotalSec = (performance.now() - startedAt) / 1000
+        addLog(
+          `[LocalVid] [timing] Tab 3 Jernihkan - Engine Load / Prep: ${prepElapsedSec.toFixed(2)} dtk | Encode FFmpeg: ${enhanceEncodeSec.toFixed(2)} dtk | Total: ${enhanceTotalSec.toFixed(2)} dtk`,
+        )
+        verifyFpsLabel = 'FPS Asli'
         summaryNote = notes.length > 0 ? notes.join(' • ') : 'Penjernihan Video'
 
         const srcW = workDimensions.width
@@ -3637,23 +3705,32 @@ export default function App() {
     return map
   }, [batchAppliedHistory])
 
-  // Rekap kumulatif untuk BatchResultView: riwayat sebelumnya + tahap yang baru saja selesai
+  // [BUG-7R-12, BUG-7R-13 & BUG-7R-14] Rekap kumulatif untuk BatchResultView & UploadZone:
+  // riwayat sebelumnya + tahap yang baru saja selesai (tanpa duplikat re-run, jujur saat parsial / cancel mid-batch)
   const batchCumulativeSteps = useMemo<BatchAppliedHistoryEntry[]>(() => {
     if (!batchResultMeta) return batchAppliedHistory
-    const sampleDone = batchItems.find((item) => item.status === 'done' && item.result !== null)
+    const doneItems = batchItems.filter((item) => item.status === 'done' && item.result !== null)
+    const sampleDone = doneItems[0]
     if (!sampleDone?.result) return batchAppliedHistory
     const currentSummary =
       getChainStepSummary(sampleDone.result) || FEATURE_TAB_LABELS[batchResultMeta.feature]
-    return [
-      ...batchAppliedHistory,
-      {
-        id: `batch-current-${batchResultMeta.feature}`,
-        tabId: batchResultMeta.feature,
-        tabLabel: FEATURE_TAB_LABELS[batchResultMeta.feature],
-        summary: currentSummary,
-        timestamp: sampleDone.result.elapsedMs,
-      },
-    ]
+    const isPartialCurrent = doneItems.length < batchItems.length
+    const currentEntry: BatchAppliedHistoryEntry = {
+      id: `batch-current-${batchResultMeta.feature}`,
+      tabId: batchResultMeta.feature,
+      tabLabel: FEATURE_TAB_LABELS[batchResultMeta.feature],
+      summary: currentSummary,
+      timestamp: sampleDone.result.elapsedMs,
+      isPartial: isPartialCurrent || undefined,
+      appliedCount: doneItems.length,
+      totalCount: batchItems.length,
+    }
+    const lastHist =
+      batchAppliedHistory.length > 0 ? batchAppliedHistory[batchAppliedHistory.length - 1] : null
+    if (lastHist && lastHist.tabId === batchResultMeta.feature) {
+      return [...batchAppliedHistory.slice(0, -1), currentEntry]
+    }
+    return [...batchAppliedHistory, currentEntry]
   }, [batchAppliedHistory, batchResultMeta, batchItems])
   const savedBatchResultBanner =
     isBatchMode &&
@@ -3671,10 +3748,11 @@ export default function App() {
   const step1Done = hasUploadedVideo
   const step3Done = Boolean(result) || hasBatchResultView
 
+  // [BUG-7R-07] Kartu Empty State terhubung langsung via <label htmlFor="localvid-main-file-input">
+  // sehingga browser langsung membuka file picker tanpa klik programatik ganda
   const handleSelectFeatureForUpload = (tabId: FeatureTabId) => {
     if (isBusy) return
     setActiveTab(tabId)
-    uploadFileInputRef.current?.click()
   }
 
   const pendingRemoveDialogData = (() => {
@@ -3858,7 +3936,7 @@ export default function App() {
                   </code>{' '}
                   • Threads:{' '}
                   <code className="rounded bg-[#E8FFF5] px-1.5 py-0.5 text-[#0D6E5D]">
-                    -threads {recommendedThreads}
+                    -threads {isMobile ? 1 : getSafeWasmEncoderThreads(recommendedThreads)}
                   </code>{' '}
                   • SharedArrayBuffer:{' '}
                   <code className="rounded bg-[#E8FFF5] px-1.5 py-0.5 text-[#0D6E5D]">
@@ -3889,19 +3967,27 @@ export default function App() {
                       <span>Pakai Mode Hemat RAM</span>
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowSystemInfo(false)
-                      setLogOpenTrigger((n) => n + 1)
-                    }}
-                    className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
-                  >
-                    <Terminal aria-hidden="true" className="h-3.5 w-3.5 text-[#0D6E5D]" />
-                    <span>Buka Log Teknis FFmpeg</span>
-                  </button>
+                  {(hasUploadedVideo || isBusy) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowSystemInfo(false)
+                        setLogOpenTrigger((n) => n + 1)
+                      }}
+                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
+                    >
+                      <Terminal aria-hidden="true" className="h-3.5 w-3.5 text-[#0D6E5D]" />
+                      <span>Buka Log Teknis FFmpeg</span>
+                    </button>
+                  )}
                 </div>
               </div>
+              {!crossOriginIsolated && (
+                <p className="sm:col-span-3 rounded-xl border border-[#B5F5DB] bg-[#E8FFF5] px-3 py-2 text-[11px] font-medium text-[#0D6E5D]">
+                  Mode Hemat RAM aktif karena isolasi browser tidak aktif di sesi ini. Muat ulang
+                  halaman biasa (bukan Hard Refresh) untuk Mode Cepat.
+                </p>
+              )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -4634,7 +4720,7 @@ export default function App() {
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="truncate font-bold text-[#0D2B24]">
                         {activeFrameProgress?.label ||
-                          (activeTab === 'stabilize' && isProcessing && displayedPercent >= 98
+                          (activeTab === 'stabilize' && isProcessing && displayedPercent >= 95
                             ? 'Merakit video hasil...'
                             : isProcessing && !hasExpectedDuration && ffmpegCurrentFrame !== null
                               ? `Memproses frame ke-${ffmpegCurrentFrame}...`
@@ -4697,7 +4783,7 @@ export default function App() {
                               ? ` (${chromaFrameProgress.modeTag})`
                               : ''}
                           </span>
-                        ) : activeTab === 'stabilize' && isProcessing && displayedPercent >= 98 ? (
+                        ) : activeTab === 'stabilize' && isProcessing && displayedPercent >= 95 ? (
                           <span className="font-semibold text-[#0D6E5D]">
                             Merakit video hasil...
                           </span>
@@ -4714,9 +4800,17 @@ export default function App() {
                           <span>Engine aktif memproses video...</span>
                         )}
                       </span>
-                      {activeTab === 'stabilize' && isProcessing && displayedPercent >= 98 ? (
+                      {activeTab === 'stabilize' && isProcessing && displayedPercent >= 95 ? (
                         <span className="font-semibold text-[#0D6E5D]">
                           Merakit video hasil...
+                        </span>
+                      ) : activeTab === 'auto-chroma' &&
+                        isChromaRunning &&
+                        chromaFrameProgress &&
+                        chromaFrameProgress.totalFrames > 0 ? (
+                        <span className="font-medium text-[#0D6E5D] tabular-nums">
+                          Memproses frame {chromaFrameProgress.currentFrame}/
+                          {chromaFrameProgress.totalFrames} (inferensi AI...)
                         </span>
                       ) : idleSeconds >= 5 && idleSeconds < 30 ? (
                         <span className="text-[#4A6B63] tabular-nums">
@@ -4897,8 +4991,8 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* Panel Log Collapsible: tampil rapi di bawah setelah ada video/log atau dibuka manual dari panel engine */}
-          {(hasUploadedVideo || logs.length > 0 || logOpenTrigger > 0) && (
+          {/* [BUG-7R-08] Panel Log Collapsible: tampil hanya saat ada video terunggah atau proses sedang berjalan */}
+          {(hasUploadedVideo || isBusy) && (
             <CollapsibleLogs
               logs={logs}
               pinnedSummary={pinnedLogSummary}

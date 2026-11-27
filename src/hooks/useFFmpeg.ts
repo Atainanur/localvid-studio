@@ -7,7 +7,11 @@ import {
   getRecommendedFFmpegThreads,
   type DeviceType,
 } from '../utils/environment'
-import { safeErrorMessage, safeStartsWith } from '../utils/videoProcessing'
+import {
+  formatDurationSecondsLabel,
+  safeErrorMessage,
+  safeStartsWith,
+} from '../utils/videoProcessing'
 
 export type EngineMode = 'Multi-Thread' | 'Single-Thread Hemat RAM'
 
@@ -161,6 +165,8 @@ const MAX_LOG_LINES = 250
 const DURATION_REGEX = /Duration:\s*(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/
 const TIME_REGEX = /time=(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/
 const FRAME_REGEX = /frame=\s*(\d+)/
+const INPUT_FPS_REGEX = /Stream\s+#\d+:\d+.*Video:.*\b(\d+(?:\.\d+)?)\s*(?:fps|tbr)\b/i
+const NEGATIVE_TIME_PROGRESS_REGEX = /^(\[(?:stderr|stdout)\]\s*)?(?:frame|size)=\s*\S+.*\btime=-\d+/i
 const MAX_CONSECUTIVE_WORKER_FAILURES = 3
 
 // [BUG-5R-09] Sertakan pola "No such file or directory" dan kegagalan I/O MEMFS
@@ -345,6 +351,8 @@ export function useFFmpeg(): UseFFmpegReturn {
   // Pelacakan durasi & progres aktif untuk parser regex `time=HH:MM:SS.ms` dan `frame=N`
   const uploadedDurationRef = useRef<number | null>(null)
   const expectedDurationRef = useRef<number | null>(null)
+  const detectedFpsRef = useRef<number>(30)
+  const lastFrameProgressUpdateRef = useRef<number>(0)
   const currentExecProgressRef = useRef(0)
   const isExecutingRef = useRef(false)
 
@@ -618,13 +626,27 @@ export function useFFmpeg(): UseFFmpegReturn {
         if (loadSessionIdRef.current !== sessionId) return
         const rawMessage = typeof message === 'string' ? message : String(message ?? '')
         const formatted = type ? `[${type}] ${rawMessage}` : rawMessage
-        appendLog(formatted)
+        // [BUG-7R-25] Filter baris progres FFmpeg bertimestamp negatif palsu (termasuk ekspor MP3 `size=... time=-577014:...`)
+        const isBogusNegativeProgress =
+          NEGATIVE_TIME_PROGRESS_REGEX.test(rawMessage) && !FAILURE_INDICATION_REGEX.test(rawMessage)
+        if (!isBogusNegativeProgress) {
+          appendLog(formatted)
+        }
 
         if (TRUE_WASM_CRASH_REGEX.test(rawMessage)) {
           workerCorruptedRef.current = true
         }
 
         if (!isExecutingRef.current) return
+
+        // Tangkap FPS input dari header Stream Video FFmpeg agar estimasi totalFrames akurat (BUG-7R-20)
+        const fpsMatch = INPUT_FPS_REGEX.exec(rawMessage)
+        if (fpsMatch) {
+          const parsedFps = Number.parseFloat(fpsMatch[1])
+          if (Number.isFinite(parsedFps) && parsedFps >= 5 && parsedFps <= 240) {
+            detectedFpsRef.current = parsedFps
+          }
+        }
 
         // Tangkap baris Duration: untuk perhitungan progres & ringkasan log tersemat (BUG-04 & BUG-06)
         const durationMatch = DURATION_REGEX.exec(rawMessage)
@@ -660,13 +682,30 @@ export function useFFmpeg(): UseFFmpegReturn {
           setPinnedLogSummary((prev) => (prev.firstError ? prev : { ...prev, firstError: cleanErr }))
         }
 
-        // Tangkap nomor frame aktif & perbarui lastActivityAt hanya saat kemajuan nyata (BUG-04 & NEW-07)
+        // [BUG-04, NEW-07 & BUG-7R-20] Tangkap nomor frame aktif & petakan progres real-time (update tiap ~400 ms)
+        // agar progres bar tidak tertahan di 0% saat FFmpeg belum mengeluarkan `time=` positif.
         const frameMatch = FRAME_REGEX.exec(rawMessage)
         if (frameMatch && isMountedRef.current) {
           const parsedFrame = Number.parseInt(frameMatch[1], 10)
           if (Number.isFinite(parsedFrame) && parsedFrame > 0) {
+            const nowMs = Date.now()
             setCurrentFrame(parsedFrame)
-            setLastActivityAt(Date.now())
+            setLastActivityAt(nowMs)
+            if (
+              expectedDurationRef.current &&
+              expectedDurationRef.current > 0 &&
+              nowMs - lastFrameProgressUpdateRef.current >= 400
+            ) {
+              lastFrameProgressUpdateRef.current = nowMs
+              const estTotalFrames = Math.max(
+                1,
+                Math.round(expectedDurationRef.current * detectedFpsRef.current),
+              )
+              const framePct = Math.min(98, (parsedFrame / estTotalFrames) * 100)
+              if (framePct > 0) {
+                updateProgressMonotonic(framePct)
+              }
+            }
           }
         }
 
@@ -972,6 +1011,8 @@ export function useFFmpeg(): UseFFmpegReturn {
           : uploadedDurationRef.current
 
       expectedDurationRef.current = resolvedDuration
+      detectedFpsRef.current = 30
+      lastFrameProgressUpdateRef.current = 0
       currentExecProgressRef.current = 0
       isExecutingRef.current = true
 
@@ -984,7 +1025,9 @@ export function useFFmpeg(): UseFFmpegReturn {
         setCurrentTimeLabel(null)
         setLastActivityAt(Date.now())
         const fallbackDurationText =
-          resolvedDuration !== null ? `Durasi sumber: ${resolvedDuration.toFixed(1)} detik` : null
+          resolvedDuration !== null
+            ? `Durasi sumber: ${formatDurationSecondsLabel(resolvedDuration)}`
+            : null
         setPinnedLogSummary({
           command: `ffmpeg ${args.join(' ')}`,
           durationLine: fallbackDurationText,

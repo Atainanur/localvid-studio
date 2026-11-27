@@ -6,12 +6,19 @@ import {
   computeChromaTargetDimensions,
   getChromaMaxDurationSec,
   getChromaSpeedProfileDef,
+  isRmbgModelCachedInSession,
   resolveChromaSolidColor,
+  setRmbgModelCachedInSession,
   type ChromaFrameProgress,
   type ChromaKeyOptions,
   type ChromaSpeedProfile,
 } from './chromaKeyConfig'
-import { safeErrorMessage, safeStartsWith, toEvenDimension } from './videoProcessing'
+import {
+  buildUniversalH264Bt709Args,
+  safeErrorMessage,
+  safeStartsWith,
+  toEvenDimension,
+} from './videoProcessing'
 
 import type { WebCodecsFrameReader } from './webCodecsFrameReader'
 
@@ -265,6 +272,8 @@ function writeCachedRmbgBackendPref(pref: 'webgpu' | 'wasm' | null): void {
     // Abaikan jika sessionStorage dibatasi
   }
 }
+
+export { isRmbgModelCachedInSession }
 
 /**
  * [BUG-26NOV-11] Mereset flag sticky backend & cache benchmark sesi (dipanggil saat unggah file baru).
@@ -1051,6 +1060,7 @@ async function getOrLoadRmbgHandle(
       pending.then(
         (loaded) => {
           cachedRmbgHandle = loaded
+          setRmbgModelCachedInSession(true)
         },
         () => {
           // Biarkan caller menerima rejection terstruktur dari promise ini
@@ -2794,6 +2804,7 @@ export async function runChromaKeyPipeline({
           }
         }
         rmbgHandle = activeHandle
+        setRmbgModelCachedInSession(true)
         engineBadge = activeHandle.device === 'webgpu' ? 'AI RMBG-1.4 WebGPU' : 'AI RMBG-1.4 WASM'
         delegateLabel =
           activeHandle.device === 'webgpu'
@@ -2801,23 +2812,85 @@ export async function runChromaKeyPipeline({
             : `AI RMBG-1.4 (WASM SIMD ${activeHandle.dtype} • ${modeTag})`
       }
 
-      // [BUG-6R-03] Stabilkan tepi mask frame 0 dengan memadukan secara konservatif terhadap keyframe berikutnya
-      // agar tidak terjadi gigitan tepi kanan/sisi rata akibat erosi awal, sambil mencegah ghosting bila objek bergerak.
+      // [BUG-6R-03 & BUG-5R-07] Proteksi tepi frame 0 terhadap gigitan tepi kanan/sisi rata RMBG:
+      // ukur stabilitas adegan frame 0 vs keyframe berikutnya; bila kamera/piksel lokal stabil,
+      // pulihkan tepi dengan bobot dominan Math.max(p0, pNext * 0.92) tanpa merusak hole-fill internal.
       const stabilizeFrame0WithNextKeyframe = (
         frame0Prob: Float32Array,
         nextKfProb: Float32Array,
+        frame0Ctx: CanvasRenderingContext2D,
+        nextKfCtxArg: CanvasRenderingContext2D,
       ): void => {
         const strongFgFloor = Math.min(0.92, options.threshold + 0.08)
+        let f0Rgba: Uint8ClampedArray | null = null
+        let f1Rgba: Uint8ClampedArray | null = null
+        let lowSceneMotion = false
+
+        try {
+          f0Rgba = frame0Ctx.getImageData(0, 0, targetDims.width, targetDims.height).data
+          f1Rgba = nextKfCtxArg.getImageData(0, 0, targetDims.width, targetDims.height).data
+          const sampleStep = Math.max(4, Math.floor(totalPixels / 1200))
+          let diffAccum = 0
+          let diffSamples = 0
+          for (let p = 0; p < totalPixels; p += sampleStep) {
+            const off = p * 4
+            const d =
+              (Math.abs(f0Rgba[off] - f1Rgba[off]) +
+                Math.abs(f0Rgba[off + 1] - f1Rgba[off + 1]) +
+                Math.abs(f0Rgba[off + 2] - f1Rgba[off + 2])) /
+              3
+            diffAccum += d
+            diffSamples += 1
+          }
+          const avgSceneDiff = diffSamples > 0 ? diffAccum / diffSamples : 999
+          lowSceneMotion = avgSceneDiff <= 24
+        } catch {
+          f0Rgba = null
+          f1Rgba = null
+          lowSceneMotion = false
+        }
+
+        const origF0 = new Float32Array(frame0Prob)
+        const w = targetDims.width
+        const h = targetDims.height
+
         for (let p = 0; p < totalPixels; p += 1) {
-          const p0 = frame0Prob[p]
+          const p0 = origF0[p]
           const p1 = nextKfProb[p]
           const diff = p1 - p0
-          if (p0 >= 0.14 && diff > 0 && diff <= 0.60) {
-            // Area tepi frame 0 lebih rendah daripada keyframe berikutnya: pulihkan probabilitas tepi secara halus
-            const weightNext = p1 >= strongFgFloor ? 0.54 : 0.40
+          if (diff <= 0) {
+            if (Math.abs(diff) <= 0.25) {
+              frame0Prob[p] = p0 * 0.85 + p1 * 0.15
+            }
+            continue
+          }
+
+          if (lowSceneMotion && p1 >= 0.42 && f0Rgba && f1Rgba) {
+            const off = p * 4
+            const localRgbDiff =
+              (Math.abs(f0Rgba[off] - f1Rgba[off]) +
+                Math.abs(f0Rgba[off + 1] - f1Rgba[off + 1]) +
+                Math.abs(f0Rgba[off + 2] - f1Rgba[off + 2])) /
+              3
+            // Cek apakah piksel berada pada area tepi (bersebelahan dengan foreground atau batas bingkai)
+            const x = p % w
+            const y = (p - x) / w
+            const nearBorder = x <= Math.max(8, Math.round(w * 0.12)) || x >= w - Math.max(8, Math.round(w * 0.12)) || y <= 8 || y >= h - 8
+            const hasFgNeighbor =
+              (x > 0 && origF0[p - 1] >= 0.18) ||
+              (x < w - 1 && origF0[p + 1] >= 0.18) ||
+              (y > 0 && origF0[p - w] >= 0.18) ||
+              (y < h - 1 && origF0[p + w] >= 0.18)
+            if (localRgbDiff <= 32 && (p0 >= 0.05 || nearBorder || hasFgNeighbor)) {
+              frame0Prob[p] = Math.min(1, Math.max(p0, p1 * 0.92))
+              continue
+            }
+          }
+
+          if (p0 >= 0.12 && diff <= 0.72) {
+            const weightNext = p1 >= strongFgFloor ? 0.62 : 0.45
             frame0Prob[p] = Math.min(1, p0 * (1 - weightNext) + p1 * weightNext)
-          } else if (Math.abs(diff) <= 0.28) {
-            // Stabilisasi temporal ringan untuk piksel yang konsisten antar dua keyframe awal
+          } else if (diff <= 0.28) {
             frame0Prob[p] = p0 * 0.82 + p1 * 0.18
           }
         }
@@ -2832,7 +2905,7 @@ export async function runChromaKeyPipeline({
           // Jalankan inferensi keyframe penuh pada frame 0 & frame 1 terlebih dahulu untuk warm-up tepi frame 0
           await runAiAtIndex(0, srcCanvas, srcCtx, scratch.probPrev)
           await runAiAtIndex(1, nextKfCanvas, nextKfCtx, scratch.probNext)
-          stabilizeFrame0WithNextKeyframe(scratch.probPrev, scratch.probNext)
+          stabilizeFrame0WithNextKeyframe(scratch.probPrev, scratch.probNext, srcCtx, nextKfCtx)
 
           await writeCompositeFrame(0, srcCanvas, scratch.probPrev, modeTag)
           await yieldToMainThread()
@@ -2855,7 +2928,7 @@ export async function runChromaKeyPipeline({
         await runAiAtIndex(0, srcCanvas, srcCtx, prevProb)
         const firstNextKf = Math.min(totalFrames - 1, keyframeStep)
         await runAiAtIndex(firstNextKf, nextKfCanvas, nextKfCtx, nextProb)
-        stabilizeFrame0WithNextKeyframe(prevProb, nextProb)
+        stabilizeFrame0WithNextKeyframe(prevProb, nextProb, srcCtx, nextKfCtx)
 
         await writeCompositeFrame(0, srcCanvas, prevProb, modeTag)
         await yieldToMainThread()
@@ -3052,7 +3125,8 @@ export async function runChromaKeyPipeline({
 
     const smartMaxRateKbps = computeChromaSmartMaxRateKbps(options, videoFile.size, rawDuration)
     const assembleCrf = options.smartSizeCap ? '22' : '21'
-    const assemblePreset = isMobile ? 'ultrafast' : 'veryfast'
+    // [BUG-7R-06] Samakan preset perakitan Tab 7 di Mobile & Desktop ke veryfast (nol ultrafast)
+    const assemblePreset = 'veryfast'
 
     if (smartMaxRateKbps !== undefined) {
       onLog(
@@ -3074,7 +3148,7 @@ export async function runChromaKeyPipeline({
       '-t',
       effectiveDuration.toFixed(2),
       '-vf',
-      'format=yuv420p',
+      'setsar=1,format=yuv420p',
       '-c:v',
       'libx264',
       '-preset',
@@ -3087,7 +3161,12 @@ export async function runChromaKeyPipeline({
       baseAssembleArgs.push('-maxrate', `${smartMaxRateKbps}k`, '-bufsize', `${smartMaxRateKbps * 2}k`)
     }
 
-    baseAssembleArgs.push('-pix_fmt', 'yuv420p', '-threads', safeThreads)
+    // [BUG-7R-01 & BUG-7R-05] Pasang tag BT.709 nyata + level H.264 dinamis (4.2 bila > 8192 macroblock)
+    baseAssembleArgs.push(
+      ...buildUniversalH264Bt709Args(targetDims.width, targetDims.height),
+      '-threads',
+      safeThreads,
+    )
 
     let assembleExit = await ffmpeg.exec(
       [...baseAssembleArgs, '-c:a', 'copy', '-shortest', '-movflags', '+faststart', outputFileName],

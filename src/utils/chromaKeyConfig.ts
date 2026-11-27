@@ -303,20 +303,36 @@ export function getChromaSpeedProfileDef(profile: ChromaSpeedProfile): ChromaSpe
 }
 
 /**
- * [BUG-6R-02] Estimasi waktu pra-run dinamis Tab 7 berdasarkan durasi video yang diunggah.
+ * [BUG-7R-28] Status cache model RMBG-1.4 di sesi browser aktif.
+ * Disimpan di chromaKeyConfig (bukan chromaKeyEngine) agar chromaKeyEngine tetap 100% lazy-loaded.
+ */
+let rmbgModelCachedInSession = false
+
+export function isRmbgModelCachedInSession(): boolean {
+  return rmbgModelCachedInSession
+}
+
+export function setRmbgModelCachedInSession(cached: boolean): void {
+  rmbgModelCachedInSession = cached
+}
+
+/**
+ * [BUG-6R-02 & BUG-7R-28] Estimasi waktu pra-run dinamis Tab 7 berdasarkan durasi video yang diunggah.
  * RMBG-1.4 (fast): ~18-20 dtk per 1 dtk video; MediaPipe VIDEO (manusia): ~2-4 dtk per 1 dtk video.
+ * Jika model RMBG belum ter-cache pada sesi ini, tampilkan estimasi dua bagian termasuk unduhan model sekali saja.
  */
 export function estimateChromaRenderDurationText(
   durationSec: number | null,
   maxDurationSec: number,
   subjectMode: ChromaSubjectMode,
   speedProfile: ChromaSpeedProfile,
+  isModelCached = false,
 ): string {
   const formatRange = (minSec: number, maxSec: number): string => {
     const safeMin = Math.max(1, Math.round(minSec))
     const safeMax = Math.max(safeMin + 2, Math.round(maxSec))
     if (safeMax < 90) {
-      return `~${safeMin}-${safeMax} detik`
+      return `~${safeMin}-${safeMax} dtk`
     }
     const minMin = (safeMin / 60).toFixed(1).replace('.', ',')
     const maxMin = (safeMax / 60).toFixed(1).replace('.', ',')
@@ -332,15 +348,24 @@ export function estimateChromaRenderDurationText(
           : [18, 20]
       : [2, 4]
 
+  const uncachedSuffix =
+    subjectMode === 'all-objects' && !isModelCached
+      ? ' + ~25 dtk unduhan model (sekali saja)'
+      : ''
+
   if (!durationSec || !Number.isFinite(durationSec) || durationSec <= 0) {
     return subjectMode === 'all-objects'
-      ? `sekitar ${secPerSecMin}-${secPerSecMax} detik per 1 detik video`
+      ? `sekitar ${secPerSecMin}-${secPerSecMax} dtk per 1 dtk video segmentasi${uncachedSuffix}`
       : 'sekitar 2-4 detik per 1 detik video'
   }
 
   const effDur = Math.min(durationSec, maxDurationSec)
-  const durLabel = effDur.toFixed(1).replace('.', ',')
-  return `${formatRange(effDur * secPerSecMin, effDur * secPerSecMax)} untuk video ${durLabel} dtk`
+  const durLabel = (Math.round(effDur * 10) / 10).toFixed(1).replace('.', ',')
+  const segRange = formatRange(effDur * secPerSecMin, effDur * secPerSecMax)
+  if (subjectMode === 'all-objects' && !isModelCached) {
+    return `${segRange} segmentasi + ~25 dtk unduhan model (sekali saja) untuk video ${durLabel} dtk`
+  }
+  return `${segRange} untuk video ${durLabel} dtk`
 }
 
 export function getChromaTemplateDef(templateId: ChromaTemplateId): ChromaTemplateDefinition {

@@ -1,5 +1,5 @@
 import { getSafeWasmEncoderThreads } from './environment'
-import { UNIVERSAL_H264_BT709_ARGS, type SimpleSizeEstimate } from './videoProcessing'
+import { buildUniversalH264Bt709Args, type SimpleSizeEstimate } from './videoProcessing'
 
 export type AudioDenoisePresetId = 'light' | 'medium' | 'strong' | 'custom'
 
@@ -398,6 +398,7 @@ export function buildAudioDenoiseFallbackArgs(
   options: AudioDenoiseOptions,
   _isMobile: boolean,
   threads = 2,
+  videoDimensions?: { width: number | null; height: number | null },
 ): string[] {
   void _isMobile
   const afChain = buildAudioDenoiseFilterChain(options)
@@ -418,7 +419,7 @@ export function buildAudioDenoiseFallbackArgs(
     'veryfast',
     '-crf',
     '21',
-    ...UNIVERSAL_H264_BT709_ARGS,
+    ...buildUniversalH264Bt709Args(videoDimensions?.width, videoDimensions?.height),
     '-threads',
     safeThreads,
     '-af',

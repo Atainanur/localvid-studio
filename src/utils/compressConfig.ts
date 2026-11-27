@@ -1,9 +1,9 @@
 import { getSafeWasmEncoderThreads } from './environment'
 import {
+  buildUniversalH264Bt709Args,
   COMPRESSION_PRESETS,
   getAdaptiveSizeCalibrationInfo,
   toEvenDimension,
-  UNIVERSAL_H264_BT709_ARGS,
   type CompressionPresetId,
   type OutputFormat,
 } from './videoProcessing'
@@ -162,10 +162,10 @@ export const CLARITY_MODEL_OPTIONS: ReadonlyArray<ClarityModelDef> = [
   },
   {
     id: 'sharp-1080p',
-    name: 'Tajam 1080p',
-    badge: 'Anti-Buram',
+    name: 'Tajam (Anti-Buram)',
+    badge: 'Anti-Buram • Resolusi Asli',
     description:
-      'Pemulihan detail tegas plus kontras/saturasi seimbang untuk menyelamatkan rekaman HP yang lembut.',
+      'Pemulihan detail tegas plus kontras/saturasi seimbang tanpa mengubah resolusi video.',
   },
   {
     id: 'low-light',
@@ -1132,12 +1132,13 @@ export function calculateTargetVideoBitrateKbps(
  * dengan batas maksimal template (mis. 544x932 pada Maks 1080p atau Maks 720p),
  * JANGAN lakukan filter `scale` sama sekali (return null)!
  */
-function computeTargetDimensions(
-  options: CompressOptions,
+export function computeTargetDimensions(
+  rawOptions: CompressOptions,
   workW: number | null,
   workH: number | null,
   isMobile = false,
 ): { width: number; height: number } | null {
+  const options = normalizeCompressOptions(rawOptions)
   if (options.videoCodec === 'copy' || options.resizeMode === 'no-change') {
     return null
   }
@@ -1313,27 +1314,31 @@ export function estimateCompressedSize(
 
   const crfBitrateScale = isAlreadyTightSource
     ? crf <= 18
-      ? 0.84
-      : crf <= 20
-        ? 0.72
-        : crf <= 21
-          ? 0.68
-          : crf <= 23
-            ? 0.62
-            : crf <= 26
-              ? 0.5
-              : 0.4
+      ? 1.48
+      : crf <= 19
+        ? 1.38
+        : crf <= 20
+          ? 1.28
+          : crf <= 21
+            ? 1.1
+            : crf <= 23
+              ? 0.88
+              : crf <= 26
+                ? 0.65
+                : 0.45
     : crf <= 18
-      ? 0.78
-      : crf <= 20
-        ? 0.66
-        : crf <= 21
-          ? 0.62
-          : crf <= 23
-            ? 0.55
-            : crf <= 26
-              ? 0.45
-              : 0.36
+      ? 0.85
+      : crf <= 19
+        ? 0.78
+        : crf <= 20
+          ? 0.72
+          : crf <= 21
+            ? 0.65
+            : crf <= 23
+              ? 0.56
+              : crf <= 26
+                ? 0.46
+                : 0.36
 
   const crop = validateCropSettings(options, sourceDims.width, sourceDims.height)
   const workW = crop.isActive && crop.isValid && crop.width ? crop.width : sourceDims.width
@@ -1517,6 +1522,7 @@ export function applySocialTemplate(
 ): CompressOptions {
   const current = normalizeCompressOptions(rawCurrent)
   if (templateId === 'custom') {
+    const detachingFromTemplate = current.socialTemplate !== 'custom'
     return {
       ...current,
       socialTemplate: 'custom',
@@ -1525,6 +1531,9 @@ export function applySocialTemplate(
           ? current.socialTemplate
           : current.derivedFromTemplate,
       customCrf: null,
+      // [BUG-7R-04] Saat keluar dari preset sosial ke Custom, kembalikan resize ke Pertahankan Asli (no-change)
+      // agar tidak pernah diam-diam melakukan upscale pada sumber sub-HD.
+      resizeMode: detachingFromTemplate ? 'no-change' : current.resizeMode,
       maxResolutionOnly: false,
     }
   }
@@ -1811,6 +1820,8 @@ export function buildAdvancedCompressArgs(
 
     // 2. Scale / Aspect Ratio: selalu dimensi genap kelipatan 2, skala lanczos, dan setsar=1
     const targetDims = computeTargetDimensions(options, workW, workH, isMobile)
+    let outW = targetDims?.width ?? workW
+    let outH = targetDims?.height ?? workH
     if (targetDims) {
       vfChain.push(`scale=${targetDims.width}:${targetDims.height}:flags=lanczos`, 'setsar=1')
     } else {
@@ -1820,10 +1831,12 @@ export function buildAdvancedCompressArgs(
     // 3. Rotate (transpose)
     if (options.rotate === '90') {
       vfChain.push('transpose=1')
+      if (outW && outH) [outW, outH] = [outH, outW]
     } else if (options.rotate === '180') {
       vfChain.push('transpose=1', 'transpose=1')
     } else if (options.rotate === '270') {
       vfChain.push('transpose=2')
+      if (outW && outH) [outW, outH] = [outH, outW]
     }
 
     // 4. Flip
@@ -1919,7 +1932,7 @@ export function buildAdvancedCompressArgs(
           )
         }
       }
-      args.push(...UNIVERSAL_H264_BT709_ARGS, '-threads', String(safeThreads))
+      args.push(...buildUniversalH264Bt709Args(outW, outH), '-threads', String(safeThreads))
     } else if (videoCodec === 'libx265') {
       args.push(
         '-c:v',

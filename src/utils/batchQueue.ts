@@ -19,6 +19,12 @@ export interface BatchAppliedHistoryEntry {
   tabLabel: string
   summary: string
   timestamp: number
+  /** [BUG-7R-12 & BUG-7R-14] True bila tahap hanya diterapkan pada sebagian video di antrean */
+  isPartial?: boolean
+  /** Jumlah video yang benar-benar selesai mendapat tahap ini (opsional) */
+  appliedCount?: number
+  /** Total video dalam antrean saat tahap dicatat (opsional) */
+  totalCount?: number
 }
 
 export interface BatchAppliedFeatureInfo {

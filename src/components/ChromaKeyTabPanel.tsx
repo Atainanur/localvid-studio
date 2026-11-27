@@ -38,13 +38,18 @@ import {
   getChromaSubjectModeLabel,
   getChromaTemplateDef,
   isDurationWithinChromaLimit,
+  isRmbgModelCachedInSession,
   sanitizeHexColor,
   type ChromaKeyOptions,
   type ChromaSubjectMode,
   type ChromaTemplateId,
 } from '../utils/chromaKeyConfig'
 import type { ChromaEngineBadge } from '../utils/chromaKeyEngine'
-import { formatDuration, formatFileSizeMB } from '../utils/videoProcessing'
+import {
+  formatDuration,
+  formatFileSizeMB,
+  resetAdaptiveSizeCalibration,
+} from '../utils/videoProcessing'
 
 interface ChromaBatchPreviewControl {
   previewItemId: string
@@ -109,40 +114,17 @@ export function ChromaKeyTabPanel({
     [sourceDimensions.width, sourceDimensions.height, options.maxResolution],
   )
 
-  const sizeEstimate = useMemo(
-    () =>
-      estimateChromaOutputSize(
-        options,
-        originalSizeBytes,
-        sourceDurationSec,
-        isMobile,
-        sourceDimensions,
-      ),
-    [options, originalSizeBytes, sourceDurationSec, isMobile, sourceDimensions],
-  )
-
-  const renderDurationText = useMemo(
-    () =>
-      estimateChromaRenderDurationText(
-        sourceDurationSec,
-        maxDurationSec,
-        options.subjectMode,
-        options.speedProfile,
-      ),
-    [sourceDurationSec, maxDurationSec, options.subjectMode, options.speedProfile],
-  )
-
-  const estimatedFrames = useMemo(() => {
-    if (
-      sourceDurationSec === null ||
-      !Number.isFinite(sourceDurationSec) ||
-      sourceDurationSec <= 0
-    ) {
-      return null
-    }
-    const clampedDur = Math.min(sourceDurationSec, maxDurationSec)
-    return Math.max(1, Math.round(clampedDur * options.targetFps))
-  }, [sourceDurationSec, maxDurationSec, options.targetFps])
+  const [calibrationVersion, setCalibrationVersion] = useState(0)
+  const sizeEstimate = useMemo(() => {
+    void calibrationVersion
+    return estimateChromaOutputSize(
+      options,
+      originalSizeBytes,
+      sourceDurationSec,
+      isMobile,
+      sourceDimensions,
+    )
+  }, [options, originalSizeBytes, sourceDurationSec, isMobile, sourceDimensions, calibrationVersion])
 
   // State pratinjau live 1-frame sebelum render
   const previewVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -163,6 +145,31 @@ export function ChromaKeyTabPanel({
   const [foregroundRatio, setForegroundRatio] = useState<number | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0)
+
+  const rmbgModelCached = isRmbgModelCachedInSession()
+  const renderDurationText = useMemo(
+    () =>
+      estimateChromaRenderDurationText(
+        sourceDurationSec,
+        maxDurationSec,
+        options.subjectMode,
+        options.speedProfile,
+        rmbgModelCached,
+      ),
+    [sourceDurationSec, maxDurationSec, options.subjectMode, options.speedProfile, rmbgModelCached],
+  )
+
+  const estimatedFrames = useMemo(() => {
+    if (
+      sourceDurationSec === null ||
+      !Number.isFinite(sourceDurationSec) ||
+      sourceDurationSec <= 0
+    ) {
+      return null
+    }
+    const clampedDur = Math.min(sourceDurationSec, maxDurationSec)
+    return Math.max(1, Math.round(clampedDur * options.targetFps))
+  }, [sourceDurationSec, maxDurationSec, options.targetFps])
 
   const effectiveScrubMax = useMemo(() => {
     const raw =
@@ -912,9 +919,23 @@ export function ChromaKeyTabPanel({
                     <p className="mt-0.5 text-[10px] text-[#4A6B63]">{sizeEstimate.note}</p>
                   )}
                   {sizeEstimate.calibrationSamples && sizeEstimate.calibrationSamples > 0 ? (
-                    <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
-                      Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
-                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-medium text-[#0D6E5D] sm:justify-end">
+                      <span>
+                        Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
+                        (tersimpan di browser ini)
+                      </span>
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          resetAdaptiveSizeCalibration(`auto-chroma:${options.bgMode}`)
+                          setCalibrationVersion((v) => v + 1)
+                        }}
+                        className="cursor-pointer rounded px-1.5 py-0.5 font-bold text-[#0D6E5D] underline underline-offset-2 hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:opacity-50"
+                      >
+                        Reset kalibrasi
+                      </button>
+                    </div>
                   ) : null}
                 </div>
               </div>
@@ -1640,9 +1661,23 @@ export function ChromaKeyTabPanel({
                     <p className="mt-0.5 text-[10px] text-[#4A6B63]">{sizeEstimate.note}</p>
                   )}
                   {sizeEstimate.calibrationSamples && sizeEstimate.calibrationSamples > 0 ? (
-                    <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
-                      Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
-                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-medium text-[#0D6E5D] sm:justify-end">
+                      <span>
+                        Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
+                        (tersimpan di browser ini)
+                      </span>
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          resetAdaptiveSizeCalibration(`auto-chroma:${options.bgMode}`)
+                          setCalibrationVersion((v) => v + 1)
+                        }}
+                        className="cursor-pointer rounded px-1.5 py-0.5 font-bold text-[#0D6E5D] underline underline-offset-2 hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:opacity-50"
+                      >
+                        Reset kalibrasi
+                      </button>
+                    </div>
                   ) : null}
                 </div>
               </div>

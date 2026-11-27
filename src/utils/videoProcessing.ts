@@ -184,31 +184,63 @@ export interface ProcessedVideoResult {
 }
 
 /**
- * Standar stream H.264 universal anti-kusam (BT.709 + yuv420p + GOP 2 detik)
+ * [BUG-7R-05] Pilih Level H.264 dinamis sesuai jumlah macroblock per frame:
+ * Level 4.1 mendukung maks 8.192 macroblock/frame; dimensi seperti 1080x1936 (8.228 MB) memakai Level 4.2.
+ */
+export function selectSafeH264Level(
+  width?: number | null,
+  height?: number | null,
+): '4.1' | '4.2' {
+  if (
+    typeof width === 'number' &&
+    typeof height === 'number' &&
+    Number.isFinite(width) &&
+    Number.isFinite(height) &&
+    width > 0 &&
+    height > 0
+  ) {
+    const macroblocks = Math.ceil(width / 16) * Math.ceil(height / 16)
+    if (macroblocks > 8192) {
+      return '4.2'
+    }
+  }
+  return '4.1'
+}
+
+/**
+ * Standar stream H.264 universal anti-kusam (BT.709 + yuv420p + GOP 2 detik + level dinamis 4.1/4.2)
  * agar hasil iPhone Safari, Android, dan Desktop identik dan tahan kompresi ulang platform sosial.
  */
-export const UNIVERSAL_H264_BT709_ARGS: readonly string[] = [
-  '-profile:v',
-  'high',
-  '-level',
-  '4.1',
-  '-pix_fmt',
-  'yuv420p',
-  '-colorspace',
-  'bt709',
-  '-color_primaries',
-  'bt709',
-  '-color_trc',
-  'bt709',
-  '-color_range',
-  'tv',
-  '-g',
-  '60',
-  '-keyint_min',
-  '30',
-  '-sc_threshold',
-  '0',
-]
+export function buildUniversalH264Bt709Args(
+  width?: number | null,
+  height?: number | null,
+): string[] {
+  const level = selectSafeH264Level(width, height)
+  return [
+    '-profile:v',
+    'high',
+    '-level',
+    level,
+    '-pix_fmt',
+    'yuv420p',
+    '-colorspace',
+    'bt709',
+    '-color_primaries',
+    'bt709',
+    '-color_trc',
+    'bt709',
+    '-color_range',
+    'tv',
+    '-g',
+    '60',
+    '-keyint_min',
+    '30',
+    '-sc_threshold',
+    '0',
+  ]
+}
+
+export const UNIVERSAL_H264_BT709_ARGS: readonly string[] = buildUniversalH264Bt709Args()
 
 export function formatOutputVerificationBadge(v: OutputVerificationInfo): string {
   const parts: string[] = [v.isHd ? 'Hasil HD' : 'Hasil Terverifikasi']
@@ -222,7 +254,7 @@ export function formatOutputVerificationBadge(v: OutputVerificationInfo): string
     parts.push(v.codecColorLabel)
   }
   if (v.bitrateMbps !== null && Number.isFinite(v.bitrateMbps) && v.bitrateMbps > 0) {
-    parts.push(`${v.bitrateMbps.toFixed(1).replace('.', ',')} Mbps`)
+    parts.push(`${v.bitrateMbps.toFixed(1).replace('.', ',')} Mbps total`)
   }
   return parts.join(' • ')
 }
@@ -399,9 +431,9 @@ export const SCALE_ALGORITHM_OPTIONS: ReadonlyArray<{
   label: string
   hint: string
 }> = [
-  { value: 'bicubic', label: 'Bicubic', hint: 'Cepat & tajam (Disarankan)' },
-  { value: 'bilinear', label: 'Bilinear', hint: 'Paling cepat & ringan' },
-  { value: 'lanczos', label: 'Lanczos', hint: 'Detail paling halus' },
+  { value: 'lanczos', label: 'Lanczos', hint: 'Detail paling tajam (Disarankan)' },
+  { value: 'bicubic', label: 'Bicubic', hint: 'Seimbang & cepat' },
+  { value: 'bilinear', label: 'Bilinear', hint: 'Paling ringan & cepat' },
 ]
 
 export const COLOR_FILTER_PRESETS: ReadonlyArray<ColorFilterPreset> = [
@@ -634,6 +666,26 @@ export function recordAdaptiveSizeCalibration(
   return clampedNext
 }
 
+/**
+ * [BUG-7R-30] Mereset data kalibrasi adaptif ukuran file yang tersimpan di localStorage browser ini.
+ */
+export function resetAdaptiveSizeCalibration(calibrationKey?: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (!calibrationKey) {
+      window.localStorage.removeItem(SIZE_CALIBRATION_STORAGE_KEY)
+      return
+    }
+    const store = readSizeCalibrationStore()
+    if (Object.prototype.hasOwnProperty.call(store, calibrationKey)) {
+      delete store[calibrationKey]
+      window.localStorage.setItem(SIZE_CALIBRATION_STORAGE_KEY, JSON.stringify(store))
+    }
+  } catch {
+    // Abaikan bila localStorage dibatasi
+  }
+}
+
 export function toEvenDimension(value: number): number {
   return Math.max(2, Math.round(value / 2) * 2)
 }
@@ -702,19 +754,30 @@ export function formatFileSizeMB(bytes: number): string {
 }
 
 /**
- * [BUG-16 & BUG-26NOV-08] Memformat durasi video secara konsisten dengan aturan floor ke 0.1 detik
- * (contoh: 2.89 detik -> "00:02.8", 6.5 detik -> "00:06.5") agar seragam di header & seluruh kartu.
+ * [BUG-7R-22] Memformat durasi detik dengan pembulatan seragam ke 0,1 detik terdekat
+ * agar label menit:detik dan teks "(X,X detik)" selalu cocok 100%.
  */
+export function roundDurationTenths(seconds: number): number {
+  return Math.max(0, Math.round(seconds * 10) / 10)
+}
+
+export function formatDurationSecondsLabel(seconds: number | null): string {
+  if (seconds === null || !Number.isFinite(seconds) || seconds < 0) {
+    return 'Tidak terdeteksi'
+  }
+  return `${roundDurationTenths(seconds).toFixed(1).replace('.', ',')} detik`
+}
+
 export function formatDuration(seconds: number | null): string {
   if (seconds === null || !Number.isFinite(seconds) || seconds < 0) {
     return 'Tidak terdeteksi'
   }
-  const flooredTenths = Math.floor(seconds * 10 + 1e-6) / 10
-  const hasFraction = Math.abs(flooredTenths - Math.floor(flooredTenths)) > 0.001
-  const wholeSec = Math.floor(flooredTenths)
+  const roundedTenths = roundDurationTenths(seconds)
+  const hasFraction = Math.abs(roundedTenths - Math.floor(roundedTenths)) > 0.001
+  const wholeSec = Math.floor(roundedTenths)
   const hrs = Math.floor(wholeSec / 3600)
   const mins = Math.floor((wholeSec % 3600) / 60)
-  const secRemainder = Math.max(0, flooredTenths - hrs * 3600 - mins * 60)
+  const secRemainder = Math.max(0, roundedTenths - hrs * 3600 - mins * 60)
 
   const pad = (n: number) => String(n).padStart(2, '0')
   const secStr = hasFraction
@@ -905,6 +968,7 @@ export function buildConvertReencodeArgs(
   targetFormat: OutputFormat,
   _isMobile: boolean,
   threads = 2,
+  videoDimensions?: { width: number | null; height: number | null },
 ): string[] {
   void _isMobile
   const safeThreads = String(getSafeWasmEncoderThreads(threads))
@@ -954,7 +1018,7 @@ export function buildConvertReencodeArgs(
     'veryfast',
     '-crf',
     '21',
-    ...UNIVERSAL_H264_BT709_ARGS,
+    ...buildUniversalH264Bt709Args(videoDimensions?.width, videoDimensions?.height),
     '-threads',
     safeThreads,
     '-c:a',
@@ -981,6 +1045,7 @@ export function buildCompressArgs(
   presetId: CompressionPresetId,
   _isMobile: boolean,
   threads = 2,
+  videoDimensions?: { width: number | null; height: number | null },
 ): string[] {
   void _isMobile
   const selected =
@@ -1002,7 +1067,7 @@ export function buildCompressArgs(
     'veryfast',
     '-crf',
     String(selected.crf),
-    ...UNIVERSAL_H264_BT709_ARGS,
+    ...buildUniversalH264Bt709Args(videoDimensions?.width, videoDimensions?.height),
     '-threads',
     safeThreads,
     '-c:a',
@@ -1249,8 +1314,14 @@ export function buildEnhanceArgs(
     args.push('-maxrate', `${maxRateKbps}k`, '-bufsize', `${maxRateKbps * 2}k`)
   }
 
+  const outTarget = options.upscale1080p
+    ? computeTarget1080pResolution(videoDimensions?.width ?? null, videoDimensions?.height ?? null)
+    : null
+  const outW = outTarget?.width ?? videoDimensions?.width ?? null
+  const outH = outTarget?.height ?? videoDimensions?.height ?? null
+
   args.push(
-    ...UNIVERSAL_H264_BT709_ARGS,
+    ...buildUniversalH264Bt709Args(outW, outH),
     '-threads',
     safeThreads,
     '-c:a',
@@ -1436,7 +1507,7 @@ export function buildStabilizerArgs(
   }
 
   args.push(
-    ...UNIVERSAL_H264_BT709_ARGS,
+    ...buildUniversalH264Bt709Args(videoDimensions?.width, videoDimensions?.height),
     '-threads',
     safeThreads,
     '-c:a',

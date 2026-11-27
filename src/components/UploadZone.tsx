@@ -214,6 +214,7 @@ export function UploadZone({
     <section aria-label="Unggah video lokal" className="flex flex-col gap-3">
       {/* Input utama multi-video (mengganti pilihan saat ini) */}
       <input
+        id="localvid-main-file-input"
         ref={fileInputRef}
         type="file"
         multiple
@@ -368,32 +369,59 @@ export function UploadZone({
           </div>
 
           {/* Bar Alur Edit Antrean (metadata teks ringan, 0 snapshot Blob, scroll horizontal mulus di mobile) */}
-          {batchAppliedHistory.length > 0 && (
-            <div className="mt-3 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] px-3 py-2.5">
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin] [scrollbar-color:#6de7c1_transparent]">
-                <span className="mr-0.5 shrink-0 whitespace-nowrap text-[11px] font-bold text-[#0D6E5D]">
-                  Efek terpasang ({batchAppliedHistory.length} tahap):
-                </span>
-                <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-lg border border-[#E2F3EC] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#4A6B63]">
-                  Video Asli
-                </span>
-                {batchAppliedHistory.map((step) => (
-                  <div key={step.id} className="inline-flex shrink-0 items-center gap-1.5">
-                    <ChevronRight
-                      aria-hidden="true"
-                      className="h-3.5 w-3.5 shrink-0 text-[#14A085]"
-                    />
-                    <span
-                      title={step.summary}
-                      className="inline-flex items-center whitespace-nowrap rounded-lg border border-[#6DE7C1] bg-white px-2.5 py-1 text-[11px] font-bold text-[#0D6E5D]"
-                    >
-                      <span>{step.tabLabel}</span>
-                    </span>
-                  </div>
-                ))}
+          {batchAppliedHistory.length > 0 && (() => {
+            const partialSteps = batchAppliedHistory.filter((step) => Boolean(step.isPartial))
+            const partialDetails = partialSteps
+              .filter(
+                (step) =>
+                  typeof step.appliedCount === 'number' &&
+                  typeof step.totalCount === 'number' &&
+                  step.appliedCount < step.totalCount,
+              )
+              .map((step) => `${step.tabLabel}: ${step.appliedCount}/${step.totalCount} selesai`)
+              .join(', ')
+            const historyLabel =
+              partialSteps.length > 0
+                ? partialDetails
+                  ? `Efek terpasang (${batchAppliedHistory.length} tahap (${partialDetails})):`
+                  : `Efek terpasang (${batchAppliedHistory.length} tahap • sebagian video):`
+                : `Efek terpasang (${batchAppliedHistory.length} tahap):`
+            return (
+              <div className="mt-3 rounded-2xl border border-[#B5F5DB] bg-[#E8FFF5] px-3 py-2.5">
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin] [scrollbar-color:#6de7c1_transparent]">
+                  <span className="mr-0.5 shrink-0 whitespace-nowrap text-[11px] font-bold text-[#0D6E5D]">
+                    {historyLabel}
+                  </span>
+                  <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-lg border border-[#E2F3EC] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#4A6B63]">
+                    Video Asli
+                  </span>
+                  {batchAppliedHistory.map((step) => (
+                    <div key={step.id} className="inline-flex shrink-0 items-center gap-1.5">
+                      <ChevronRight
+                        aria-hidden="true"
+                        className="h-3.5 w-3.5 shrink-0 text-[#14A085]"
+                      />
+                      <span
+                        title={step.summary}
+                        className="inline-flex items-center whitespace-nowrap rounded-lg border border-[#6DE7C1] bg-white px-2.5 py-1 text-[11px] font-bold text-[#0D6E5D]"
+                      >
+                        <span>
+                          {step.tabLabel}
+                          {step.isPartial &&
+                          typeof step.appliedCount === 'number' &&
+                          typeof step.totalCount === 'number'
+                            ? ` (${step.appliedCount}/${step.totalCount})`
+                            : step.isPartial
+                              ? ' (sebagian)'
+                              : ''}
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* Daftar Baris Antrean (Ringan, 0 <video>, area sentuh tombol hapus >= 44x44px) */}
           <ul className="mt-3.5 flex flex-col gap-2" aria-label="Daftar antrean video">

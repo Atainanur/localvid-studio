@@ -56,6 +56,7 @@ import {
   formatFileSizeMB,
   getColorFilterPreset,
   OUTPUT_FORMAT_OPTIONS,
+  resetAdaptiveSizeCalibration,
   SCALE_ALGORITHM_OPTIONS,
   shouldDirectReencodeToWebm,
   STABILIZER_OPTIONS,
@@ -245,6 +246,7 @@ export function FeatureTabs({
 }: FeatureTabsProps) {
   const [compareOriginal, setCompareOriginal] = useState(false)
   const [showTabFadeRight, setShowTabFadeRight] = useState(false)
+  const [calibrationVersion, setCalibrationVersion] = useState(0)
   const tabListRef = useRef<HTMLDivElement | null>(null)
   const tabButtonRefs = useRef<Partial<Record<FeatureTabId, HTMLButtonElement | null>>>({})
 
@@ -290,6 +292,7 @@ export function FeatureTabs({
   )
   const activeColorPreset = getColorFilterPreset(enhanceOptions.colorFilter)
 
+  void calibrationVersion
   const enhanceSizeEstimate = estimateEnhanceOutputSize(
     enhanceOptions,
     selectedVideoSizeBytes,
@@ -733,7 +736,7 @@ export function FeatureTabs({
                       otomatis fallback ke re-encode{' '}
                       {outputFormat === 'webm' ? 'VP8/Vorbis' : 'H.264/AAC'} (preset{' '}
                       <code className="rounded bg-white px-1.5 py-0.5 font-semibold text-[#0D6E5D]">
-                        {isMobile ? 'ultrafast' : 'fast'}
+                        veryfast
                       </code>
                       ).
                     </p>
@@ -907,8 +910,7 @@ export function FeatureTabs({
                       Algoritma Skala 1080p
                     </span>
                     <span className="text-[11px] font-semibold text-[#0D6E5D]">
-                      CRF {enhanceOptions.upscale1080p ? '23' : '22'} • preset{' '}
-                      {isMobile ? 'veryfast' : 'fast'}
+                      CRF {enhanceOptions.upscale1080p ? '21' : '20'} • preset veryfast
                     </span>
                   </div>
                   <div className="mt-2.5 grid grid-cols-3 gap-2">
@@ -918,6 +920,7 @@ export function FeatureTabs({
                         <button
                           key={opt.value}
                           type="button"
+                          aria-pressed={active}
                           disabled={disabled}
                           onClick={() => handleScaleAlgorithmChange(opt.value)}
                           className={`min-h-11 cursor-pointer touch-manipulation rounded-xl border px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-60 ${
@@ -1072,7 +1075,7 @@ export function FeatureTabs({
                       Batasi Ukuran Hasil (Smart Cap)
                     </span>
                     <span className="rounded-full bg-[#B5F5DB] px-2 py-0.5 text-[10px] font-bold text-[#0D6E5D]">
-                      CRF {enhanceOptions.upscale1080p ? '23' : '22'} • {isMobile ? 'veryfast' : 'fast'}
+                      CRF {enhanceOptions.upscale1080p ? '21' : '20'} • veryfast
                     </span>
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-[#4A6B63]">
@@ -1144,17 +1147,32 @@ export function FeatureTabs({
                       </span>
                     </p>
                     <p className="mt-0.5 text-[11px] text-[#4A6B63]">
-                      CRF {enhanceOptions.upscale1080p ? '23' : '22'} • preset{' '}
-                      {isMobile ? 'veryfast' : 'fast'}
+                      CRF {enhanceOptions.upscale1080p ? '21' : '20'} • preset veryfast
                       {enhanceSizeEstimate.maxRateKbps
                         ? ` • Cap ≤ ${enhanceSizeEstimate.maxRateKbps}k`
                         : ' • Tanpa Cap'}
                     </p>
                     {enhanceSizeEstimate.calibrationSamples !== undefined &&
                       enhanceSizeEstimate.calibrationSamples > 0 && (
-                        <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
-                          Dikalibrasi dari {enhanceSizeEstimate.calibrationSamples} proses sebelumnya
-                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-medium text-[#0D6E5D] sm:justify-end">
+                          <span>
+                            Dikalibrasi dari {enhanceSizeEstimate.calibrationSamples} proses
+                            sebelumnya (tersimpan di browser ini)
+                          </span>
+                          <button
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => {
+                              resetAdaptiveSizeCalibration(
+                                `enhance:${enhanceOptions.upscale1080p ? '1080p' : 'native'}`,
+                              )
+                              setCalibrationVersion((v) => v + 1)
+                            }}
+                            className="cursor-pointer rounded px-1.5 py-0.5 font-bold text-[#0D6E5D] underline underline-offset-2 hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:opacity-50"
+                          >
+                            Reset kalibrasi
+                          </button>
+                        </div>
                       )}
                   </div>
                 </div>
@@ -1291,16 +1309,30 @@ export function FeatureTabs({
                     </span>
                   </p>
                   <p className="mt-0.5 text-[11px] text-[#4A6B63]">
-                    CRF 22 • preset {isMobile ? 'veryfast' : 'fast'}
+                    CRF 21 • preset veryfast
                     {stabilizerSizeEstimate.maxRateKbps
                       ? ` • Cap ≤ ${stabilizerSizeEstimate.maxRateKbps}k`
                       : ''}
                   </p>
                   {stabilizerSizeEstimate.calibrationSamples !== undefined &&
                     stabilizerSizeEstimate.calibrationSamples > 0 && (
-                      <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
-                        Dikalibrasi dari {stabilizerSizeEstimate.calibrationSamples} proses sebelumnya
-                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-medium text-[#0D6E5D] sm:justify-end">
+                        <span>
+                          Dikalibrasi dari {stabilizerSizeEstimate.calibrationSamples} proses
+                          sebelumnya (tersimpan di browser ini)
+                        </span>
+                        <button
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => {
+                            resetAdaptiveSizeCalibration(`stabilize:${stabilizerLevel}`)
+                            setCalibrationVersion((v) => v + 1)
+                          }}
+                          className="cursor-pointer rounded px-1.5 py-0.5 font-bold text-[#0D6E5D] underline underline-offset-2 hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:opacity-50"
+                        >
+                          Reset kalibrasi
+                        </button>
+                      </div>
                     )}
                 </div>
               </div>
@@ -1862,9 +1894,25 @@ export function FeatureTabs({
                         )}
                         {aiSizeEstimate.calibrationSamples !== undefined &&
                           aiSizeEstimate.calibrationSamples > 0 && (
-                            <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
-                              Dikalibrasi dari {aiSizeEstimate.calibrationSamples} proses sebelumnya
-                            </p>
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-medium text-[#0D6E5D] sm:justify-end">
+                              <span>
+                                Dikalibrasi dari {aiSizeEstimate.calibrationSamples} proses
+                                sebelumnya (tersimpan di browser ini)
+                              </span>
+                              <button
+                                type="button"
+                                disabled={disabled}
+                                onClick={() => {
+                                  resetAdaptiveSizeCalibration(
+                                    `ai-upscale:${aiSettings.smartSizeCap ? 'cap' : 'uncapped'}`,
+                                  )
+                                  setCalibrationVersion((v) => v + 1)
+                                }}
+                                className="cursor-pointer rounded px-1.5 py-0.5 font-bold text-[#0D6E5D] underline underline-offset-2 hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:opacity-50"
+                              >
+                                Reset kalibrasi
+                              </button>
+                            </div>
                           )}
                       </div>
                     </div>

@@ -253,6 +253,13 @@ export function BatchResultView({
         entries,
         (current, total) => {
           setDownloadAllStatus(`Mengunduh ${current} dari ${total}...`)
+          // [BUG-7R-11] Tandai kartu item sebagai "Terunduh" saat unduhan bertahapnya dipicu
+          const triggeredItem = completedItems[current - 1]
+          if (triggeredItem) {
+            setDownloadedItemIds((prev) =>
+              prev[triggeredItem.id] ? prev : { ...prev, [triggeredItem.id]: true },
+            )
+          }
         },
         controller.signal,
       )
@@ -312,32 +319,59 @@ export function BatchResultView({
           </div>
         </div>
 
-        {/* [BUG-5R-08] Rekap kumulatif fitur terpasang (satu sumber kebenaran batchCumulativeSteps) */}
-        {cumulativeSteps.length >= 1 && (
-          <div className="rounded-xl border border-[#B5F5DB] bg-white px-3.5 py-2.5">
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin] [scrollbar-color:#6de7c1_transparent]">
-              <span className="mr-0.5 shrink-0 whitespace-nowrap text-[11px] font-bold text-[#0D6E5D]">
-                Fitur terpasang di semua video ({cumulativeSteps.length} tahap):
-              </span>
-              {cumulativeSteps.map((step, idx) => (
-                <div key={step.id} className="inline-flex shrink-0 items-center gap-1.5">
-                  {idx > 0 && (
-                    <ChevronRight
-                      aria-hidden="true"
-                      className="h-3.5 w-3.5 shrink-0 text-[#14A085]"
-                    />
-                  )}
-                  <span
-                    title={step.summary}
-                    className="inline-flex items-center whitespace-nowrap rounded-lg border border-[#6DE7C1] bg-[#E8FFF5] px-2.5 py-1 text-[11px] font-bold text-[#0D6E5D]"
-                  >
-                    <span>{step.tabLabel}</span>
-                  </span>
-                </div>
-              ))}
+        {/* [BUG-5R-08, BUG-7R-12 & BUG-7R-14] Rekap kumulatif fitur terpasang dengan kejujuran cakupan */}
+        {cumulativeSteps.length >= 1 && (() => {
+          const partialSteps = cumulativeSteps.filter((step) => Boolean(step.isPartial))
+          const hasPartialCoverage = partialSteps.length > 0
+          const partialDetailText = partialSteps
+            .filter(
+              (step) =>
+                typeof step.appliedCount === 'number' &&
+                typeof step.totalCount === 'number' &&
+                step.appliedCount < step.totalCount,
+            )
+            .map((step) => `${step.tabLabel}: ${step.appliedCount}/${step.totalCount} selesai`)
+            .join(', ')
+          const headerText = hasPartialCoverage
+            ? partialDetailText
+              ? `Fitur terpasang (${cumulativeSteps.length} tahap • ${partialDetailText}):`
+              : `Fitur terpasang (${cumulativeSteps.length} tahap • sebagian video):`
+            : `Fitur terpasang di semua video (${cumulativeSteps.length} tahap):`
+          return (
+            <div className="rounded-xl border border-[#B5F5DB] bg-white px-3.5 py-2.5">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin] [scrollbar-color:#6de7c1_transparent]">
+                <span className="mr-0.5 shrink-0 whitespace-nowrap text-[11px] font-bold text-[#0D6E5D]">
+                  {headerText}
+                </span>
+                {cumulativeSteps.map((step, idx) => (
+                  <div key={step.id} className="inline-flex shrink-0 items-center gap-1.5">
+                    {idx > 0 && (
+                      <ChevronRight
+                        aria-hidden="true"
+                        className="h-3.5 w-3.5 shrink-0 text-[#14A085]"
+                      />
+                    )}
+                    <span
+                      title={step.summary}
+                      className="inline-flex items-center whitespace-nowrap rounded-lg border border-[#6DE7C1] bg-[#E8FFF5] px-2.5 py-1 text-[11px] font-bold text-[#0D6E5D]"
+                    >
+                      <span>
+                        {step.tabLabel}
+                        {step.isPartial &&
+                        typeof step.appliedCount === 'number' &&
+                        typeof step.totalCount === 'number'
+                          ? ` (${step.appliedCount}/${step.totalCount})`
+                          : step.isPartial
+                            ? ' (sebagian)'
+                            : ''}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* [BUG-4R-15a] Ringkasan Ukuran Gabungan dengan badge Hemat / Naik + konteks jelas */}
         {completedItems.length > 0 && (
@@ -468,8 +502,8 @@ export function BatchResultView({
           <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[#14A085]" />
           <span>
             <strong className="font-bold text-[#0D2B24]">Tips WhatsApp:</strong> Simpan video
-            terlebih dahulu, lalu kirim lewat WhatsApp dengan ikon HD aktif agar ketajaman 1080p
-            terjaga.
+            terlebih dahulu, lalu kirim lewat WhatsApp dengan ikon HD aktif agar ketajaman terbaik
+            video ini terjaga.
           </span>
         </div>
       )}

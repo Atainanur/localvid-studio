@@ -282,8 +282,8 @@ export function ResultPreview({
           <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[#14A085]" />
           <span>
             <strong className="font-bold text-[#0D2B24]">Tips WhatsApp:</strong> Simpan video
-            terlebih dahulu, lalu kirim lewat WhatsApp dengan ikon HD aktif agar ketajaman 1080p
-            terjaga.
+            terlebih dahulu, lalu kirim lewat WhatsApp dengan ikon HD aktif agar ketajaman terbaik
+            video ini terjaga.
           </span>
         </div>
       )}
