@@ -113,9 +113,9 @@ export const AUDIO_DENOISE_PRESETS: ReadonlyArray<AudioDenoisePresetDef> = [
     id: 'strong',
     title: 'Kuat (Angin & Tiupan Mic)',
     shortLabel: 'Kuat',
-    badge: 'nr=36 dB • Single-Pass Cepat',
+    badge: 'nr=36 dB • Single-Pass',
     description:
-      'Reduksi kuat 1-tahap cepat (~30-40% lebih singkat dari 2-tahap) + pemotong gemuruh angin dengan Noise Gate lembut agar vokal utama tetap jernih.',
+      'Reduksi kuat 1-tahap + pemotong gemuruh angin dengan Noise Gate lembut agar vokal utama tetap jernih.',
     params: {
       nr: 36,
       nf: -25,

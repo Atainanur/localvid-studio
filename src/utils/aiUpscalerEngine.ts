@@ -1520,7 +1520,9 @@ export async function runAiUpscalePipeline({
       percent: 8,
     })
 
-    // [BUG-5R-02] Bungkus seluruh fase model-prep (unduh model + init session + heartbeat) dalam try/catch terstruktur
+    // [BUG-5R-02 & BUG-6R-02] Bungkus seluruh fase model-prep + ukur timing per-tahap dengan performance.now()
+    const pipelineStartedAtMs = performance.now()
+    const modelPrepStartedAtMs = performance.now()
     let modelPrepStage = 'inisialisasi GPU/model AI'
     let lastPrepActivityAt = Date.now()
     const prepStartedAt = Date.now()
@@ -1647,6 +1649,11 @@ export async function runAiUpscalePipeline({
       window.clearInterval(prepHeartbeatId)
     }
 
+    const modelPrepDurationSec = (performance.now() - modelPrepStartedAtMs) / 1000
+    onLog(
+      `[${formatLogTimestamp()}] [LocalVid AI] [timing] Model Prep: ${modelPrepDurationSec.toFixed(2)} dtk.`,
+    )
+
     checkAborted(signal)
 
     // Gunakan canvas 2D standar (tanpa willReadFrequently agar jalur upload tekstur GPU optimal)
@@ -1662,6 +1669,12 @@ export async function runAiUpscalePipeline({
       ? undefined
       : 'Menggunakan decoder video bawaan browser (fallback otomatis)'
 
+    const shaderStageStartedAtMs = performance.now()
+    let lastFrameDoneMs = shaderStageStartedAtMs
+    const recentFrameIntervalsMs: number[] = []
+    let latestFpsSpeed: number | undefined
+    let latestEtaSeconds: number | undefined
+
     for (let index = 0; index < totalFrames; index += 1) {
       checkAborted(signal)
 
@@ -1675,6 +1688,8 @@ export async function runAiUpscalePipeline({
         currentFrame,
         totalFrames,
         percent: framePercent,
+        fpsSpeed: latestFpsSpeed,
+        etaSeconds: latestEtaSeconds,
         fallbackNotice: enhancer.fallbackReason,
         decoderNotice: decoderFallbackNotice,
       })
@@ -1738,14 +1753,51 @@ export async function runAiUpscalePipeline({
       tempFiles.add(outFrameName)
       await ffmpeg.writeFile(outFrameName, jpegBytes)
 
+      // [BUG-6R-02] Hitung kecepatan frame & ETA live secara konsisten selama proses berjalan
+      const nowMs = performance.now()
+      const frameDeltaMs = Math.max(1, nowMs - lastFrameDoneMs)
+      lastFrameDoneMs = nowMs
+      recentFrameIntervalsMs.push(frameDeltaMs)
+      if (recentFrameIntervalsMs.length > 5) {
+        recentFrameIntervalsMs.shift()
+      }
+      const avgIntervalMs =
+        recentFrameIntervalsMs.reduce((acc, v) => acc + v, 0) / recentFrameIntervalsMs.length
+      latestFpsSpeed = Math.min(120, Math.max(0.1, 1000 / Math.max(1, avgIntervalMs)))
+      const remainingFrames = Math.max(0, totalFrames - currentFrame)
+      latestEtaSeconds =
+        remainingFrames > 0
+          ? Math.max(1, Math.round(remainingFrames / Math.max(0.1, latestFpsSpeed)))
+          : 0
+
+      onProgress({
+        phase: 'upscaling',
+        label: `Memproses frame ${currentFrame} / ${totalFrames}`,
+        currentFrame,
+        totalFrames,
+        percent: Math.min(86, Math.round(12 + (currentFrame / totalFrames) * 74)),
+        fpsSpeed: latestFpsSpeed,
+        etaSeconds: latestEtaSeconds,
+        fallbackNotice: enhancer.fallbackReason,
+        decoderNotice: decoderFallbackNotice,
+      })
+
       await yieldToMainThread()
     }
+
+    const shaderStageDurationSec = (performance.now() - shaderStageStartedAtMs) / 1000
 
     checkAborted(signal)
 
     const finalBackendName = enhancer.backendName
     const finalUsedFallbackShader = enhancer.usedFallbackShader
     const finalFallbackReason = enhancer.fallbackReason
+
+    onLog(
+      `[${formatLogTimestamp()}] [LocalVid AI] [timing] Ekstraksi & Shader (${finalBackendName}): ${shaderStageDurationSec.toFixed(
+        2,
+      )} dtk (${totalFrames} frame, ${(totalFrames / Math.max(0.05, shaderStageDurationSec)).toFixed(2)} fps).`,
+    )
 
     await enhancer.dispose()
     enhancer = null
@@ -1764,6 +1816,7 @@ export async function runAiUpscalePipeline({
       videoElement = null
     }
 
+    const assemblyStartedAtMs = performance.now()
     onProgress({
       phase: 'assembling',
       label: `Merakit ulang ${totalFrames} frame menjadi MP4 HD (${targetDims.width}×${targetDims.height})...`,
@@ -1860,6 +1913,19 @@ export async function runAiUpscalePipeline({
     if (assembleExit !== 0) {
       throw new Error(`Gagal merakit ulang video MP4 HD (kode FFmpeg ${assembleExit}).`)
     }
+
+    const assemblyDurationSec = (performance.now() - assemblyStartedAtMs) / 1000
+    const totalPipelineDurationSec = (performance.now() - pipelineStartedAtMs) / 1000
+    onLog(
+      `[${formatLogTimestamp()}] [LocalVid AI] [timing] Encoding/Assembly FFmpeg: ${assemblyDurationSec.toFixed(2)} dtk.`,
+    )
+    onLog(
+      `[${formatLogTimestamp()}] [LocalVid AI] [timing] Total: ${totalPipelineDurationSec.toFixed(
+        2,
+      )} dtk (Model Prep ${modelPrepDurationSec.toFixed(1)} dtk | Ekstraksi & Shader ${shaderStageDurationSec.toFixed(
+        1,
+      )} dtk | Assembly FFmpeg ${assemblyDurationSec.toFixed(1)} dtk).`,
+    )
 
     onProgress({
       phase: 'assembling',

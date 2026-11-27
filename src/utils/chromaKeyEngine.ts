@@ -329,6 +329,8 @@ export async function disposeRmbgModelInstance(): Promise<void> {
   const handle = cachedRmbgHandle
   cachedRmbgHandle = null
   rmbgLoadPromise = null
+  rmbgLogListeners.clear()
+  rmbgStatusListeners.clear()
   if (rmbgLoadAbortController) {
     rmbgLoadAbortController.abort()
     rmbgLoadAbortController = null
@@ -351,6 +353,8 @@ export function clearChromaModelCache(): number {
   disposeChromaPreviewSegmenter()
   modelBufferCache.clear()
   rmbgProcessorCache.clear()
+  rmbgLogListeners.clear()
+  rmbgStatusListeners.clear()
   resetChromaRuntimeState()
   if (cachedRmbgHandle) {
     cleared += 1
@@ -1017,6 +1021,8 @@ async function getOrLoadRmbgHandle(
   onLog: (msg: string) => void,
   onStatus?: (msg: string, downloadPercent?: number) => void,
 ): Promise<ActiveRmbgHandle> {
+  checkAborted(signal)
+
   if (cachedRmbgHandle) {
     onLog(
       `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Menggunakan sesi AI RMBG-1.4 dari cache memori (${cachedRmbgHandle.device}, ${cachedRmbgHandle.dtype}).`,
@@ -1024,8 +1030,15 @@ async function getOrLoadRmbgHandle(
     return cachedRmbgHandle
   }
 
+  // [BUG-6R-13] Pastikan setiap listener selalu dicabut lewat finally & saat abort agar tidak pernah terjadi duplikasi log/status
+  const cleanupListeners = () => {
+    rmbgLogListeners.delete(onLog)
+    if (onStatus) rmbgStatusListeners.delete(onStatus)
+  }
+
   rmbgLogListeners.add(onLog)
   if (onStatus) rmbgStatusListeners.add(onStatus)
+  signal.addEventListener('abort', cleanupListeners, { once: true })
 
   try {
     if (!rmbgLoadPromise) {
@@ -1058,8 +1071,8 @@ async function getOrLoadRmbgHandle(
 
     return await raceWithAbortSignal(rmbgLoadPromise, signal)
   } finally {
-    rmbgLogListeners.delete(onLog)
-    if (onStatus) rmbgStatusListeners.delete(onStatus)
+    signal.removeEventListener('abort', cleanupListeners)
+    cleanupListeners()
   }
 }
 
@@ -1783,13 +1796,13 @@ function compositeProbBufferToOutput(
     }
   }
 
-  // 3. [BUG-5R-07] Edge Shift akurat (-3..+3) dengan erosi tepi lembut khusus AI RMBG Semua Objek:
+  // 3. [BUG-5R-07 & BUG-6R-03] Edge Shift akurat (-3..+3) dengan erosi tepi lembut khusus AI RMBG Semua Objek:
   // Pisahkan ambang probabilitas tepi (edgeLow) agar erosi tepi tidak menggigit tajam sisi objek datar,
   // sembari tetap mempertahankan hole-fill internal yang sudah berhasil.
   const shiftSteps = Math.min(3, Math.max(-3, Math.round(options.edgeShift)))
   const isAllObjects = options.subjectMode === 'all-objects'
-  const edgeSoftLow = Math.max(0.04, options.threshold - 0.22)
-  const edgeCoreFloor = Math.max(0.12, options.threshold - 0.08)
+  const edgeSoftLow = Math.max(0.04, options.threshold - 0.24)
+  const edgeCoreFloor = Math.max(0.12, options.threshold - 0.10)
 
   if (shiftSteps < 0 && workW >= 4 && workH >= 4) {
     const iterations = Math.abs(shiftSteps)
@@ -1803,10 +1816,10 @@ function compositeProbBufferToOutput(
             const p = probBuffer[i]
             if (p >= edgeCoreFloor) {
               // Sisi objek berprobabilitas solid: erosi sangat lembut agar bebas gigitan tajam
-              spareAlpha[i] = Math.round(erodedA * 0.42 + prevA * 0.58)
+              spareAlpha[i] = Math.round(erodedA * 0.25 + prevA * 0.75)
             } else if (p >= edgeSoftLow) {
-              // Zona transisi tepi: transisi halus anti-halo
-              spareAlpha[i] = Math.round(erodedA * 0.72 + prevA * 0.28)
+              // Zona transisi tepi: transisi halus anti-halo tanpa memangkas sisi objek rata
+              spareAlpha[i] = Math.round(erodedA * 0.52 + prevA * 0.48)
             }
           }
         }
@@ -2449,7 +2462,9 @@ export async function runChromaKeyPipeline({
     let engineBadge: ChromaEngineBadge = 'MediaPipe GPU'
     let delegateLabel = 'MediaPipe GPU (VIDEO Mode)'
 
-    // [BUG-5R-02] Bungkus seluruh jalur model-prep (unduh + init session + heartbeat >45 dtk) dalam try/catch terstruktur
+    // [BUG-5R-02 & BUG-6R-02] Bungkus seluruh jalur model-prep + ukur timing per-tahap dengan performance.now()
+    const pipelineStartedAtMs = performance.now()
+    const modelPrepStartedAtMs = performance.now()
     let modelPrepStage =
       options.subjectMode === 'all-objects'
         ? 'unduh & inisialisasi sesi ONNX RMBG-1.4'
@@ -2553,6 +2568,11 @@ export async function runChromaKeyPipeline({
       window.clearInterval(modelPrepHeartbeatId)
     }
 
+    const modelPrepDurationSec = (performance.now() - modelPrepStartedAtMs) / 1000
+    onLog(
+      `[${formatLogTimestamp()}] [LocalVid Chroma] [timing] Model Prep: ${modelPrepDurationSec.toFixed(2)} dtk.`,
+    )
+
     checkAborted(signal)
 
     // Alokasi kanvas & scratch SEKALI di luar loop frame (zero allocation di dalam loop)
@@ -2577,6 +2597,8 @@ export async function runChromaKeyPipeline({
     scratch = createCompositorScratch(targetDims.width, targetDims.height)
     let loggedMaskInfo = false
     const segStartedAtMs = performance.now()
+    let inferenceTotalMs = 0
+    let compositingTotalMs = 0
     let lastFrameDoneMs = segStartedAtMs
     const recentIntervalsMs: number[] = []
     let writtenFrames = 0
@@ -2625,6 +2647,7 @@ export async function runChromaKeyPipeline({
       modeTag: string,
     ): Promise<void> => {
       checkAborted(signal)
+      const compT0 = performance.now()
       compositeProbBufferToOutput(
         frameSrcCanvas,
         probBuf,
@@ -2637,6 +2660,7 @@ export async function runChromaKeyPipeline({
       const outFrameName = `chroma_out_${String(frameNum).padStart(5, '0')}.jpg`
       tempFiles.add(outFrameName)
       await ffmpeg.writeFile(outFrameName, jpegBytes)
+      compositingTotalMs += Math.max(0, performance.now() - compT0)
       writtenFrames += 1
       const nowMs = performance.now()
       const intervalMs = Math.max(1, nowMs - lastFrameDoneMs)
@@ -2722,6 +2746,7 @@ export async function runChromaKeyPipeline({
         }
 
         let activeHandle: ActiveRmbgHandle
+        const inferT0 = performance.now()
         try {
           const outcome = await runRmbgInferenceToProbBuffer(
             targetCanvas,
@@ -2763,6 +2788,7 @@ export async function runChromaKeyPipeline({
           onLog(`[${formatLogTimestamp()}] [LocalVid Chroma] ERROR: ${msg}`)
           throw new Error(msg)
         } finally {
+          inferenceTotalMs += Math.max(0, performance.now() - inferT0)
           if (firstInferHeartbeatId !== null) {
             window.clearInterval(firstInferHeartbeatId)
           }
@@ -2775,23 +2801,92 @@ export async function runChromaKeyPipeline({
             : `AI RMBG-1.4 (WASM SIMD ${activeHandle.dtype} • ${modeTag})`
       }
 
+      // [BUG-6R-03] Stabilkan tepi mask frame 0 dengan memadukan secara konservatif terhadap keyframe berikutnya
+      // agar tidak terjadi gigitan tepi kanan/sisi rata akibat erosi awal, sambil mencegah ghosting bila objek bergerak.
+      const stabilizeFrame0WithNextKeyframe = (
+        frame0Prob: Float32Array,
+        nextKfProb: Float32Array,
+      ): void => {
+        const strongFgFloor = Math.min(0.92, options.threshold + 0.08)
+        for (let p = 0; p < totalPixels; p += 1) {
+          const p0 = frame0Prob[p]
+          const p1 = nextKfProb[p]
+          const diff = p1 - p0
+          if (p0 >= 0.14 && diff > 0 && diff <= 0.60) {
+            // Area tepi frame 0 lebih rendah daripada keyframe berikutnya: pulihkan probabilitas tepi secara halus
+            const weightNext = p1 >= strongFgFloor ? 0.54 : 0.40
+            frame0Prob[p] = Math.min(1, p0 * (1 - weightNext) + p1 * weightNext)
+          } else if (Math.abs(diff) <= 0.28) {
+            // Stabilisasi temporal ringan untuk piksel yang konsisten antar dua keyframe awal
+            frame0Prob[p] = p0 * 0.82 + p1 * 0.18
+          }
+        }
+      }
+
       if (keyframeStep === 1 || totalFrames === 1) {
-        for (let idx = 0; idx < totalFrames; idx += 1) {
-          checkAborted(signal)
-          await runAiAtIndex(idx, srcCanvas, srcCtx, scratch.probCurrent)
-          await writeCompositeFrame(idx, srcCanvas, scratch.probCurrent, modeTag)
+        if (totalFrames === 1) {
+          await runAiAtIndex(0, srcCanvas, srcCtx, scratch.probCurrent)
+          await writeCompositeFrame(0, srcCanvas, scratch.probCurrent, modeTag)
           await yieldToMainThread()
+        } else {
+          // Jalankan inferensi keyframe penuh pada frame 0 & frame 1 terlebih dahulu untuk warm-up tepi frame 0
+          await runAiAtIndex(0, srcCanvas, srcCtx, scratch.probPrev)
+          await runAiAtIndex(1, nextKfCanvas, nextKfCtx, scratch.probNext)
+          stabilizeFrame0WithNextKeyframe(scratch.probPrev, scratch.probNext)
+
+          await writeCompositeFrame(0, srcCanvas, scratch.probPrev, modeTag)
+          await yieldToMainThread()
+          await writeCompositeFrame(1, nextKfCanvas, scratch.probNext, modeTag)
+          await yieldToMainThread()
+
+          for (let idx = 2; idx < totalFrames; idx += 1) {
+            checkAborted(signal)
+            await runAiAtIndex(idx, srcCanvas, srcCtx, scratch.probCurrent)
+            await writeCompositeFrame(idx, srcCanvas, scratch.probCurrent, modeTag)
+            await yieldToMainThread()
+          }
         }
       } else {
-        // Keyframe pertama (frame 0)
+        // [BUG-6R-03] Hitung keyframe 0 (di srcCanvas) & keyframe berikutnya (di nextKfCanvas) sebelum kompositing frame 0
+        // sehingga tepi frame 0 mendapat warm-up & blend stabil tanpa seek ganda maupun alokasi kanvas tambahan.
         let prevProb = scratch.probPrev
         let nextProb = scratch.probNext
 
         await runAiAtIndex(0, srcCanvas, srcCtx, prevProb)
+        const firstNextKf = Math.min(totalFrames - 1, keyframeStep)
+        await runAiAtIndex(firstNextKf, nextKfCanvas, nextKfCtx, nextProb)
+        stabilizeFrame0WithNextKeyframe(prevProb, nextProb)
+
         await writeCompositeFrame(0, srcCanvas, prevProb, modeTag)
         await yieldToMainThread()
 
-        let prevKf = 0
+        // Interpolasi linear mask untuk seluruh frame di antara frame 0 dan firstNextKf
+        const firstSpan = firstNextKf
+        for (let midIdx = 1; midIdx < firstNextKf; midIdx += 1) {
+          checkAborted(signal)
+          const t = midIdx / firstSpan
+          const oneMinusT = 1 - t
+          const interp = scratch.probInterp
+          for (let p = 0; p < totalPixels; p += 1) {
+            interp[p] = oneMinusT * prevProb[p] + t * nextProb[p]
+          }
+
+          await captureFrameToCanvas(midIdx, srcCtx)
+          checkAborted(signal)
+
+          await writeCompositeFrame(midIdx, srcCanvas, interp, modeTag)
+          await yieldToMainThread()
+        }
+
+        // Tulis keyframe firstNextKf langsung dari nextKfCanvas
+        await writeCompositeFrame(firstNextKf, nextKfCanvas, nextProb, modeTag)
+        await yieldToMainThread()
+
+        let swap = prevProb
+        prevProb = nextProb
+        nextProb = swap
+        let prevKf = firstNextKf
+
         while (prevKf < totalFrames - 1) {
           checkAborted(signal)
           const nextKf = Math.min(totalFrames - 1, prevKf + keyframeStep)
@@ -2822,7 +2917,7 @@ export async function runChromaKeyPipeline({
           await yieldToMainThread()
 
           // Swap pointer maskPrev <-> maskNext tanpa alokasi maupun copy array
-          const swap = prevProb
+          swap = prevProb
           prevProb = nextProb
           nextProb = swap
           prevKf = nextKf
@@ -2858,6 +2953,7 @@ export async function runChromaKeyPipeline({
         )
         mpHandle.lastVideoTimestampMs = monotonicTsMs
 
+        const mpInferT0 = performance.now()
         await runMediaPipeVideoSegment(
           mpHandle,
           scratch.mpInputCanvas,
@@ -2872,6 +2968,7 @@ export async function runChromaKeyPipeline({
               }
             : undefined,
         )
+        inferenceTotalMs += Math.max(0, performance.now() - mpInferT0)
 
         // Temporal Smoothing ringan antar-frame (0.78 current + 0.22 prev) agar rambut & bahu tidak berkedip
         if (index === 0) {
@@ -2894,10 +2991,15 @@ export async function runChromaKeyPipeline({
     checkAborted(signal)
 
     const segTotalSec = (performance.now() - segStartedAtMs) / 1000
+    const inferenceSec = inferenceTotalMs / 1000
+    const compositingSec = compositingTotalMs / 1000
     onLog(
       `[LocalVid Chroma] Segmentasi ${totalFrames} frame selesai dalam ${segTotalSec.toFixed(
         1,
       )} detik (${(totalFrames / Math.max(0.1, segTotalSec)).toFixed(1)} fps rata-rata).`,
+    )
+    onLog(
+      `[${formatLogTimestamp()}] [LocalVid Chroma] [timing] Inferensi Segmentasi: ${inferenceSec.toFixed(2)} dtk.`,
     )
 
     // Bebaskan kanvas & elemen video sebelum perakitan FFmpeg agar puncak RAM rendah
@@ -2934,6 +3036,7 @@ export async function runChromaKeyPipeline({
       videoElement = null
     }
 
+    const assemblyStartedAtMs = performance.now()
     onProgress({
       phase: 'assembling',
       label: 'Merakit video MP4...',
@@ -3033,6 +3136,22 @@ export async function runChromaKeyPipeline({
         `Gagal merakit ulang video MP4 Auto Green Screen (kode FFmpeg ${assembleExit}).`,
       )
     }
+
+    const assemblyDurationSec = (performance.now() - assemblyStartedAtMs) / 1000
+    const compositingAndAssemblySec = compositingSec + assemblyDurationSec
+    const totalPipelineDurationSec = (performance.now() - pipelineStartedAtMs) / 1000
+    onLog(
+      `[${formatLogTimestamp()}] [LocalVid Chroma] [timing] Compositing & Assembly: ${compositingAndAssemblySec.toFixed(
+        2,
+      )} dtk (Compositing ${compositingSec.toFixed(2)} dtk + Assembly FFmpeg ${assemblyDurationSec.toFixed(2)} dtk).`,
+    )
+    onLog(
+      `[${formatLogTimestamp()}] [LocalVid Chroma] [timing] Total: ${totalPipelineDurationSec.toFixed(
+        2,
+      )} dtk (Model Prep ${modelPrepDurationSec.toFixed(1)} dtk | Inferensi Segmentasi ${inferenceSec.toFixed(
+        1,
+      )} dtk | Compositing & Assembly ${compositingAndAssemblySec.toFixed(1)} dtk).`,
+    )
 
     onProgress({
       phase: 'assembling',

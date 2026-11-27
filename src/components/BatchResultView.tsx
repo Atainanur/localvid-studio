@@ -90,7 +90,6 @@ export function BatchResultView({
   const [singleDownloadToast, setSingleDownloadToast] = useState<string | null>(null)
   const downloadAbortRef = useRef<AbortController | null>(null)
   const singleToastTimerRef = useRef<number | null>(null)
-  const itemDownloadTimersRef = useRef<Map<string, number>>(new Map())
 
   const completedItems = useMemo(
     () => items.filter((item) => item.status === 'done' && item.result && item.outputFile),
@@ -151,18 +150,45 @@ export function BatchResultView({
     }
   }, [openPreviewItemId, feature, items])
 
-  // Batalkan staggered download & bersihkan timer feedback unduh jika komponen unmount
+  // [BUG-6R-06] Reset penanda "Terunduh" hanya saat URL hasil suatu item berubah/diproses ulang atau dihapus
+  const completedResultSignature = useMemo(
+    () =>
+      completedItems
+        .map((item) => `${item.id}:${item.result?.url ?? ''}`)
+        .sort()
+        .join('|'),
+    [completedItems],
+  )
+  const prevResultUrlsByIdRef = useRef<Record<string, string>>({})
+
   useEffect(() => {
-    const timersMap = itemDownloadTimersRef.current
+    const nextUrlMap: Record<string, string> = {}
+    for (const item of completedItems) {
+      if (item.result?.url) nextUrlMap[item.id] = item.result.url
+    }
+    const prevUrlMap = prevResultUrlsByIdRef.current
+    setDownloadedItemIds((prev) => {
+      let changed = false
+      const cleaned: Record<string, boolean> = {}
+      for (const [id, flag] of Object.entries(prev)) {
+        if (flag && nextUrlMap[id] && nextUrlMap[id] === prevUrlMap[id]) {
+          cleaned[id] = true
+        } else if (flag) {
+          changed = true
+        }
+      }
+      return changed ? cleaned : prev
+    })
+    prevResultUrlsByIdRef.current = nextUrlMap
+  }, [completedItems, completedResultSignature])
+
+  // Batalkan staggered download & bersihkan timer toast jika komponen unmount
+  useEffect(() => {
     return () => {
       downloadAbortRef.current?.abort()
       if (singleToastTimerRef.current !== null) {
         window.clearTimeout(singleToastTimerRef.current)
       }
-      for (const t of timersMap.values()) {
-        window.clearTimeout(t)
-      }
-      timersMap.clear()
     }
   }, [])
 
@@ -174,20 +200,8 @@ export function BatchResultView({
     isAudio: boolean,
   ) => {
     triggerSingleFileDownload(url, fileName)
+    // [BUG-6R-06] Pertahankan status "Terunduh" secara persisten hingga hasil diproses ulang/diganti/dihapus
     setDownloadedItemIds((prev) => ({ ...prev, [itemId]: true }))
-    const prevItemTimer = itemDownloadTimersRef.current.get(itemId)
-    if (prevItemTimer !== undefined) {
-      window.clearTimeout(prevItemTimer)
-    }
-    const nextItemTimer = window.setTimeout(() => {
-      setDownloadedItemIds((prev) => {
-        const copy = { ...prev }
-        delete copy[itemId]
-        return copy
-      })
-      itemDownloadTimersRef.current.delete(itemId)
-    }, 2600)
-    itemDownloadTimersRef.current.set(itemId, nextItemTimer)
 
     setSingleDownloadToast(`Unduhan ${isAudio ? 'Audio' : 'Video'} #${itemIndex} dimulai`)
     if (singleToastTimerRef.current !== null) {

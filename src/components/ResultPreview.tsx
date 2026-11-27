@@ -155,16 +155,17 @@ export function ResultPreview({
     anchor.click()
     document.body.removeChild(anchor)
 
+    // [BUG-6R-06] Pertahankan status "Terunduh" secara persisten hingga hasil diproses ulang, diganti, atau dihapus;
+    // hanya toast konfirmasi unduhan yang hilang otomatis setelah 3 detik.
     setIsDownloaded(true)
     setDownloadToast(isAudioOnlyResult ? 'Unduhan Audio (.MP3) dimulai' : 'Unduhan Video dimulai')
     if (downloadTimerRef.current !== null) {
       window.clearTimeout(downloadTimerRef.current)
     }
     downloadTimerRef.current = window.setTimeout(() => {
-      setIsDownloaded(false)
       setDownloadToast(null)
       downloadTimerRef.current = null
-    }, 2600)
+    }, 3000)
   }
 
   const handleShareToGallery = async () => {

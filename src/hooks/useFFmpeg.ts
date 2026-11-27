@@ -188,6 +188,10 @@ function isStreamCopyArgs(args: readonly string[]): boolean {
   return false
 }
 
+// [BUG-6R-15] Filter indikasi kegagalan untuk fallback stderr agar warning jinak (mis. swscaler) tidak dilabeli "Error Pertama"
+const FAILURE_INDICATION_REGEX =
+  /(error|fail|exception|invalid|cannot|no such file|denied|corrupt|unable)/i
+
 export function extractBestStderrError(
   logLines: readonly string[],
   allowLastStderrFallback = true,
@@ -205,7 +209,7 @@ export function extractBestStderrError(
     }
   }
   if (allowLastStderrFallback) {
-    // [BUG-5R-09] Fallback: ambil baris stderr non-kosong terakhir (skip bare Aborted() bila ada baris lain)
+    // [BUG-5R-09 & BUG-6R-15] Fallback: hanya ambil baris stderr terakhir yang benar-benar mengandung indikasi kegagalan
     for (let i = logLines.length - 1; i >= 0; i -= 1) {
       const line = logLines[i]
       if (typeof line !== 'string') continue
@@ -213,7 +217,7 @@ export function extractBestStderrError(
       if (!trimmed || BARE_ABORTED_REGEX.test(trimmed)) continue
       if (/^\[stderr\]/i.test(trimmed)) {
         const cleaned = trimmed.replace(/^\[stderr\]\s*/i, '').trim()
-        if (cleaned) return cleaned
+        if (cleaned && FAILURE_INDICATION_REGEX.test(cleaned)) return cleaned
       }
     }
   }
@@ -228,7 +232,7 @@ export function extractBestStderrError(
       const line = logLines[i]
       if (typeof line !== 'string') continue
       const cleaned = line.replace(/^\[stderr\]\s*/i, '').trim()
-      if (cleaned) return cleaned
+      if (cleaned && FAILURE_INDICATION_REGEX.test(cleaned)) return cleaned
     }
   }
   return null

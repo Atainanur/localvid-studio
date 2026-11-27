@@ -113,6 +113,7 @@ import {
   estimateStabilizerOutputSize,
   FEATURE_TAB_LABELS,
   formatDuration,
+  formatEnhanceUpscaleLabel,
   formatFileSizeMB,
   getChainStepSummary,
   getColorFilterPreset,
@@ -124,6 +125,7 @@ import {
   readVideoMetadata,
   recordAdaptiveSizeCalibration,
   safeErrorMessage,
+  shouldDirectReencodeToWebm,
   toEvenDimension,
   type EditPipelineStep,
   type EnhanceOptions,
@@ -183,6 +185,32 @@ interface UndoRemovedStepState {
   previousDisplayMetadata: VideoMetadata
   optionsBeforeReset: TabOptionsSnapshot
 }
+
+/** [BUG-6R-01] Snapshot 5 detik untuk tombol Urungkan saat item tunggal dihapus dari antrean batch */
+interface UndoRemovedBatchItemState {
+  previousBatchItems: BatchQueueItem[]
+  previousBatchAppliedHistory: BatchAppliedHistoryEntry[]
+  previousBatchPreviewItemId: string | null
+  previousBatchResultMeta: {
+    feature: FeatureTabId
+    totalElapsedMs: number
+    wasCancelledEarly: boolean
+  } | null
+  removedItemName: string
+}
+
+type PendingClearConfirmState =
+  | { kind: 'single-delete' }
+  | { kind: 'batch-clear-all' }
+  | { kind: 'batch-change-all' }
+  | {
+      kind: 'batch-remove-item'
+      itemId: string
+      itemIndex: number
+      itemName: string
+      hasResult: boolean
+    }
+  | null
 
 type TabOptionsSnapshot =
   | { tab: 'convert'; outputFormat: OutputFormat; fastRemux: boolean }
@@ -272,11 +300,13 @@ export default function App() {
   const [viewedResultBeforeUrl, setViewedResultBeforeUrl] = useState<string | null>(null)
   const [pendingRemoveStepId, setPendingRemoveStepId] = useState<string | null>(null)
   const [pendingResetAll, setPendingResetAll] = useState(false)
-  /** [BUG-5R-06] Konfirmasi inline untuk Hapus Semua, Ganti Semua Video, dan hapus video di kartu upload */
-  const [pendingClearConfirm, setPendingClearConfirm] = useState<
-    'single-delete' | 'batch-clear-all' | 'batch-change-all' | null
-  >(null)
+  /** [BUG-5R-06 & BUG-6R-01] Konfirmasi inline terpadu untuk Hapus Semua, Ganti Semua Video, hapus video tunggal, dan hapus 1 item antrean */
+  const [pendingClearConfirm, setPendingClearConfirm] = useState<PendingClearConfirmState>(null)
+  /** [BUG-6R-10] Konfirmasi inline saat "Proses Ulang / Ubah Setelan" pada batch chaining akan membuang tahap terakhir */
+  const [pendingBatchReeditConfirm, setPendingBatchReeditConfirm] = useState(false)
   const [undoRemovedStep, setUndoRemovedStep] = useState<UndoRemovedStepState | null>(null)
+  const [undoRemovedBatchItem, setUndoRemovedBatchItem] =
+    useState<UndoRemovedBatchItemState | null>(null)
   const [chainNotice, setChainNotice] = useState<string | null>(null)
   const [sourcePreviewUrl, setSourcePreviewUrl] = useState<string | null>(null)
   const [isReadingMetadata, setIsReadingMetadata] = useState(false)
@@ -379,15 +409,18 @@ export default function App() {
     message: string,
     durationMs = 4000,
     undoPayload: UndoRemovedStepState | null = null,
+    undoBatchPayload: UndoRemovedBatchItemState | null = null,
   ) => {
     setChainNotice(message)
     setUndoRemovedStep(undoPayload)
+    setUndoRemovedBatchItem(undoBatchPayload)
     if (chainNoticeTimerRef.current !== null) {
       window.clearTimeout(chainNoticeTimerRef.current)
     }
     chainNoticeTimerRef.current = window.setTimeout(() => {
       setChainNotice(null)
       setUndoRemovedStep(null)
+      setUndoRemovedBatchItem(null)
       chainNoticeTimerRef.current = null
     }, durationMs)
   }
@@ -399,6 +432,7 @@ export default function App() {
     }
     setChainNotice(null)
     setUndoRemovedStep(null)
+    setUndoRemovedBatchItem(null)
   }
 
   useEffect(() => {
@@ -771,9 +805,16 @@ export default function App() {
 
   const handleTabChange = (nextTab: FeatureTabId) => {
     if (isBusy) return
+    // [BUG-6R-11] Cegah race condition: jika konfirmasi Reset ke Video Asli sedang terbuka,
+    // batalkan state konfirmasi reset secara eksplisit dengan toast singkat lalu tahan navigasi.
+    if (pendingResetAll) {
+      setPendingResetAll(false)
+      showChainNotice('Reset dibatalkan', 3000)
+      return
+    }
     setPendingRemoveStepId(null)
-    setPendingResetAll(false)
     setPendingClearConfirm(null)
+    setPendingBatchReeditConfirm(false)
 
     // [BUG-4R-04a] Mode Antrean Multi-Video (2+ video): pertahankan hasil batch & URL tetap hidup saat pindah tab
     if (isBatchMode) {
@@ -1055,11 +1096,38 @@ export default function App() {
     }
 
     // 2+ video: aktifkan Mode Antrean Multi-Video (Batch Queue)
+    // [BUG-6R-16] Jika pengguna sudah melakukan chaining pada 1 file lalu masuk kembali ke Mode Antrean
+    // dengan menyertakan file yang sama, pindahkan jejak riwayat efek ke batchAppliedHistory agar tidak hilang diam-diam.
+    const previousSingleSteps = !isBatchMode ? pipelineSteps : []
+    const previousOriginalRef = originalSourceFile
+    const previousSelectedRef = selectedVideo?.file ?? null
+    const retainedExistingSingleFile =
+      previousSingleSteps.length > 0 &&
+      validated.acceptedFiles.some(
+        (incoming) =>
+          (previousOriginalRef &&
+            incoming.name === previousOriginalRef.name &&
+            incoming.size === previousOriginalRef.size) ||
+          (previousSelectedRef &&
+            incoming.name === previousSelectedRef.name &&
+            incoming.size === previousSelectedRef.size),
+      )
+    const preservedHistoryFromSelect: BatchAppliedHistoryEntry[] = retainedExistingSingleFile
+      ? previousSingleSteps.map((step, idx) => ({
+          id: `single-reentry-${step.id}-${idx}`,
+          tabId: step.tabId,
+          tabLabel: step.tabLabel,
+          summary: `${step.summary} (Video #1)`,
+          timestamp: step.timestamp,
+        }))
+      : []
+
     metadataReqIdRef.current += 1
     dismissChainNotice()
     setPendingRemoveStepId(null)
     setPendingResetAll(false)
     setPendingClearConfirm(null)
+    setPendingBatchReeditConfirm(false)
     lastProcessedWasAudioOnlyRef.current = false
     resetChromaSessionCaches()
     revokeAllBatchResultUrls()
@@ -1071,7 +1139,7 @@ export default function App() {
     setExpectedDuration(null)
     setBatchResultMeta(null)
     setBatchActiveItemIndex(-1)
-    setBatchAppliedHistory([])
+    setBatchAppliedHistory(preservedHistoryFromSelect)
     await clearCurrentResult()
 
     const createdItems = validated.acceptedFiles.map((file, idx) =>
@@ -1084,6 +1152,16 @@ export default function App() {
     )
     if (noticeMsg) {
       showChainNotice(noticeMsg, 5500)
+    } else if (preservedHistoryFromSelect.length > 0) {
+      showChainNotice(
+        `Antrean aktif (${createdItems.length} video). Riwayat ${preservedHistoryFromSelect.length} tahap efek pada video sebelumnya tetap dicatat.`,
+        4500,
+      )
+    } else if (previousSingleSteps.length > 0) {
+      showChainNotice(
+        `Memulai antrean baru (${createdItems.length} video). Riwayat ${previousSingleSteps.length} tahap video sebelumnya dibersihkan.`,
+        4500,
+      )
     }
     void readMetadataForBatchItems(createdItems, true)
   }
@@ -1131,11 +1209,25 @@ export default function App() {
       return
     }
 
+    // [BUG-6R-16] Saat transisi dari 1 video yang sudah di-chaining ke Mode Antrean (2+ video),
+    // pindahkan jejak efek pipelineSteps ke batchAppliedHistory dengan keterangan jelas untuk Video #1.
+    const preservedSingleHistory: BatchAppliedHistoryEntry[] =
+      !isBatchMode && pipelineSteps.length > 0
+        ? pipelineSteps.map((step, idx) => ({
+            id: `single-to-batch-${step.id}-${idx}`,
+            tabId: step.tabId,
+            tabLabel: step.tabLabel,
+            summary: `${step.summary} (Video #1)`,
+            timestamp: step.timestamp,
+          }))
+        : []
+
     if (!isBatchMode) {
       metadataReqIdRef.current += 1
       setPendingRemoveStepId(null)
       setPendingResetAll(false)
       setPendingClearConfirm(null)
+      setPendingBatchReeditConfirm(false)
       lastProcessedWasAudioOnlyRef.current = false
       setOriginalSourceFile(null)
       setOriginalFileName(null)
@@ -1145,6 +1237,9 @@ export default function App() {
       setExpectedDuration(null)
       setBatchResultMeta(null)
       setBatchActiveItemIndex(-1)
+      if (preservedSingleHistory.length > 0) {
+        setBatchAppliedHistory(preservedSingleHistory)
+      }
       await clearCurrentResult()
       setBatchPreviewItemId(combined[0]?.id ?? null)
     }
@@ -1155,6 +1250,11 @@ export default function App() {
     )
     if (noticeMsg) {
       showChainNotice(noticeMsg, 5500)
+    } else if (preservedSingleHistory.length > 0) {
+      showChainNotice(
+        `${newItems.length} video ditambahkan. Riwayat ${preservedSingleHistory.length} tahap efek pada Video #1 tetap dicatat.`,
+        4500,
+      )
     } else {
       showChainNotice(
         `${newItems.length} video ditambahkan. Antrean sekarang berisi ${combined.length} video.`,
@@ -1164,10 +1264,74 @@ export default function App() {
     void readMetadataForBatchItems(newItems, baseItems.length === 0)
   }
 
+  // [BUG-6R-01] Arahkan ikon x / hapus per-item pada kartu antrean ke dialog konfirmasi inline terpadu
+  const handleRequestRemoveBatchItem = (itemId: string) => {
+    if (isBusy) return
+    const target = batchItems.find((item) => item.id === itemId)
+    if (!target) return
+    setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+    setPendingBatchReeditConfirm(false)
+    setPendingClearConfirm({
+      kind: 'batch-remove-item',
+      itemId: target.id,
+      itemIndex: target.index,
+      itemName: target.originalFileName,
+      hasResult: Boolean(target.status === 'done' && target.result),
+    })
+  }
+
+  const handleUndoRemoveBatchItem = async () => {
+    if (isBusy || !undoRemovedBatchItem) return
+    const snap = undoRemovedBatchItem
+    dismissChainNotice()
+
+    // Segarkan Blob URL dari Blob hasil yang tersimpan di snapshot agar pratinjau & unduh tetap hidup 100%
+    revokeAllBatchResultUrls()
+    const restoredItems = snap.previousBatchItems.map((item) => {
+      if (item.result?.blob) {
+        const freshUrl = URL.createObjectURL(item.result.blob)
+        batchResultUrlsRef.current.add(freshUrl)
+        return {
+          ...item,
+          result: {
+            ...item.result,
+            url: freshUrl,
+          },
+        }
+      }
+      return item
+    })
+
+    metadataReqIdRef.current += 1
+    setOriginalSourceFile(null)
+    setOriginalFileName(null)
+    setSelectedVideo(null)
+    setPipelineSteps([])
+    await clearCurrentResult()
+
+    setBatchItems(restoredItems)
+    setBatchAppliedHistory(snap.previousBatchAppliedHistory)
+    setBatchPreviewItemId(snap.previousBatchPreviewItemId ?? restoredItems[0]?.id ?? null)
+    setBatchResultMeta(snap.previousBatchResultMeta)
+    setBatchActiveItemIndex(-1)
+    addLog(`[LocalVid Batch] Penghapusan video "${snap.removedItemName}" dibatalkan (Urungkan).`)
+    showChainNotice(`Video ${snap.removedItemName} dikembalikan ke antrean.`, 3200)
+  }
+
   const handleRemoveBatchItem = async (itemId: string) => {
     if (isBusy) return
     const target = batchItems.find((item) => item.id === itemId)
     if (!target) return
+
+    // [BUG-6R-01] Simpan snapshot 5 detik untuk aksi Urungkan setelah konfirmasi hapus disetujui
+    const undoBatchSnapshot: UndoRemovedBatchItemState = {
+      previousBatchItems: batchItems,
+      previousBatchAppliedHistory: batchAppliedHistory,
+      previousBatchPreviewItemId: batchPreviewItemId,
+      previousBatchResultMeta: batchResultMeta,
+      removedItemName: target.originalFileName,
+    }
 
     const wasActivePreview = activeBatchPreviewItem?.id === target.id
 
@@ -1180,6 +1344,7 @@ export default function App() {
     const remaining = reindexBatchItems(batchItems.filter((item) => item.id !== itemId))
     if (remaining.length === 0) {
       await handleClearFile()
+      showChainNotice(`Video ${target.originalFileName} dihapus`, 5000, null, undoBatchSnapshot)
       return
     }
 
@@ -1220,9 +1385,11 @@ export default function App() {
       })
       showChainNotice(
         preservedSteps.length > 0
-          ? `Tersisa 1 video (${preservedSteps.length} tahap efek tetap tercatat).`
-          : 'Tersisa 1 video, beralih otomatis ke mode edit tunggal.',
-        3800,
+          ? `Video ${target.originalFileName} dihapus. Tersisa 1 video (${preservedSteps.length} tahap efek tetap tercatat).`
+          : `Video ${target.originalFileName} dihapus. Beralih ke mode edit tunggal.`,
+        5000,
+        null,
+        undoBatchSnapshot,
       )
       return
     }
@@ -1239,12 +1406,28 @@ export default function App() {
     // [BUG-4R-20] Jika item yang dihapus adalah referensi pratinjau aktif, reset rapi ke Video #1
     if (wasActivePreview) {
       setBatchPreviewItemId(remaining[0].id)
-      showChainNotice('Pratinjau kembali ke Video #1', 3500)
     }
+    showChainNotice(
+      wasActivePreview
+        ? `Video ${target.originalFileName} dihapus. Pratinjau kembali ke Video #1.`
+        : `Video ${target.originalFileName} dihapus`,
+      5000,
+      null,
+      undoBatchSnapshot,
+    )
   }
 
-  const handleEditSettingsFromBatchResult = () => {
+  const executeEditSettingsFromBatchResult = () => {
     if (isBusy) return
+    const discardedStageLabel = batchResultMeta
+      ? FEATURE_TAB_LABELS[batchResultMeta.feature]
+      : FEATURE_TAB_LABELS[activeTab]
+    const prevStageEntry =
+      batchAppliedHistory.length > 0
+        ? batchAppliedHistory[batchAppliedHistory.length - 1]
+        : null
+
+    setPendingBatchReeditConfirm(false)
     revokeAllBatchResultUrls()
     setBatchResultMeta(null)
     setBatchActiveItemIndex(-1)
@@ -1260,6 +1443,28 @@ export default function App() {
         errorMessage: undefined,
       })),
     )
+
+    if (prevStageEntry) {
+      showChainNotice(
+        `Kembali ke tahap ${prevStageEntry.tabLabel}, hasil ${discardedStageLabel} dibuang`,
+        4500,
+      )
+    }
+  }
+
+  // [BUG-6R-10] Jika "Proses Ulang / Ubah Setelan" pada hasil chaining akan membuang tahap terakhir,
+  // tampilkan konfirmasi inline terlebih dahulu agar tidak terjadi diam-diam.
+  const handleEditSettingsFromBatchResult = () => {
+    if (isBusy) return
+    if (batchAppliedHistory.length > 0 && batchResultMeta) {
+      setPendingClearConfirm(null)
+      setPendingResetAll(false)
+      setPendingRemoveStepId(null)
+      setPendingBatchReeditConfirm(true)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    executeEditSettingsFromBatchResult()
   }
 
   const handleContinueBatchWithOutputs = async () => {
@@ -1371,23 +1576,33 @@ export default function App() {
     if (isBusy) return
     setPendingRemoveStepId(null)
     setPendingResetAll(false)
-    setPendingClearConfirm(isBatchMode ? 'batch-clear-all' : 'single-delete')
+    setPendingBatchReeditConfirm(false)
+    setPendingClearConfirm(isBatchMode ? { kind: 'batch-clear-all' } : { kind: 'single-delete' })
   }
 
   const handleRequestChangeAllVideos = () => {
     if (isBusy) return
     setPendingRemoveStepId(null)
     setPendingResetAll(false)
-    setPendingClearConfirm('batch-change-all')
+    setPendingBatchReeditConfirm(false)
+    setPendingClearConfirm({ kind: 'batch-change-all' })
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const executeConfirmedClear = async () => {
     const mode = pendingClearConfirm
     setPendingClearConfirm(null)
+    if (!mode) return
+    if (mode.kind === 'batch-remove-item') {
+      await handleRemoveBatchItem(mode.itemId)
+      return
+    }
+    const deletedSingleName = originalFileName || selectedVideo?.name || 'video'
     await handleClearFile()
-    if (mode === 'batch-change-all') {
+    if (mode.kind === 'batch-change-all') {
       window.scrollTo({ top: 0, behavior: 'smooth' })
+    } else if (mode.kind === 'single-delete') {
+      showChainNotice(`Video ${deletedSingleName} dihapus`, 3200)
     }
   }
 
@@ -2171,8 +2386,43 @@ export default function App() {
       }
 
       if (activeTab === 'convert') {
-        suffix = fastRemux ? 'remux' : 'convert'
-        if (fastRemux) {
+        const directWebmReencode = fastRemux && shouldDirectReencodeToWebm(inputExt, targetFormat)
+        suffix = fastRemux && !directWebmReencode ? 'remux' : 'convert'
+
+        if (directWebmReencode) {
+          // [BUG-6R-05] Target .WebM dari input non-WebM (mis. H.264/MP4) langsung ke re-encode VP8/Vorbis
+          // tanpa membuang 1 siklus -c copy yang pasti gagal.
+          usedFallbackEncode = true
+          setStatusStage('Format .WebM otomatis: Re-encode VP8/Vorbis...')
+          addLog(
+            `[LocalVid] Target .WebM dari input .${inputExt.toUpperCase()} langsung memakai re-encode VP8/Vorbis (melewati -c copy yang tidak kompatibel wadah WebM).`,
+          )
+          if (!batchIndex || batchIndex === 1) {
+            showChainNotice(
+              'Format .WebM otomatis memakai re-encode VP8/Vorbis agar kompatibel penuh di browser.',
+              4500,
+            )
+          }
+          exitCode = await exec(
+            buildConvertReencodeArgs(
+              inputName,
+              outputName,
+              targetFormat,
+              isMobile,
+              recommendedThreads,
+            ),
+            undefined,
+            durationSec,
+          )
+          summaryNote = 'Konversi ke .WEBM (Re-encode VP8/Vorbis)'
+          resultDetails = {
+            kind: 'convert',
+            sourceFormat: `.${inputExt.toUpperCase()}`,
+            targetFormat: '.WEBM',
+            processMode: 'Re-encode Otomatis (VP8/Vorbis)',
+            fallbackCodecLabel: 'VP8/Vorbis',
+          }
+        } else if (fastRemux) {
           setStatusStage(`Mode Kilat / Fast Remux ke .${targetFormat.toUpperCase()}...`)
           addLog(
             `[LocalVid] Menjalankan Fast Remux (-c copy) dari .${inputExt} ke .${targetFormat}...`,
@@ -2630,12 +2880,16 @@ export default function App() {
               ((preEnhanceEst.minEstimatedMB + preEnhanceEst.maxEstimatedMB) / 2) * 1024 * 1024,
           }
         }
+        const upscaleLabel = formatEnhanceUpscaleLabel(
+          enhanceOptions.scaleAlgorithm,
+          enhanceOptions.smartSizeCap,
+        )
         const notes: string[] = []
         if (enhanceOptions.colorFilter !== 'none') {
           notes.push(getColorFilterPreset(enhanceOptions.colorFilter).name)
         }
         if (enhanceOptions.upscale1080p) {
-          notes.push(`Upscale 1080p (${enhanceOptions.scaleAlgorithm})`)
+          notes.push(upscaleLabel)
         }
         if (enhanceOptions.denoise || enhanceOptions.sharpen || enhanceOptions.colorFix) {
           notes.push('Penjernihan')
@@ -2677,13 +2931,7 @@ export default function App() {
         if (enhanceOptions.sharpen) activeEnhancements.push('Pertajam Detail')
         if (enhanceOptions.colorFix) activeEnhancements.push('Perbaiki Warna')
         if (enhanceOptions.upscale1080p) {
-          const algoName =
-            enhanceOptions.scaleAlgorithm === 'lanczos'
-              ? 'Lanczos'
-              : enhanceOptions.scaleAlgorithm === 'bilinear'
-                ? 'Bilinear'
-                : 'Bicubic'
-          activeEnhancements.push(`Upscale 1080p (${algoName})`)
+          activeEnhancements.push(upscaleLabel)
         }
         if (enhanceOptions.smartSizeCap) {
           activeEnhancements.push('Smart Cap')
@@ -3448,6 +3696,16 @@ export default function App() {
                 transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
                 className="mt-4 grid grid-cols-1 gap-2.5 border-t border-[#E2F3EC] pt-4 text-xs sm:grid-cols-3"
               >
+              {/* [BUG-6R-12] Label halus panel disclosure agar pengguna jelas memahami isi detail teknis & opsi lanjutan */}
+              <div className="sm:col-span-3 flex items-center justify-between px-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#0D6E5D]">
+                  Detail Teknis &amp; Opsi Lanjutan
+                </span>
+                <span className="text-[11px] text-[#4A6B63]">
+                  Diagnostik browser lokal
+                </span>
+              </div>
+
               <div className="flex items-center justify-between rounded-xl border border-[#E2F3EC] bg-[#F7FFFC] px-3.5 py-2.5">
                 <span className="inline-flex items-center gap-1.5 font-medium text-[#4A6B63]">
                   {crossOriginIsolated ? (
@@ -3487,7 +3745,7 @@ export default function App() {
                       ? 'text-[#0D6E5D]'
                       : webgpu.status === 'checking'
                         ? 'text-[#4A6B63]'
-                        : 'text-amber-700'
+                        : 'text-[#0D6E5D]'
                   }`}
                 >
                   {webgpu.status === 'supported'
@@ -3609,7 +3867,7 @@ export default function App() {
             isReadingMetadata={isReadingMetadata}
             onSelectFiles={(files) => void handleSelectFiles(files)}
             onAddMoreFiles={(files) => void handleAddMoreFiles(files)}
-            onRemoveBatchItem={(itemId) => void handleRemoveBatchItem(itemId)}
+            onRemoveBatchItem={handleRequestRemoveBatchItem}
             onClearFile={handleRequestClearFile}
             onSelectStepTab={handleTabChange}
             onRemoveStep={handleRequestRemoveStep}
@@ -3617,11 +3875,11 @@ export default function App() {
             onSuggestFastRemux={handleSuggestFastRemux}
           />
 
-          {/* [BUG-5R-06] Konfirmasi Inline (alertdialog) untuk Hapus Semua, Ganti Semua Video, & Hapus Video di Kartu Upload */}
+          {/* [BUG-5R-06 & BUG-6R-01] Konfirmasi Inline Terpadu (alertdialog) untuk Hapus Semua, Ganti Semua, Hapus Video, & Hapus 1 Item Antrean */}
           <AnimatePresence initial={false}>
             {pendingClearConfirm && (
               <motion.div
-                key={`confirm-clear-${pendingClearConfirm}`}
+                key={`confirm-clear-${pendingClearConfirm.kind}-${pendingClearConfirm.kind === 'batch-remove-item' ? pendingClearConfirm.itemId : 'all'}`}
                 role="alertdialog"
                 aria-label="Konfirmasi hapus video"
                 initial={{ opacity: 0, y: -6, scale: 0.98 }}
@@ -3636,15 +3894,23 @@ export default function App() {
                     className="mt-0.5 h-4 w-4 shrink-0 text-rose-600"
                   />
                   <span>
-                    {pendingClearConfirm === 'batch-clear-all' ? (
+                    {pendingClearConfirm.kind === 'batch-clear-all' ? (
                       <>
                         Hapus semua <strong className="font-bold">{batchItems.length} video</strong>{' '}
                         dari antrean?
                       </>
-                    ) : pendingClearConfirm === 'batch-change-all' ? (
+                    ) : pendingClearConfirm.kind === 'batch-change-all' ? (
                       <>
                         Ganti semua <strong className="font-bold">{batchItems.length} video</strong>{' '}
                         dan hapus antrean beserta hasilnya saat ini?
+                      </>
+                    ) : pendingClearConfirm.kind === 'batch-remove-item' ? (
+                      <>
+                        <strong className="font-bold">Konfirmasi hapus video</strong> - Hapus video
+                        ini (<strong className="font-bold">Video #{pendingClearConfirm.itemIndex}: {pendingClearConfirm.itemName}</strong>) dari antrean?
+                        {pendingClearConfirm.hasResult
+                          ? ' Hasil proses video ini juga akan ikut terhapus.'
+                          : ''}
                       </>
                     ) : (
                       <>
@@ -3665,9 +3931,9 @@ export default function App() {
                   >
                     <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
                     <span>
-                      {pendingClearConfirm === 'batch-clear-all'
+                      {pendingClearConfirm.kind === 'batch-clear-all'
                         ? 'Ya, Hapus Semua'
-                        : pendingClearConfirm === 'batch-change-all'
+                        : pendingClearConfirm.kind === 'batch-change-all'
                           ? 'Ya, Ganti Semua'
                           : 'Ya, Hapus Video'}
                     </span>
@@ -3675,6 +3941,58 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setPendingClearConfirm(null)}
+                    className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
+                  >
+                    Batal
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* [BUG-6R-10] Konfirmasi Inline saat "Proses Ulang / Ubah Setelan" pada batch chaining akan membuang tahap terakhir */}
+          <AnimatePresence initial={false}>
+            {pendingBatchReeditConfirm && batchResultMeta && batchAppliedHistory.length > 0 && (
+              <motion.div
+                key="confirm-batch-reedit"
+                role="alertdialog"
+                aria-label="Konfirmasi proses ulang tahap antrean"
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                className="flex flex-col gap-3 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3.5 text-xs leading-relaxed text-rose-950 shadow-xs sm:flex-row sm:items-center sm:justify-between sm:text-sm"
+              >
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle
+                    aria-hidden="true"
+                    className="mt-0.5 h-4 w-4 shrink-0 text-rose-600"
+                  />
+                  <span>
+                    Proses ulang akan membuang hasil tahap{' '}
+                    <strong className="font-bold">
+                      {FEATURE_TAB_LABELS[batchResultMeta.feature]}
+                    </strong>{' '}
+                    dan kembali ke tahap{' '}
+                    <strong className="font-bold">
+                      {batchAppliedHistory[batchAppliedHistory.length - 1].tabLabel}
+                    </strong>
+                    . Lanjutkan?
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={executeEditSettingsFromBatchResult}
+                    className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-2xs transition-colors hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
+                  >
+                    <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
+                    <span>Ya, Proses Ulang</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingBatchReeditConfirm(false)}
                     className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
                   >
                     Batal
@@ -3804,10 +4122,21 @@ export default function App() {
                       type="button"
                       disabled={isBusy}
                       onClick={() => void handleUndoRemoveStep()}
-                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold shadow-2xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:opacity-50"
+                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold shadow-2xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
                     >
                       <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
-                      <span>Undo / Batalkan</span>
+                      <span>Urungkan</span>
+                    </button>
+                  )}
+                  {undoRemovedBatchItem && (
+                    <button
+                      type="button"
+                      disabled={isBusy}
+                      onClick={() => void handleUndoRemoveBatchItem()}
+                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold shadow-2xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
+                    >
+                      <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
+                      <span>Urungkan</span>
                     </button>
                   )}
                   <button
@@ -4187,10 +4516,12 @@ export default function App() {
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="truncate font-bold text-[#0D2B24]">
                         {activeFrameProgress?.label ||
-                          (isProcessing && !hasExpectedDuration && ffmpegCurrentFrame !== null
-                            ? `Memproses frame ke-${ffmpegCurrentFrame}...`
-                            : statusStage ||
-                              (isLoaded && displayedPercent === 100 ? 'Selesai' : 'Memproses...'))}
+                          (activeTab === 'stabilize' && isProcessing && displayedPercent >= 98
+                            ? 'Merakit video hasil...'
+                            : isProcessing && !hasExpectedDuration && ffmpegCurrentFrame !== null
+                              ? `Memproses frame ke-${ffmpegCurrentFrame}...`
+                              : statusStage ||
+                                (isLoaded && displayedPercent === 100 ? 'Selesai' : 'Memproses...'))}
                       </span>
                       {activeFrameProgress && activeFrameProgress.totalFrames > 0 && (
                         <span className="shrink-0 whitespace-nowrap rounded-full bg-[#E8FFF5] px-2.5 py-0.5 text-xs font-bold text-[#0D6E5D] ring-1 ring-[#B5F5DB] tabular-nums">
@@ -4230,7 +4561,7 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* [BUG-07] Indikator liveness frame/waktu terakhir & peringatan macet 30 detik */}
+                  {/* [BUG-07, BUG-6R-02 & BUG-6R-08] Indikator liveness frame/waktu + ETA live konsisten Tab 5 & Tab 7 + status akhir Stabilizer */}
                   {isBusy && (
                     <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#4A6B63]">
                       <span className="inline-flex items-center gap-1.5 tabular-nums">
@@ -4238,15 +4569,19 @@ export default function App() {
                           <span>
                             Frame terakhir: {activeFrameProgress.currentFrame} /{' '}
                             {activeFrameProgress.totalFrames}
-                            {chromaFrameProgress?.fpsSpeed
-                              ? ` • ${chromaFrameProgress.fpsSpeed.toFixed(1)} fps`
+                            {activeFrameProgress.fpsSpeed
+                              ? ` • ${activeFrameProgress.fpsSpeed.toFixed(1)} fps`
                               : ''}
-                            {chromaFrameProgress?.etaSeconds && chromaFrameProgress.etaSeconds > 0
-                              ? ` • Sisa ~${chromaFrameProgress.etaSeconds} dtk`
+                            {activeFrameProgress.etaSeconds && activeFrameProgress.etaSeconds > 0
+                              ? ` • Sisa ~${activeFrameProgress.etaSeconds} dtk`
                               : ''}
                             {chromaFrameProgress?.modeTag
                               ? ` (${chromaFrameProgress.modeTag})`
                               : ''}
+                          </span>
+                        ) : activeTab === 'stabilize' && isProcessing && displayedPercent >= 98 ? (
+                          <span className="font-semibold text-[#0D6E5D]">
+                            Merakit video hasil...
                           </span>
                         ) : ffmpegCurrentFrame !== null || ffmpegCurrentTimeLabel ? (
                           <span>
@@ -4261,11 +4596,15 @@ export default function App() {
                           <span>Engine aktif memproses video...</span>
                         )}
                       </span>
-                      {idleSeconds >= 5 && idleSeconds < 30 && (
-                        <span className="text-slate-400 tabular-nums">
+                      {activeTab === 'stabilize' && isProcessing && displayedPercent >= 98 ? (
+                        <span className="font-semibold text-[#0D6E5D]">
+                          Merakit video hasil...
+                        </span>
+                      ) : idleSeconds >= 5 && idleSeconds < 30 ? (
+                        <span className="text-[#4A6B63] tabular-nums">
                           Menunggu frame berikutnya ({idleSeconds} dtk)
                         </span>
-                      )}
+                      ) : null}
                     </div>
                   )}
 

@@ -345,7 +345,7 @@ export function UploadZone({
                   type="button"
                   onClick={openAddMorePicker}
                   disabled={disabled || isBatchRunning}
-                  className="mint-secondary-btn inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                  className="mint-secondary-btn inline-flex min-h-[44px] flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
                 >
                   <Plus aria-hidden="true" className="h-4 w-4" />
                   <span>Tambah Video</span>
@@ -355,7 +355,7 @@ export function UploadZone({
                 type="button"
                 onClick={onClearFile}
                 disabled={disabled || isBatchRunning}
-                className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/70 px-3.5 py-2 text-xs font-semibold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                className="inline-flex min-h-[44px] flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/70 px-3.5 py-2.5 text-xs font-semibold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
               >
                 <Trash2 aria-hidden="true" className="h-4 w-4" />
                 <span>Hapus Semua</span>
@@ -492,7 +492,7 @@ export function UploadZone({
                       onClick={() => onRemoveBatchItem(item.id)}
                       aria-label={`Hapus Video #${item.index} (${item.originalFileName}) dari antrean`}
                       title={`Hapus Video #${item.index}`}
-                      className="inline-flex min-h-11 min-w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-rose-200/80 bg-rose-50/50 text-rose-600 transition-colors hover:border-rose-300 hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="inline-flex h-[44px] w-[44px] min-h-[44px] min-w-[44px] shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-rose-200/80 bg-rose-50/50 text-rose-600 transition-colors hover:border-rose-300 hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <X aria-hidden="true" className="h-4 w-4" />
                     </button>
@@ -586,7 +586,7 @@ export function UploadZone({
                 onClick={openAddMorePicker}
                 disabled={disabled}
                 title={`Tambah video ke-2 atau lebih untuk Mode Antrean (maks ${maxBatchCount} video)`}
-                className="mint-secondary-btn inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                className="mint-secondary-btn inline-flex min-h-[44px] flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
               >
                 <Plus aria-hidden="true" className="h-4 w-4" />
                 <span>Tambah Video</span>
@@ -595,7 +595,7 @@ export function UploadZone({
                 type="button"
                 onClick={openFilePicker}
                 disabled={disabled}
-                className="mint-secondary-btn inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                className="mint-secondary-btn inline-flex min-h-[44px] flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
               >
                 <Replace aria-hidden="true" className="h-4 w-4" />
                 <span>Ganti Video</span>
@@ -605,7 +605,7 @@ export function UploadZone({
                 onClick={onClearFile}
                 disabled={disabled}
                 aria-label="Hapus video terpilih"
-                className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs font-semibold text-rose-700 transition-colors duration-150 hover:border-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex min-h-[44px] min-w-[44px] cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2.5 text-xs font-semibold text-rose-700 transition-colors duration-150 hover:border-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Trash2 aria-hidden="true" className="h-4 w-4" />
                 <span className="sm:hidden">Hapus</span>

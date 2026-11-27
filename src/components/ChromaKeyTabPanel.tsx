@@ -31,6 +31,7 @@ import {
   CHROMA_TEMPLATES,
   computeChromaTargetDimensions,
   estimateChromaOutputSize,
+  estimateChromaRenderDurationText,
   getChromaBgDisplayLabel,
   getChromaMaxDurationSec,
   getChromaSpeedProfileDef,
@@ -118,6 +119,17 @@ export function ChromaKeyTabPanel({
         sourceDimensions,
       ),
     [options, originalSizeBytes, sourceDurationSec, isMobile, sourceDimensions],
+  )
+
+  const renderDurationText = useMemo(
+    () =>
+      estimateChromaRenderDurationText(
+        sourceDurationSec,
+        maxDurationSec,
+        options.subjectMode,
+        options.speedProfile,
+      ),
+    [sourceDurationSec, maxDurationSec, options.subjectMode, options.speedProfile],
   )
 
   const estimatedFrames = useMemo(() => {
@@ -790,15 +802,25 @@ export function ChromaKeyTabPanel({
         </div>
       )}
 
-      {/* Info Jujur Estimasi Kecepatan & Pencahayaan saat Mode Semua Objek (AI RMBG-1.4) Aktif */}
-      {options.subjectMode === 'all-objects' && (
-        <div className="flex items-start gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-xs leading-relaxed text-emerald-950">
-          <Cpu aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+      {/* [BUG-6R-02] Info Jujur Estimasi Kecepatan Dinamis (berdasarkan durasi video) & Pencahayaan */}
+      {options.subjectMode === 'all-objects' ? (
+        <div className="flex items-start gap-2.5 rounded-2xl border border-[#6DE7C1] bg-[#E8FFF5] px-4 py-3 text-xs leading-relaxed text-[#0D6E5D]">
+          <Cpu aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[#14A085]" />
           <span>
-            <strong className="font-bold">Mode AI Semua Objek (RMBG-1.4)</strong> memakai akselerasi{' '}
-            <strong className="font-bold">{activeSpeedProfile.shortTag}</strong> dan pembersihan
-            bercak latar otomatis (batas {maxDurationSec} detik). Hasil paling bersih pada
-            pencahayaan terang dan objek yang kontras dengan latar.
+            <strong className="font-bold text-[#0D2B24]">Mode AI Semua Objek (RMBG-1.4)</strong>{' '}
+            memakai akselerasi <strong className="font-bold text-[#0D2B24]">{activeSpeedProfile.shortTag}</strong>{' '}
+            (batas {maxDurationSec} detik). Estimasi waktu proses:{' '}
+            <strong className="font-bold text-[#0D2B24]">{renderDurationText}</strong>. Hasil paling
+            bersih pada pencahayaan terang dan objek yang kontras dengan latar.
+          </span>
+        </div>
+      ) : (
+        <div className="flex items-start gap-2.5 rounded-2xl border border-[#B5F5DB] bg-[#F7FFFC] px-4 py-2.5 text-xs leading-relaxed text-[#0D6E5D]">
+          <Clock aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[#14A085]" />
+          <span>
+            <strong className="font-bold text-[#0D2B24]">Mode Subjek Manusia (MediaPipe):</strong>{' '}
+            estimasi waktu proses <strong className="font-bold text-[#0D2B24]">{renderDurationText}</strong>{' '}
+            (batas {maxDurationSec} detik).
           </span>
         </div>
       )}
@@ -926,17 +948,21 @@ export function ChromaKeyTabPanel({
                     aria-label="Aktifkan Mask Cleanup"
                     disabled={disabled}
                     onClick={() => onChange({ ...options, maskCleanup: !options.maskCleanup })}
-                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
-                      options.maskCleanup
-                        ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
-                        : 'bg-[#B5F5DB]'
-                    }`}
+                    className="inline-flex min-h-[44px] min-w-[48px] shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
                   >
                     <span
-                      className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
-                        options.maskCleanup ? 'translate-x-6' : 'translate-x-1'
+                      className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 ${
+                        options.maskCleanup
+                          ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                          : 'bg-[#B5F5DB]'
                       }`}
-                    />
+                    >
+                      <span
+                        className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
+                          options.maskCleanup ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </span>
                   </button>
                 </div>
 
@@ -1132,7 +1158,7 @@ export function ChromaKeyTabPanel({
                         <div className="text-xs font-bold">{prof.label}</div>
                         <div
                           className={`mt-0.5 text-[10px] leading-snug ${
-                            selected ? 'text-[#E8FFF5]' : 'text-[#4A6B63]'
+                            selected ? 'text-white' : 'text-[#4A6B63]'
                           }`}
                         >
                           {prof.hint}
@@ -1344,17 +1370,21 @@ export function ChromaKeyTabPanel({
                 aria-label="Aktifkan Bersihkan Bercak Latar Mask Cleanup"
                 disabled={disabled}
                 onClick={() => onChange({ ...options, maskCleanup: !options.maskCleanup })}
-                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
-                  options.maskCleanup
-                    ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
-                    : 'bg-[#B5F5DB]'
-                }`}
+                className="inline-flex min-h-[44px] min-w-[48px] shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
               >
                 <span
-                  className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
-                    options.maskCleanup ? 'translate-x-6' : 'translate-x-1'
+                  className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 ${
+                    options.maskCleanup
+                      ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                      : 'bg-[#B5F5DB]'
                   }`}
-                />
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
+                      options.maskCleanup ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </span>
               </button>
             </div>
 
@@ -1477,7 +1507,7 @@ export function ChromaKeyTabPanel({
                         <div className="text-xs font-bold">{opt.label}</div>
                         <div
                           className={`mt-0.5 truncate text-[10px] ${
-                            active ? 'text-[#E8FFF5]' : 'text-slate-500'
+                            active ? 'text-white' : 'text-slate-500'
                           }`}
                         >
                           {opt.hint}
@@ -1519,7 +1549,7 @@ export function ChromaKeyTabPanel({
                         <div className="text-xs font-bold">{opt.label}</div>
                         <div
                           className={`mt-0.5 text-[10px] ${
-                            active ? 'text-[#E8FFF5]' : 'text-slate-500'
+                            active ? 'text-white' : 'text-slate-500'
                           }`}
                         >
                           {opt.hint}
@@ -1556,17 +1586,21 @@ export function ChromaKeyTabPanel({
                 aria-label="Aktifkan Batasi Ukuran Hasil Smart Cap Auto Green Screen"
                 disabled={disabled}
                 onClick={() => onChange({ ...options, smartSizeCap: !options.smartSizeCap })}
-                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
-                  options.smartSizeCap
-                    ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
-                    : 'bg-[#B5F5DB]'
-                }`}
+                className="inline-flex min-h-[44px] min-w-[48px] shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
               >
                 <span
-                  className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
-                    options.smartSizeCap ? 'translate-x-6' : 'translate-x-1'
+                  className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 ${
+                    options.smartSizeCap
+                      ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                      : 'bg-[#B5F5DB]'
                   }`}
-                />
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
+                      options.smartSizeCap ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </span>
               </button>
             </div>
 

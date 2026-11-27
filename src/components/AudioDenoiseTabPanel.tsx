@@ -300,17 +300,21 @@ export function AudioDenoiseTabPanel({
                 aria-label="Aktifkan Noise Gate Bungkam Angin di Jeda"
                 disabled={disabled}
                 onClick={() => updateCustomParam({ noiseGate: !options.noiseGate })}
-                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
-                  options.noiseGate
-                    ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
-                    : 'bg-[#B5F5DB]'
-                }`}
+                className="inline-flex min-h-[44px] min-w-[48px] shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
               >
                 <span
-                  className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
-                    options.noiseGate ? 'translate-x-6' : 'translate-x-1'
+                  className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 ${
+                    options.noiseGate
+                      ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                      : 'bg-[#B5F5DB]'
                   }`}
-                />
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
+                      options.noiseGate ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </span>
               </button>
             </div>
 
@@ -334,17 +338,21 @@ export function AudioDenoiseTabPanel({
                 onClick={() =>
                   updateCustomParam({ twoStageWindReduction: !options.twoStageWindReduction })
                 }
-                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
-                  options.twoStageWindReduction
-                    ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
-                    : 'bg-[#B5F5DB]'
-                }`}
+                className="inline-flex min-h-[44px] min-w-[48px] shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
               >
                 <span
-                  className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
-                    options.twoStageWindReduction ? 'translate-x-6' : 'translate-x-1'
+                  className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 ${
+                    options.twoStageWindReduction
+                      ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                      : 'bg-[#B5F5DB]'
                   }`}
-                />
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
+                      options.twoStageWindReduction ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </span>
               </button>
             </div>
           </div>
@@ -383,17 +391,21 @@ export function AudioDenoiseTabPanel({
               aria-label="Aktifkan Jernihkan Vokal Voice Clarity EQ"
               disabled={disabled}
               onClick={() => updateOption({ voiceClarity: !options.voiceClarity })}
-              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
-                options.voiceClarity
-                  ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
-                  : 'bg-[#B5F5DB]'
-              }`}
+              className="inline-flex min-h-[44px] min-w-[48px] shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
             >
               <span
-                className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
-                  options.voiceClarity ? 'translate-x-6' : 'translate-x-1'
+                className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 ${
+                  options.voiceClarity
+                    ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                    : 'bg-[#B5F5DB]'
                 }`}
-              />
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
+                    options.voiceClarity ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </span>
             </button>
           </div>
 
@@ -415,17 +427,21 @@ export function AudioDenoiseTabPanel({
               aria-label="Aktifkan Ratakan Volume Auto Leveling"
               disabled={disabled}
               onClick={() => updateOption({ autoLeveling: !options.autoLeveling })}
-              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
-                options.autoLeveling
-                  ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
-                  : 'bg-[#B5F5DB]'
-              }`}
+              className="inline-flex min-h-[44px] min-w-[48px] shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
             >
               <span
-                className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
-                  options.autoLeveling ? 'translate-x-6' : 'translate-x-1'
+                className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 ${
+                  options.autoLeveling
+                    ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
+                    : 'bg-[#B5F5DB]'
                 }`}
-              />
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full border-2 border-[#14A085] bg-white shadow-xs transition-transform duration-200 ${
+                    options.autoLeveling ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </span>
             </button>
           </div>
         </div>
@@ -465,7 +481,7 @@ export function AudioDenoiseTabPanel({
             value={options.volumePercent}
             disabled={disabled}
             onChange={(e) => updateOption({ volumePercent: Number(e.target.value) })}
-            className="mt-3 h-2 w-full cursor-pointer accent-[#14A085] disabled:opacity-50"
+            className="mt-1 min-h-[44px] w-full cursor-pointer touch-manipulation accent-[#14A085] disabled:opacity-50"
           />
           <div className="mt-1 flex justify-between text-[10px] text-[#4A6B63]">
             <span>50% (Lebih Pelan)</span>

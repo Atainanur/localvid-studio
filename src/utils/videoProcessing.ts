@@ -771,6 +771,37 @@ export function buildOutputFileName(
   return buildBrandedFilename(suffix, format, batchIndex)
 }
 
+/**
+ * [BUG-6R-05] Deteksi apakah target .WebM dari input non-WebM (mis. MP4/MOV/AVI/MKV berisi H.264/AAC)
+ * harus langsung menuju re-encode VP8/Vorbis tanpa membuang 1 siklus -c copy yang pasti gagal.
+ */
+export function shouldDirectReencodeToWebm(
+  sourceExt: string | null | undefined,
+  targetFormat: OutputFormat,
+): boolean {
+  if (targetFormat !== 'webm') return false
+  const normalized = (sourceExt ?? '').trim().replace(/^\.+/, '').toLowerCase()
+  return normalized !== 'webm'
+}
+
+/**
+ * [BUG-6R-07] Satu sumber label untuk Upscale 1080p Tab 3 agar catatan pra-run dan ringkasan hasil 100% seragam.
+ */
+export function formatEnhanceUpscaleLabel(
+  scaleAlgorithm: ScaleAlgorithm,
+  smartSizeCap: boolean,
+): string {
+  const algoLabel =
+    scaleAlgorithm === 'lanczos'
+      ? 'lanczos'
+      : scaleAlgorithm === 'bilinear'
+        ? 'bilinear'
+        : 'bicubic'
+  return smartSizeCap
+    ? `Upscale 1080p (${algoLabel} • skala fast_bilinear)`
+    : `Upscale 1080p (${algoLabel})`
+}
+
 export function buildFastRemuxArgs(
   inputName: string,
   outputName: string,
@@ -905,7 +936,7 @@ export function buildEnhanceFilterChain(
   }
 
   // 2. Upscale ke 1080p HD dengan angka lebar:tinggi genap yang dihitung di JavaScript
-  // Saat Smart Cap aktif, selalu gunakan fast_bilinear pada filter scale untuk percepatan 10-20%
+  // Saat Smart Cap aktif, gunakan skala fast_bilinear pada filter scale
   const scaleFlags = options.smartSizeCap
     ? 'fast_bilinear'
     : options.scaleAlgorithm || 'bicubic'

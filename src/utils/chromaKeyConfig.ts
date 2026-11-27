@@ -302,6 +302,47 @@ export function getChromaSpeedProfileDef(profile: ChromaSpeedProfile): ChromaSpe
   return CHROMA_SPEED_PROFILES.find((item) => item.id === profile) ?? CHROMA_SPEED_PROFILES[0]
 }
 
+/**
+ * [BUG-6R-02] Estimasi waktu pra-run dinamis Tab 7 berdasarkan durasi video yang diunggah.
+ * RMBG-1.4 (fast): ~18-20 dtk per 1 dtk video; MediaPipe VIDEO (manusia): ~2-4 dtk per 1 dtk video.
+ */
+export function estimateChromaRenderDurationText(
+  durationSec: number | null,
+  maxDurationSec: number,
+  subjectMode: ChromaSubjectMode,
+  speedProfile: ChromaSpeedProfile,
+): string {
+  const formatRange = (minSec: number, maxSec: number): string => {
+    const safeMin = Math.max(1, Math.round(minSec))
+    const safeMax = Math.max(safeMin + 2, Math.round(maxSec))
+    if (safeMax < 90) {
+      return `~${safeMin}-${safeMax} detik`
+    }
+    const minMin = (safeMin / 60).toFixed(1).replace('.', ',')
+    const maxMin = (safeMax / 60).toFixed(1).replace('.', ',')
+    return `~${minMin}-${maxMin} menit (${safeMin}-${safeMax} dtk)`
+  }
+
+  const [secPerSecMin, secPerSecMax] =
+    subjectMode === 'all-objects'
+      ? speedProfile === 'balanced'
+        ? [24, 28]
+        : speedProfile === 'detail'
+          ? [34, 42]
+          : [18, 20]
+      : [2, 4]
+
+  if (!durationSec || !Number.isFinite(durationSec) || durationSec <= 0) {
+    return subjectMode === 'all-objects'
+      ? `sekitar ${secPerSecMin}-${secPerSecMax} detik per 1 detik video`
+      : 'sekitar 2-4 detik per 1 detik video'
+  }
+
+  const effDur = Math.min(durationSec, maxDurationSec)
+  const durLabel = effDur.toFixed(1).replace('.', ',')
+  return `${formatRange(effDur * secPerSecMin, effDur * secPerSecMax)} untuk video ${durLabel} dtk`
+}
+
 export function getChromaTemplateDef(templateId: ChromaTemplateId): ChromaTemplateDefinition {
   return CHROMA_TEMPLATES.find((item) => item.id === templateId) ?? CHROMA_TEMPLATES[1]
 }

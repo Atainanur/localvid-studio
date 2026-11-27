@@ -27,6 +27,8 @@ const ERROR_HIGHLIGHT_REGEX =
 
 const BENIGN_CLEANUP_ABORT_REGEX = /^(\[stderr\]\s*)?Aborted\(\s*\)$/i
 const FFMPEG_SUCCESS_MARKER_REGEX = /FFmpeg selesai sukses \(kode keluar 0\)/i
+const FAILURE_INDICATION_REGEX =
+  /(error|fail|exception|invalid|cannot|no such file|denied|corrupt|unable)/i
 
 /**
  * [BUG-05, NEW-03, NEW-09, BUG-4R-12] Saring noise teknis bawaan FFmpeg.wasm di tampilan default:
@@ -83,9 +85,20 @@ export function CollapsibleLogs({
     if (showRawLogs) {
       return { displayedLogs: logs, hiddenNoiseCount: 0 }
     }
+
+    // [BUG-6R-15] Cek keberadaan penanda sukses di seluruh array log & ringkasan akhir terlebih dahulu
+    // agar penyembunyian Aborted() pasca-sukses tidak bergantung pada urutan baris log.
+    const hasSuccessMarkerInLogs = logs.some(
+      (line) => typeof line === 'string' && FFMPEG_SUCCESS_MARKER_REGEX.test(line),
+    )
+    const hasSuccessInSummary =
+      typeof pinnedSummary.finalSummary === 'string' &&
+      (FFMPEG_SUCCESS_MARKER_REGEX.test(pinnedSummary.finalSummary) ||
+        /^Selesai/i.test(pinnedSummary.finalSummary.trim()))
+    const canHideBenignAbort = !hasFailure && (hasSuccessMarkerInLogs || hasSuccessInSummary)
+
     const filtered: string[] = []
     let hidden = 0
-    let seenSuccessMarker = false
 
     for (let i = 0; i < logs.length; i += 1) {
       const line = logs[i]
@@ -95,29 +108,12 @@ export function CollapsibleLogs({
       }
 
       const trimmed = typeof line === 'string' ? line.trim() : ''
-      if (FFMPEG_SUCCESS_MARKER_REGEX.test(trimmed)) {
-        seenSuccessMarker = true
-      } else if (/^\[LocalVid(?:\s+Batch)?\]\s+(Menjalankan|Kompres|Bersihkan|Memulai)/i.test(trimmed)) {
-        seenSuccessMarker = false
-      }
 
-      // [BUG-5R-10] Sembunyikan [stderr] Aborted() benign saat cleanup FFmpeg.wasm setelah run sukses (kode keluar 0),
+      // [BUG-5R-10 & BUG-6R-15] Sembunyikan [stderr] Aborted() jinak saat cleanup FFmpeg.wasm pada run sukses,
       // namun TETAP tampilkan bila proses berakhir gagal.
-      if (BENIGN_CLEANUP_ABORT_REGEX.test(trimmed)) {
-        const nextLine = i + 1 < logs.length ? logs[i + 1] : ''
-        const followedImmediatelyBySuccess =
-          typeof nextLine === 'string' && FFMPEG_SUCCESS_MARKER_REGEX.test(nextLine)
-        const isBenignAfterSuccess =
-          seenSuccessMarker ||
-          followedImmediatelyBySuccess ||
-          (!hasFailure &&
-            typeof pinnedSummary.finalSummary === 'string' &&
-            FFMPEG_SUCCESS_MARKER_REGEX.test(pinnedSummary.finalSummary))
-
-        if (isBenignAfterSuccess && !hasFailure) {
-          hidden += 1
-          continue
-        }
+      if (BENIGN_CLEANUP_ABORT_REGEX.test(trimmed) && canHideBenignAbort) {
+        hidden += 1
+        continue
       }
 
       filtered.push(line)
@@ -144,11 +140,23 @@ export function CollapsibleLogs({
       pinnedSummary.finalSummary,
   )
 
-  // [BUG-5R-09] Jangan pernah tampilkan "Error Pertama: Tidak ada" saat proses berakhir gagal
+  // [BUG-5R-09 & BUG-6R-15] Jangan pernah tampilkan "Error Pertama: Tidak ada" saat gagal,
+  // dan jangan jadikan baris stderr jinak sebagai "Error Pertama".
+  const fallbackFailureLine = useMemo(() => {
+    if (!hasFailure) return null
+    for (let i = lastStderrContext.length - 1; i >= 0; i -= 1) {
+      const cleaned = lastStderrContext[i]?.replace(/^\[stderr\]\s*/i, '').trim()
+      if (cleaned && FAILURE_INDICATION_REGEX.test(cleaned)) {
+        return cleaned
+      }
+    }
+    return null
+  }, [hasFailure, lastStderrContext])
+
   const effectiveFirstError =
     pinnedSummary.firstError ??
     (hasFailure
-      ? (lastStderrContext[lastStderrContext.length - 1]?.replace(/^\[stderr\]\s*/i, '').trim() ||
+      ? (fallbackFailureLine ||
         pinnedSummary.finalSummary ||
         'Proses berakhir dengan kegagalan.')
       : null)

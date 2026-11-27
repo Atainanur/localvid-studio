@@ -45,10 +45,52 @@ export interface AiFrameProgress {
   currentFrame: number
   totalFrames: number
   percent: number
+  /** [BUG-6R-02] Kecepatan pemrosesan frame/detik secara live */
+  fpsSpeed?: number
+  /** [BUG-6R-02] Estimasi sisa waktu (detik) secara live */
+  etaSeconds?: number
   /** Catatan diagnostik jika terjadi fallback otomatis dari model ONNX eksternal ke WebGPU Shader */
   fallbackNotice?: string
   /** [BUG-4R-13c] Catatan jujur bila jatuh ke fallback decoder native <video> */
   decoderNotice?: string
+}
+
+/**
+ * [BUG-6R-02] Format rentang estimasi waktu pra-run yang dinamis berdasarkan durasi video.
+ */
+export function formatEstimatedDurationRange(minSec: number, maxSec: number): string {
+  const safeMin = Math.max(1, Math.round(minSec))
+  const safeMax = Math.max(safeMin + 2, Math.round(maxSec))
+  if (safeMax < 90) {
+    return `~${safeMin}-${safeMax} detik`
+  }
+  const minMin = (safeMin / 60).toFixed(1).replace('.', ',')
+  const maxMin = (safeMax / 60).toFixed(1).replace('.', ',')
+  return `~${minMin}-${maxMin} menit (${safeMin}-${safeMax} dtk)`
+}
+
+/**
+ * [BUG-6R-02] Estimasi waktu pra-run dinamis Tab 5 berdasarkan durasi video & mode GPU.
+ * WebGL2: ~18-22 detik per 1 detik video; WebGPU/ONNX: ~5-14 detik per 1 detik video.
+ */
+export function estimateAiRenderDurationText(
+  durationSec: number | null,
+  maxDurationSec: number,
+  isWebGl2Mode: boolean,
+): string {
+  if (!durationSec || !Number.isFinite(durationSec) || durationSec <= 0) {
+    return isWebGl2Mode
+      ? 'sekitar 18-22 detik per 1 detik video pada mode WebGL2'
+      : 'sekitar 5-14 detik per 1 detik video pada WebGPU (18-22 dtk/dtk pada WebGL2)'
+  }
+  const effDur = Math.min(durationSec, maxDurationSec)
+  const durLabel = effDur.toFixed(1).replace('.', ',')
+  if (isWebGl2Mode) {
+    const range = formatEstimatedDurationRange(effDur * 18, effDur * 22)
+    return `${range} untuk video ${durLabel} dtk (mode WebGL2)`
+  }
+  const range = formatEstimatedDurationRange(effDur * 5, effDur * 14)
+  return `${range} untuk video ${durLabel} dtk (mode WebGPU)`
 }
 
 export const AI_MODEL_PRESETS: ReadonlyArray<AiModelPreset> = [

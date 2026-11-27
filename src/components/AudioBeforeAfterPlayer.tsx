@@ -416,10 +416,10 @@ export function AudioBeforeAfterPlayer({
 
       if (afterCanvasRef.current && waveforms.afterRaw) {
         drawWaveformCanvas(afterCanvasRef.current, waveforms.afterRaw, waveforms.globalPeak, ratio, {
-          played: '#059669',
-          unplayed: '#6ee7b7',
-          playhead: '#047857',
-          centerLine: 'rgba(16, 185, 129, 0.25)',
+          played: '#14A085',
+          unplayed: '#6DE7C1',
+          playhead: '#0D6E5D',
+          centerLine: 'rgba(20, 160, 133, 0.25)',
         })
       }
     },
