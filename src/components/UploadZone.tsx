@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent, type DragEvent } from 'react'
+import { useRef, useState, type ChangeEvent, type DragEvent, type RefObject } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   AlertTriangle,
@@ -62,6 +62,8 @@ interface UploadZoneProps {
   isMobile: boolean
   disabled: boolean
   isReadingMetadata: boolean
+  /** Opsional: ref eksternal agar kartu fitur di empty state dapat memicu dialog pilih file secara langsung */
+  fileInputRef?: RefObject<HTMLInputElement | null>
   onSelectFiles: (files: File[]) => void
   onAddMoreFiles: (files: File[]) => void
   onRemoveBatchItem: (itemId: string) => void
@@ -114,6 +116,7 @@ export function UploadZone({
   isMobile,
   disabled,
   isReadingMetadata,
+  fileInputRef: externalFileInputRef,
   onSelectFiles,
   onAddMoreFiles,
   onRemoveBatchItem,
@@ -123,7 +126,8 @@ export function UploadZone({
   onRevertToOriginal,
   onSuggestFastRemux,
 }: UploadZoneProps) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const internalFileInputRef = useRef<HTMLInputElement | null>(null)
+  const fileInputRef = externalFileInputRef ?? internalFileInputRef
   const addMoreInputRef = useRef<HTMLInputElement | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [validationError, setValidationError] = useState<string | null>(null)

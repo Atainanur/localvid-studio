@@ -28,6 +28,7 @@ import {
 } from 'lucide-react'
 import { BatchResultView } from './components/BatchResultView'
 import { CollapsibleLogs } from './components/CollapsibleLogs'
+import { FeatureOverviewSection } from './components/FeatureOverviewSection'
 import { FeatureTabs } from './components/FeatureTabs'
 import { ResultPreview } from './components/ResultPreview'
 import { UploadZone } from './components/UploadZone'
@@ -372,6 +373,7 @@ export default function App() {
   const clearChromaCacheRef = useRef<(() => number) | null>(null)
   const resetChromaRuntimeRef = useRef<(() => void) | null>(null)
   const featureCardRef = useRef<HTMLDivElement | null>(null)
+  const uploadFileInputRef = useRef<HTMLInputElement | null>(null)
   const lastWatchdogActivityRef = useRef<number>(Date.now())
   const [idleSeconds, setIdleSeconds] = useState(0)
 
@@ -3581,8 +3583,15 @@ export default function App() {
           onRestore: () => setActiveTab(batchResultMeta.feature),
         }
       : null
-  const step1Done = Boolean(selectedVideo) || isBatchMode
+  const hasUploadedVideo = Boolean(selectedVideo) || batchItems.length > 0
+  const step1Done = hasUploadedVideo
   const step3Done = Boolean(result) || hasBatchResultView
+
+  const handleSelectFeatureForUpload = (tabId: FeatureTabId) => {
+    if (isBusy) return
+    setActiveTab(tabId)
+    uploadFileInputRef.current?.click()
+  }
 
   const pendingRemoveDialogData = (() => {
     if (!pendingRemoveStepId) return null
@@ -3865,6 +3874,7 @@ export default function App() {
             isMobile={isMobile}
             disabled={isBusy}
             isReadingMetadata={isReadingMetadata}
+            fileInputRef={uploadFileInputRef}
             onSelectFiles={(files) => void handleSelectFiles(files)}
             onAddMoreFiles={(files) => void handleAddMoreFiles(files)}
             onRemoveBatchItem={handleRequestRemoveBatchItem}
@@ -4152,9 +4162,33 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* 2. Tujuh Tab Fitur Utama (Pusat Navigasi Tambah, Ubah, & Hapus Efek + Clean Result View) */}
-          <div ref={featureCardRef} className="scroll-mt-4">
-            <FeatureTabs
+          {/* 2. Tampilan Awal Ringkasan 7 Fitur saat belum ada video, atau Bar 7 Tab + Panel Editor setelah video diunggah */}
+          <AnimatePresence mode="wait" initial={false}>
+            {!hasUploadedVideo ? (
+              <motion.div
+                key="feature-overview-empty-state"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <FeatureOverviewSection
+                  isMobile={isMobile}
+                  disabled={isBusy}
+                  onSelectFeatureForUpload={handleSelectFeatureForUpload}
+                />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="feature-tabs-active-editor"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                className="flex flex-col gap-5"
+              >
+                <div ref={featureCardRef} className="scroll-mt-4">
+                  <FeatureTabs
               activeTab={activeTab}
               onTabChange={handleTabChange}
               isMobile={isMobile}
@@ -4775,15 +4809,20 @@ export default function App() {
               )}
             </section>
           )}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-          {/* Panel Log Collapsible (Tetap di paling bawah dalam keadaan tertutup secara default) */}
-          <CollapsibleLogs
-            logs={logs}
-            pinnedSummary={pinnedLogSummary}
-            isActive={isBusy}
-            openTrigger={logOpenTrigger}
-            onClear={clearLogs}
-          />
+          {/* Panel Log Collapsible: tampil rapi di bawah setelah ada video/log atau dibuka manual dari panel engine */}
+          {(hasUploadedVideo || logs.length > 0 || logOpenTrigger > 0) && (
+            <CollapsibleLogs
+              logs={logs}
+              pinnedSummary={pinnedLogSummary}
+              isActive={isBusy}
+              openTrigger={logOpenTrigger}
+              onClear={clearLogs}
+            />
+          )}
         </main>
 
         {/* Footer dengan Credit Pembuat Atainanur */}
