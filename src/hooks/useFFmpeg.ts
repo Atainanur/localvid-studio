@@ -75,6 +75,14 @@ export interface UseFFmpegReturn {
   recommendedThreads: number
   /** Pesan error terakhir bila pemuatan atau eksekusi gagal. */
   error: string | null
+  /** [BUG-5R-17] Jumlah crash worker FFmpeg berturut-turut dalam sesi ini. */
+  workerFailureCount: number
+  /** [BUG-5R-17] True jika terjadi >= 3x crash worker berturut-turut sehingga auto-recovery dihentikan. */
+  workerCrashLoopDetected: boolean
+  /** [BUG-5R-17] Beralih paksa ke Mode Single-Thread Hemat RAM (@ffmpeg/core@0.12.6, 1 thread). */
+  switchToSingleThreadMode: () => void
+  /** [BUG-5R-17] Reset penghitung kegagalan worker secara manual. */
+  resetWorkerFailureGuard: () => void
   /** Tipe perangkat terdeteksi ('Desktop' | 'iOS' | 'Android'). */
   deviceType: DeviceType
   /** True jika pengguna berada di perangkat mobile (iOS/Android). */
@@ -93,6 +101,8 @@ export interface UseFFmpegReturn {
   setPinnedDurationLine: (durationLine: string | null) => void
   /** [BUG-06] Menyematkan ringkasan akhir proses pada ringkasan log tersemat. */
   setPinnedFinalSummary: (summary: string | null) => void
+  /** [BUG-5R-09] Mengalirkan error dari tahap eksternal (model-prep Tab 5/Tab 7) ke pelaporan error yang sama. */
+  reportExternalError: (message: string) => void
   /**
    * Menjalankan perintah CLI FFmpeg.
    * Berikan `durationSeconds` agar parser log `time=HH:MM:SS.ms` menghitung progres 0-100% secara akurat.
@@ -104,6 +114,14 @@ export interface UseFFmpegReturn {
   ) => Promise<number>
   /** Menulis file input ke virtual FS FFmpeg via fetchFile dan melacaknya untuk cleanupMemory(). */
   writeInputFile: (
+    fileName: string,
+    source: File | Blob | string | Uint8Array,
+  ) => Promise<void>
+  /**
+   * [BUG-5R-01] Memastikan file input tersedia di MEMFS sebelum menjalankan perintah fallback/retry;
+   * menulis ulang otomatis jika worker baru saja di-reload sehingga MEMFS kosong.
+   */
+  ensureInputFile: (
     fileName: string,
     source: File | Blob | string | Uint8Array,
   ) => Promise<void>
@@ -143,12 +161,37 @@ const MAX_LOG_LINES = 250
 const DURATION_REGEX = /Duration:\s*(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/
 const TIME_REGEX = /time=(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/
 const FRAME_REGEX = /frame=\s*(\d+)/
-const FFMPEG_ERROR_LINE_REGEX =
-  /(RuntimeError|worker sent an error|memory access out of bounds|function signature mismatch|\bAborted\b|\bError\b|Invalid\b|Conversion failed|No such filter|Could not|Cannot open|Failed to|Unknown encoder|Unrecognized option)/i
-const WASM_FATAL_ERROR_REGEX =
-  /(RuntimeError|worker sent an error|memory access out of bounds|function signature mismatch|unreachable|out of memory|table index is out of bounds|\bAborted\(.+\))/i
+const MAX_CONSECUTIVE_WORKER_FAILURES = 3
 
-export function extractBestStderrError(logLines: readonly string[]): string | null {
+// [BUG-5R-09] Sertakan pola "No such file or directory" dan kegagalan I/O MEMFS
+const FFMPEG_ERROR_LINE_REGEX =
+  /(RuntimeError|worker sent an error|memory access out of bounds|function signature mismatch|\bAborted\b|\bError\b|Invalid\b|Conversion failed|No such filter|No such file or directory|FS error|ErrnoError|Input\/output error|I\/O error|Permission denied|Could not|Cannot open|Unable to open|Failed to|Unknown encoder|Unrecognized option|Only VP8 or VP9)/i
+
+// [BUG-5R-01] Crash WASM fatal sejati (bukan kegagalan mux/codec normal seperti -c copy ke WebM)
+const TRUE_WASM_CRASH_REGEX =
+  /(RuntimeError|worker sent an error|memory access out of bounds|function signature mismatch|unreachable|out of memory|table index is out of bounds)/i
+
+const CONTAINER_CODEC_INCOMPATIBLE_REGEX =
+  /(Only VP8 or VP9|Could not write header|incompatible with output codec|Could not find tag for codec|Codec .* not supported|Error initializing output stream|Conversion failed|Stream map .* matches no streams|does not contain any stream|Invalid data found when processing input)/i
+
+const BARE_ABORTED_REGEX = /^(\[stderr\]\s*)?Aborted\(\s*(?:0|1)?\s*\)$/i
+
+const WASM_FATAL_ERROR_REGEX =
+  /(RuntimeError|worker sent an error|memory access out of bounds|function signature mismatch|unreachable|out of memory|table index is out of bounds|\bAborted\((?!\s*(?:0|1)?\s*\)).+\))/i
+
+function isStreamCopyArgs(args: readonly string[]): boolean {
+  for (let i = 0; i < args.length - 1; i += 1) {
+    if ((args[i] === '-c' || args[i] === '-c:v') && args[i + 1] === 'copy') {
+      return true
+    }
+  }
+  return false
+}
+
+export function extractBestStderrError(
+  logLines: readonly string[],
+  allowLastStderrFallback = true,
+): string | null {
   for (const line of logLines) {
     if (typeof line !== 'string') continue
     if (WASM_FATAL_ERROR_REGEX.test(line)) {
@@ -157,14 +200,35 @@ export function extractBestStderrError(logLines: readonly string[]): string | nu
   }
   for (const line of logLines) {
     if (typeof line !== 'string') continue
-    if (FFMPEG_ERROR_LINE_REGEX.test(line) && !/^(\[stderr\]\s*)?Aborted\(\)$/i.test(line.trim())) {
+    if (FFMPEG_ERROR_LINE_REGEX.test(line) && !BARE_ABORTED_REGEX.test(line.trim())) {
       return line.replace(/^\[stderr\]\s*/i, '').trim()
+    }
+  }
+  if (allowLastStderrFallback) {
+    // [BUG-5R-09] Fallback: ambil baris stderr non-kosong terakhir (skip bare Aborted() bila ada baris lain)
+    for (let i = logLines.length - 1; i >= 0; i -= 1) {
+      const line = logLines[i]
+      if (typeof line !== 'string') continue
+      const trimmed = line.trim()
+      if (!trimmed || BARE_ABORTED_REGEX.test(trimmed)) continue
+      if (/^\[stderr\]/i.test(trimmed)) {
+        const cleaned = trimmed.replace(/^\[stderr\]\s*/i, '').trim()
+        if (cleaned) return cleaned
+      }
     }
   }
   for (const line of logLines) {
     if (typeof line !== 'string') continue
     if (/\bAborted\b/i.test(line)) {
       return line.replace(/^\[stderr\]\s*/i, '').trim()
+    }
+  }
+  if (allowLastStderrFallback) {
+    for (let i = logLines.length - 1; i >= 0; i -= 1) {
+      const line = logLines[i]
+      if (typeof line !== 'string') continue
+      const cleaned = line.replace(/^\[stderr\]\s*/i, '').trim()
+      if (cleaned) return cleaned
     }
   }
   return null
@@ -186,13 +250,13 @@ export function isMobilePlatform(deviceType: DeviceType): boolean {
   return deviceType === 'iOS' || deviceType === 'Android'
 }
 
-export function resolveEngineProfile(): EngineProfile {
+export function resolveEngineProfile(forceSingleThread = false): EngineProfile {
   const deviceInfo = detectDeviceInfo()
   const isMobile = isMobilePlatform(deviceInfo.type)
   const isDesktop = !isMobile
   const crossOriginIsolated =
     typeof window !== 'undefined' && window.crossOriginIsolated === true
-  const useMultiThread = isDesktop && crossOriginIsolated
+  const useMultiThread = !forceSingleThread && isDesktop && crossOriginIsolated
 
   // Batasi thread secara eksplisit hingga maks 6 agar libx264/filter cepat tanpa pthread deadlock di WASM
   const recommendedThreads = getRecommendedFFmpegThreads(
@@ -244,7 +308,11 @@ function revokeBlobUrls(urls: Iterable<string>): number {
 }
 
 export function useFFmpeg(): UseFFmpegReturn {
-  const profile = useMemo<EngineProfile>(() => resolveEngineProfile(), [])
+  const [forceSingleThread, setForceSingleThread] = useState(false)
+  const profile = useMemo<EngineProfile>(
+    () => resolveEngineProfile(forceSingleThread),
+    [forceSingleThread],
+  )
 
   const [isLoaded, setIsLoaded] = useState(false)
   const [isLoadingEngine, setIsLoadingEngine] = useState(false)
@@ -260,6 +328,8 @@ export function useFFmpeg(): UseFFmpegReturn {
   const [logs, setLogs] = useState<string[]>([])
   const [pinnedLogSummary, setPinnedLogSummary] = useState<PinnedLogSummary>(EMPTY_PINNED_SUMMARY)
   const [error, setError] = useState<string | null>(null)
+  const [workerFailureCount, setWorkerFailureCount] = useState(0)
+  const [workerCrashLoopDetected, setWorkerCrashLoopDetected] = useState(false)
 
   const ffmpegRef = useRef<FFmpeg | null>(null)
   const loadPromiseRef = useRef<Promise<FFmpeg> | null>(null)
@@ -267,6 +337,7 @@ export function useFFmpeg(): UseFFmpegReturn {
   const abortControllerRef = useRef<AbortController | null>(null)
   const isMountedRef = useRef(true)
   const workerCorruptedRef = useRef(false)
+  const workerFailureCountRef = useRef(0)
 
   // Pelacakan durasi & progres aktif untuk parser regex `time=HH:MM:SS.ms` dan `frame=N`
   const uploadedDurationRef = useRef<number | null>(null)
@@ -355,6 +426,17 @@ export function useFFmpeg(): UseFFmpegReturn {
   const setPinnedFinalSummary = useCallback((finalSummary: string | null) => {
     if (!isMountedRef.current) return
     setPinnedLogSummary((prev) => ({ ...prev, finalSummary }))
+  }, [])
+
+  const reportExternalError = useCallback((message: string) => {
+    const clean = message.trim()
+    if (!clean || !isMountedRef.current) return
+    setError(clean)
+    setPinnedLogSummary((prev) => ({
+      ...prev,
+      firstError: prev.firstError ?? clean,
+      finalSummary: `Gagal: ${clean}`,
+    }))
   }, [])
 
   const resetProcessState = useCallback(() => {
@@ -482,6 +564,22 @@ export function useFFmpeg(): UseFFmpegReturn {
   )
 
   const loadEngine = useCallback(async (): Promise<FFmpeg> => {
+    // [BUG-5R-17] Hentikan crash-loop jika worker sudah gagal 3x berturut-turut dalam sesi ini
+    if (workerFailureCountRef.current >= MAX_CONSECUTIVE_WORKER_FAILURES) {
+      const loopMessage =
+        'Worker FFmpeg mengalami 3x crash berturut-turut. Auto-recovery dihentikan untuk mencegah crash-loop. Silakan beralih ke Mode Single-Thread Hemat RAM.'
+      if (isMountedRef.current) {
+        setWorkerCrashLoopDetected(true)
+        setError(loopMessage)
+        setPinnedLogSummary((prev) => ({
+          ...prev,
+          firstError: prev.firstError ?? loopMessage,
+          finalSummary: `Gagal: ${loopMessage}`,
+        }))
+      }
+      throw new Error(loopMessage)
+    }
+
     // [BUG-4R-01c] Auto-recovery: bila worker sebelumnya ditandai crash/korup, terminate & buat baru
     if (workerCorruptedRef.current) {
       workerCorruptedRef.current = false
@@ -519,7 +617,7 @@ export function useFFmpeg(): UseFFmpegReturn {
         const formatted = type ? `[${type}] ${rawMessage}` : rawMessage
         appendLog(formatted)
 
-        if (WASM_FATAL_ERROR_REGEX.test(rawMessage)) {
+        if (TRUE_WASM_CRASH_REGEX.test(rawMessage)) {
           workerCorruptedRef.current = true
         }
 
@@ -549,10 +647,10 @@ export function useFFmpeg(): UseFFmpegReturn {
           }
         }
 
-        // [BUG-4R-03 & BUG-4R-12] Tangkap error pertama FFmpeg/WASM dari stderr secara prioritas
+        // [BUG-4R-03, BUG-4R-12 & BUG-5R-09] Tangkap error pertama FFmpeg/WASM dari stderr secara prioritas
         if (
           isMountedRef.current &&
-          !/^Aborted\(\)$/i.test(rawMessage.trim()) &&
+          !BARE_ABORTED_REGEX.test(rawMessage.trim()) &&
           FFMPEG_ERROR_LINE_REGEX.test(rawMessage)
         ) {
           const cleanErr = rawMessage.trim()
@@ -715,6 +813,30 @@ export function useFFmpeg(): UseFFmpegReturn {
     terminateInternal('[LocalVid] Engine FFmpeg dihentikan (terminated) dan memori dibebaskan.')
   }, [terminateInternal])
 
+  const resetWorkerFailureGuard = useCallback(() => {
+    workerFailureCountRef.current = 0
+    workerCorruptedRef.current = false
+    if (isMountedRef.current) {
+      setWorkerFailureCount(0)
+      setWorkerCrashLoopDetected(false)
+      setError(null)
+    }
+  }, [])
+
+  const switchToSingleThreadMode = useCallback(() => {
+    workerFailureCountRef.current = 0
+    workerCorruptedRef.current = false
+    terminateInternal(
+      '[LocalVid] Beralih ke Mode Single-Thread Hemat RAM (@ffmpeg/core@0.12.6, 1 thread). Worker lama dibersihkan.',
+    )
+    if (isMountedRef.current) {
+      setWorkerFailureCount(0)
+      setWorkerCrashLoopDetected(false)
+      setError(null)
+      setForceSingleThread(true)
+    }
+  }, [terminateInternal])
+
   const cancel = useCallback(() => {
     const wasLoadedBeforeCancel = Boolean(ffmpegRef.current?.loaded)
     const revoked = revokeBlobUrls(trackedBlobUrlsRef.current)
@@ -751,6 +873,28 @@ export function useFFmpeg(): UseFFmpegReturn {
       trackedFilesRef.current.add(fileName)
     },
     [loadEngine],
+  )
+
+  const ensureInputFile = useCallback(
+    async (fileName: string, source: File | Blob | string | Uint8Array): Promise<void> => {
+      const ffmpeg = await loadEngine()
+      let exists = false
+      try {
+        const entries = await ffmpeg.listDir('.')
+        exists = entries.some((entry) => !entry.isDir && entry.name === fileName)
+      } catch {
+        exists = false
+      }
+      if (!exists) {
+        appendLog(
+          `[LocalVid] Menulis ulang file input "${fileName}" ke MEMFS sebelum menjalankan perintah fallback.`,
+        )
+        const data = source instanceof Uint8Array ? source : await fetchFile(source)
+        await ffmpeg.writeFile(fileName, data)
+        trackedFilesRef.current.add(fileName)
+      }
+    },
+    [appendLog, loadEngine],
   )
 
   const readOutputAsBlobURL = useCallback(
@@ -825,6 +969,7 @@ export function useFFmpeg(): UseFFmpegReturn {
       }
 
       const logStartIndex = logsRef.current.length
+      const streamCopyRun = isStreamCopyArgs(args)
 
       try {
         const exitCode = await ffmpeg.exec(args, timeoutMs, {
@@ -832,19 +977,34 @@ export function useFFmpeg(): UseFFmpegReturn {
         })
 
         const runLogs = logsRef.current.slice(logStartIndex)
-        const stderrErr = exitCode !== 0 ? extractBestStderrError(runLogs) : null
-        const hitFatalWasm =
+        const stderrErr = exitCode !== 0 ? extractBestStderrError(runLogs, true) : null
+        const hitTrueWasmCrash =
           workerCorruptedRef.current ||
-          runLogs.some((line) => typeof line === 'string' && WASM_FATAL_ERROR_REGEX.test(line))
+          runLogs.some((line) => typeof line === 'string' && TRUE_WASM_CRASH_REGEX.test(line))
+        const isNormalContainerCodecError =
+          streamCopyRun ||
+          runLogs.some(
+            (line) => typeof line === 'string' && CONTAINER_CODEC_INCOMPATIBLE_REGEX.test(line),
+          )
+        const hitFatalWasm =
+          hitTrueWasmCrash ||
+          (!isNormalContainerCodecError &&
+            runLogs.some((line) => typeof line === 'string' && WASM_FATAL_ERROR_REGEX.test(line)))
+
+        if (exitCode === 0) {
+          appendLog('[LocalVid] FFmpeg selesai sukses (kode keluar 0).')
+        }
 
         if (isMountedRef.current) {
           if (exitCode === 0) {
             currentExecProgressRef.current = 100
             setProgress(100)
           }
+          const fallbackErrText =
+            exitCode !== 0 ? (stderrErr ?? `FFmpeg berhenti dengan kode keluar ${exitCode}.`) : null
           setPinnedLogSummary((prev) => ({
             ...prev,
-            firstError: prev.firstError ?? stderrErr,
+            firstError: prev.firstError ?? fallbackErrText,
             finalSummary:
               exitCode === 0
                 ? 'FFmpeg selesai sukses (kode keluar 0).'
@@ -852,32 +1012,68 @@ export function useFFmpeg(): UseFFmpegReturn {
           }))
         }
 
-        // [BUG-4R-01c] Auto-recovery bila terjadi error WASM / exit tak terduga agar worker berikutnya selalu bersih
-        if (exitCode !== 0 && hitFatalWasm && !controller.signal.aborted) {
+        // [BUG-5R-01 & BUG-5R-17] Kegagalan codec/wadah pada -c copy BUKAN crash WASM fatal;
+        // pertahankan worker & MEMFS agar fallback re-encode (mis. WebM VP8/Vorbis) berjalan di worker yang sama.
+        if (exitCode === 0) {
           workerCorruptedRef.current = false
-          terminateInternal('[LocalVid] Worker FFmpeg dipulihkan otomatis setelah error sebelumnya.')
-        } else if (exitCode !== 0 && !controller.signal.aborted) {
-          // Tandai untuk dicek/dipulihkan bila terjadi Aborted pada akhir run
-          if (runLogs.some((line) => typeof line === 'string' && /\bAborted\b/i.test(line))) {
-            workerCorruptedRef.current = true
+          if (workerFailureCountRef.current > 0) {
+            workerFailureCountRef.current = 0
+            if (isMountedRef.current) {
+              setWorkerFailureCount(0)
+              setWorkerCrashLoopDetected(false)
+            }
           }
-        } else {
+        } else if (hitFatalWasm && !controller.signal.aborted) {
+          workerFailureCountRef.current += 1
+          const nextFailureCount = workerFailureCountRef.current
+          workerCorruptedRef.current = false
+          if (isMountedRef.current) {
+            setWorkerFailureCount(nextFailureCount)
+            if (nextFailureCount >= MAX_CONSECUTIVE_WORKER_FAILURES) {
+              setWorkerCrashLoopDetected(true)
+            }
+          }
+          terminateInternal(
+            nextFailureCount >= MAX_CONSECUTIVE_WORKER_FAILURES
+              ? `[LocalVid] Worker FFmpeg crash ${nextFailureCount}x berturut-turut. Auto-recovery dihentikan; disarankan beralih ke Mode Single-Thread Hemat RAM.`
+              : `[LocalVid] Worker FFmpeg dipulihkan otomatis setelah crash WASM (${nextFailureCount}/${MAX_CONSECUTIVE_WORKER_FAILURES}).`,
+          )
+        } else if (!controller.signal.aborted) {
+          // Non-zero exit biasa (termasuk ketidakcocokan codec/kontainer -c copy): jangan hancurkan worker/MEMFS
           workerCorruptedRef.current = false
         }
 
         return exitCode
       } catch (err) {
         const runLogs = logsRef.current.slice(logStartIndex)
-        const stderrErr = extractBestStderrError(runLogs)
+        const stderrErr = extractBestStderrError(runLogs, true)
         const errMsg = safeErrorMessage(err, 'Worker FFmpeg mengalami error runtime.')
         const bestError = stderrErr ?? errMsg
         const isAbort =
           controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')
+        const isNormalContainerCodecError =
+          streamCopyRun &&
+          !TRUE_WASM_CRASH_REGEX.test(errMsg) &&
+          runLogs.some(
+            (line) => typeof line === 'string' && CONTAINER_CODEC_INCOMPATIBLE_REGEX.test(line),
+          )
 
-        if (!isAbort) {
-          // [BUG-4R-01c] Auto-recovery: terminate worker rusak segera agar tidak memicu efek kaskade
+        if (!isAbort && !isNormalContainerCodecError) {
+          // [BUG-4R-01c & BUG-5R-17] Hitung crash worker berturut-turut & cegah crash-loop >= 3x
+          workerFailureCountRef.current += 1
+          const nextFailureCount = workerFailureCountRef.current
           workerCorruptedRef.current = false
-          terminateInternal('[LocalVid] Worker FFmpeg dipulihkan otomatis setelah error sebelumnya.')
+          if (isMountedRef.current) {
+            setWorkerFailureCount(nextFailureCount)
+            if (nextFailureCount >= MAX_CONSECUTIVE_WORKER_FAILURES) {
+              setWorkerCrashLoopDetected(true)
+            }
+          }
+          terminateInternal(
+            nextFailureCount >= MAX_CONSECUTIVE_WORKER_FAILURES
+              ? `[LocalVid] Worker FFmpeg crash ${nextFailureCount}x berturut-turut. Auto-recovery dihentikan; disarankan beralih ke Mode Single-Thread Hemat RAM.`
+              : `[LocalVid] Worker FFmpeg dipulihkan otomatis setelah error sebelumnya (${nextFailureCount}/${MAX_CONSECUTIVE_WORKER_FAILURES}).`,
+          )
         }
 
         if (isMountedRef.current && !isAbort) {
@@ -899,7 +1095,7 @@ export function useFFmpeg(): UseFFmpegReturn {
         }
       }
     },
-    [loadEngine, terminateInternal],
+    [appendLog, loadEngine, terminateInternal],
   )
 
   const getFFmpegInstance = useCallback(() => ffmpegRef.current, [])
@@ -930,6 +1126,10 @@ export function useFFmpeg(): UseFFmpegReturn {
     engineMode: profile.engineMode,
     recommendedThreads: profile.recommendedThreads,
     error,
+    workerFailureCount,
+    workerCrashLoopDetected,
+    switchToSingleThreadMode,
+    resetWorkerFailureGuard,
     deviceType: profile.deviceType,
     isMobile: profile.isMobile,
     crossOriginIsolated: profile.crossOriginIsolated,
@@ -939,8 +1139,10 @@ export function useFFmpeg(): UseFFmpegReturn {
     setPinnedCommand,
     setPinnedDurationLine,
     setPinnedFinalSummary,
+    reportExternalError,
     exec,
     writeInputFile,
+    ensureInputFile,
     readOutputAsBlobURL,
     registerTempFile,
     registerBlobURL,

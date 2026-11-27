@@ -424,14 +424,14 @@ export function ChromaKeyTabPanel({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {batchPreviewControl && batchPreviewControl.items.length > 1 && (
-            <label className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+            <label className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
               <span className="shrink-0">Pratinjau dari:</span>
               <select
                 aria-label="Pilih video referensi pratinjau Auto Green Screen"
                 disabled={disabled}
                 value={batchPreviewControl.previewItemId}
                 onChange={(e) => batchPreviewControl.onPreviewItemIdChange(e.target.value)}
-                className="max-w-[160px] cursor-pointer rounded-md bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-900 ring-1 ring-slate-200 focus:outline-none focus:ring-2 focus:ring-green-600 disabled:opacity-50"
+                className="min-h-11 max-w-[160px] cursor-pointer rounded-md bg-white px-2 py-1 text-[11px] font-bold text-slate-900 ring-1 ring-slate-200 focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1 disabled:opacity-50"
               >
                 {batchPreviewControl.items.map((bItem) => (
                   <option key={bItem.id} value={bItem.id}>
@@ -470,9 +470,9 @@ export function ChromaKeyTabPanel({
             type="button"
             disabled={disabled}
             onClick={() => handleSelectTemplate('product-greenscreen')}
-            className="inline-flex min-h-10 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-amber-400 bg-white px-3.5 py-2 text-xs font-bold text-amber-950 shadow-2xs transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 focus-visible:ring-offset-1 disabled:opacity-50"
+            className="inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-amber-400 bg-white px-3.5 py-2 text-xs font-bold text-amber-950 shadow-2xs transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
           >
-            <Wand2 aria-hidden="true" className="h-3.5 w-3.5 text-green-600" />
+            <Wand2 aria-hidden="true" className="h-3.5 w-3.5 text-[#0D6E5D]" />
             <span>Coba Template Green Screen Produk &amp; Objek</span>
           </button>
         </div>
@@ -496,7 +496,7 @@ export function ChromaKeyTabPanel({
               type="button"
               disabled={disabled}
               onClick={() => handleSelectTemplate('custom')}
-              className="mint-secondary-btn shrink-0 cursor-pointer rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors disabled:opacity-50"
+              className="mint-secondary-btn inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
             >
               Buka Custom / Manual
             </button>
@@ -570,9 +570,9 @@ export function ChromaKeyTabPanel({
                 }
               }}
               onBlur={() => setHoldOriginal(false)}
-              className={`inline-flex min-h-8 cursor-pointer select-none touch-manipulation items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400 disabled:opacity-50 ${
+              className={`inline-flex min-h-11 cursor-pointer select-none touch-manipulation items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6DE7C1] focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 disabled:opacity-50 ${
                 holdOriginal
-                  ? 'border-green-400 bg-green-500 text-slate-950'
+                  ? 'border-[#6DE7C1] bg-[#2EC7A4] text-[#0D2B24]'
                   : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
               }`}
             >
@@ -628,7 +628,7 @@ export function ChromaKeyTabPanel({
                 type="button"
                 disabled={disabled}
                 onClick={() => setPreviewRefreshNonce((n) => n + 1)}
-                className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-rose-400/50 bg-rose-900 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-rose-800"
+                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg border border-rose-400/50 bg-rose-900 px-3 py-2 text-xs font-bold text-white hover:bg-rose-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6DE7C1] focus-visible:ring-offset-2 focus-visible:ring-offset-rose-950"
               >
                 <RefreshCw aria-hidden="true" className="h-3 w-3" />
                 <span>Muat Ulang Pratinjau</span>
@@ -721,7 +721,7 @@ export function ChromaKeyTabPanel({
                 whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
                 whileTap={!disabled ? { scale: 0.98 } : undefined}
                 transition={CARD_SPRING}
-                className={`flex min-h-26 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                className={`flex min-h-26 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                   selected ? 'mint-option-card-active' : 'mint-option-card'
                 }`}
               >
@@ -735,9 +735,16 @@ export function ChromaKeyTabPanel({
                       <span className="block text-xs font-bold leading-snug text-[#0D2B24]">
                         {tpl.title}
                       </span>
-                      <span className="mt-1 inline-block rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
-                        {tpl.badge}
-                      </span>
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        <span className="inline-block rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
+                          {tpl.badge}
+                        </span>
+                        {tpl.swatchLabel && (
+                          <span className="inline-block rounded-full bg-[#E8FFF5] px-2 py-0.5 text-[10px] font-bold text-[#0D6E5D] ring-1 ring-[#6DE7C1]">
+                            {tpl.swatchLabel}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -775,7 +782,7 @@ export function ChromaKeyTabPanel({
             type="button"
             disabled={disabled}
             onClick={onSwitchToCompress}
-            className="inline-flex min-h-10 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-amber-400 bg-white px-3.5 py-2 text-xs font-bold text-amber-900 shadow-2xs transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 focus-visible:ring-offset-1 disabled:opacity-50"
+            className="inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-amber-400 bg-white px-3.5 py-2 text-xs font-bold text-amber-900 shadow-2xs transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
           >
             <Scissors aria-hidden="true" className="h-3.5 w-3.5" />
             <span>Trim di Tab Kompres</span>
@@ -817,7 +824,7 @@ export function ChromaKeyTabPanel({
                 type="button"
                 disabled={disabled}
                 onClick={() => handleSelectTemplate('custom')}
-                className="cursor-pointer text-xs font-bold text-[#0D6E5D] underline decoration-[#6DE7C1] underline-offset-2 transition-colors hover:text-[#0D2B24] disabled:opacity-50"
+                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center rounded-lg px-2 text-xs font-bold text-[#0D6E5D] underline decoration-[#6DE7C1] underline-offset-2 transition-colors hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
               >
                 Ingin atur manual? Pilih Custom / Manual
               </button>
@@ -879,6 +886,9 @@ export function ChromaKeyTabPanel({
                     CRF 22 • {options.targetFps} fps
                     {sizeEstimate.maxRateKbps ? ` • Cap <= ${sizeEstimate.maxRateKbps}k` : ''}
                   </p>
+                  {sizeEstimate.note && (
+                    <p className="mt-0.5 text-[10px] text-[#4A6B63]">{sizeEstimate.note}</p>
+                  )}
                   {sizeEstimate.calibrationSamples && sizeEstimate.calibrationSamples > 0 ? (
                     <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
                       Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
@@ -889,8 +899,8 @@ export function ChromaKeyTabPanel({
             )}
 
             {/* [UX #23] Accordion Opsi Lanjutan Tepian (Default Tertutup pada Mode Template 1-Klik) */}
-            <details className="rounded-xl border border-[#B5F5DB] bg-white px-3.5 py-2.5 text-xs text-[#4A6B63]">
-              <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 font-bold text-[#0D2B24] select-none hover:text-[#0D6E5D]">
+            <details className="rounded-xl border border-[#B5F5DB] bg-white px-3.5 py-2 text-xs text-[#4A6B63]">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded-lg font-bold text-[#0D2B24] select-none hover:text-[#0D6E5D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2">
                 <span className="inline-flex items-center gap-1.5">
                   <SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
                   <span>Sesuaikan Detail Tepian (Opsional)</span>
@@ -916,7 +926,7 @@ export function ChromaKeyTabPanel({
                     aria-label="Aktifkan Mask Cleanup"
                     disabled={disabled}
                     onClick={() => onChange({ ...options, maskCleanup: !options.maskCleanup })}
-                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
                       options.maskCleanup
                         ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
                         : 'bg-[#B5F5DB]'
@@ -1002,9 +1012,9 @@ export function ChromaKeyTabPanel({
                       type="button"
                       disabled={disabled}
                       onClick={resetEdgeSettings}
-                      className="inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 disabled:opacity-50"
+                      className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
                     >
-                      <RotateCcw aria-hidden="true" className="h-3 w-3" />
+                      <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
                       <span>Reset Tepi</span>
                     </button>
                   </div>
@@ -1058,7 +1068,7 @@ export function ChromaKeyTabPanel({
                     whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
                     whileTap={!disabled ? { scale: 0.98 } : undefined}
                     transition={CARD_SPRING}
-                    className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2.5 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                    className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2.5 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                       selected ? 'mint-option-card-active' : 'mint-option-card'
                     }`}
                   >
@@ -1113,9 +1123,9 @@ export function ChromaKeyTabPanel({
                         type="button"
                         disabled={disabled}
                         onClick={() => onChange({ ...options, speedProfile: prof.id })}
-                        className={`min-h-14 cursor-pointer touch-manipulation rounded-xl border px-3 py-2 text-left transition-[border-color,background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-1 disabled:opacity-60 ${
+                        className={`min-h-14 cursor-pointer touch-manipulation rounded-xl border px-3 py-2 text-left transition-[border-color,background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-60 ${
                           selected
-                            ? 'border-[#14A085] bg-[#14A085] text-white shadow-xs'
+                            ? 'border-[#0D6E5D] bg-[#0D6E5D] text-white shadow-xs'
                             : 'border-[#E2F3EC] bg-white text-[#0D2B24] hover:border-[#6DE7C1]'
                         }`}
                       >
@@ -1161,7 +1171,7 @@ export function ChromaKeyTabPanel({
                     whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
                     whileTap={!disabled ? { scale: 0.98 } : undefined}
                     transition={CARD_SPRING}
-                    className={`flex min-h-22 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                    className={`flex min-h-22 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                       selected ? 'mint-option-card-active' : 'mint-option-card'
                     }`}
                   >
@@ -1175,9 +1185,16 @@ export function ChromaKeyTabPanel({
                           <span className="block text-xs font-bold text-[#0D2B24] sm:text-sm">
                             {mode.title}
                           </span>
-                          <span className="mt-0.5 inline-block rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
-                            {mode.badge}
-                          </span>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                            <span className="inline-block rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[#0D6E5D] ring-1 ring-[#B5F5DB]">
+                              {mode.badge}
+                            </span>
+                            {mode.swatchLabel && (
+                              <span className="inline-block rounded-full bg-[#E8FFF5] px-2 py-0.5 text-[10px] font-bold text-[#0D6E5D] ring-1 ring-[#6DE7C1]">
+                                {mode.swatchLabel}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1226,9 +1243,9 @@ export function ChromaKeyTabPanel({
                         type="button"
                         disabled={disabled}
                         onClick={() => onChange({ ...options, customColor: preset.hex })}
-                        className={`inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 disabled:opacity-50 ${
+                        className={`inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
                           isSelected
-                            ? 'border-green-600 bg-white text-green-800 shadow-xs ring-1 ring-green-400/50'
+                            ? 'border-[#0D6E5D] bg-white text-[#0D6E5D] shadow-xs ring-1 ring-[#6DE7C1]'
                             : 'border-slate-200 bg-white/80 text-slate-700 hover:bg-white'
                         }`}
                       >
@@ -1296,9 +1313,9 @@ export function ChromaKeyTabPanel({
                   type="button"
                   disabled={disabled}
                   onClick={resetEdgeSettings}
-                  className="inline-flex min-h-8 cursor-pointer touch-manipulation items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 disabled:opacity-50"
+                  className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
                 >
-                  <RotateCcw aria-hidden="true" className="h-3 w-3" />
+                  <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
                   <span>Reset Tepi</span>
                 </button>
               )}
@@ -1327,7 +1344,7 @@ export function ChromaKeyTabPanel({
                 aria-label="Aktifkan Bersihkan Bercak Latar Mask Cleanup"
                 disabled={disabled}
                 onClick={() => onChange({ ...options, maskCleanup: !options.maskCleanup })}
-                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
                   options.maskCleanup
                     ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
                     : 'bg-[#B5F5DB]'
@@ -1451,16 +1468,16 @@ export function ChromaKeyTabPanel({
                         type="button"
                         disabled={disabled}
                         onClick={() => onChange({ ...options, targetFps: opt.value })}
-                        className={`min-h-12 cursor-pointer touch-manipulation rounded-xl border px-1.5 py-2 text-center transition-[border-color,background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                        className={`min-h-12 cursor-pointer touch-manipulation rounded-xl border px-1.5 py-2 text-center transition-[border-color,background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                           active
-                            ? 'border-green-600 bg-green-600 text-white shadow-sm'
+                            ? 'border-[#0D6E5D] bg-[#0D6E5D] text-white shadow-sm'
                             : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                         }`}
                       >
                         <div className="text-xs font-bold">{opt.label}</div>
                         <div
                           className={`mt-0.5 truncate text-[10px] ${
-                            active ? 'text-green-100' : 'text-slate-500'
+                            active ? 'text-[#E8FFF5]' : 'text-slate-500'
                           }`}
                         >
                           {opt.hint}
@@ -1493,16 +1510,16 @@ export function ChromaKeyTabPanel({
                         type="button"
                         disabled={disabled}
                         onClick={() => onChange({ ...options, maxResolution: opt.value })}
-                        className={`min-h-12 cursor-pointer touch-manipulation rounded-xl border px-2.5 py-2 text-left transition-[border-color,background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                        className={`min-h-12 cursor-pointer touch-manipulation rounded-xl border px-2.5 py-2 text-left transition-[border-color,background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                           active
-                            ? 'border-green-600 bg-green-600 text-white shadow-sm'
+                            ? 'border-[#0D6E5D] bg-[#0D6E5D] text-white shadow-sm'
                             : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                         }`}
                       >
                         <div className="text-xs font-bold">{opt.label}</div>
                         <div
                           className={`mt-0.5 text-[10px] ${
-                            active ? 'text-green-100' : 'text-slate-500'
+                            active ? 'text-[#E8FFF5]' : 'text-slate-500'
                           }`}
                         >
                           {opt.hint}
@@ -1539,7 +1556,7 @@ export function ChromaKeyTabPanel({
                 aria-label="Aktifkan Batasi Ukuran Hasil Smart Cap Auto Green Screen"
                 disabled={disabled}
                 onClick={() => onChange({ ...options, smartSizeCap: !options.smartSizeCap })}
-                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
                   options.smartSizeCap
                     ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
                     : 'bg-[#B5F5DB]'
@@ -1569,24 +1586,27 @@ export function ChromaKeyTabPanel({
                   </div>
                 </div>
                 <div className="rounded-xl bg-white/95 p-3 ring-1 ring-green-200/80 sm:text-right">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-green-700">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-[#0D6E5D]">
                     Estimasi Ukuran Hasil (Perkiraan)
                   </p>
                   <p className="mt-0.5 text-base font-extrabold text-slate-900 tabular-nums">
                     ~{sizeEstimate.minEstimatedMB.toFixed(1)} MB -{' '}
                     {sizeEstimate.maxEstimatedMB.toFixed(1)} MB{' '}
-                    <span className="text-[11px] font-semibold text-slate-500">
+                    <span className="text-[11px] font-semibold text-slate-600">
                       (perkiraan)
                     </span>
                   </p>
-                  <p className="mt-0.5 text-[11px] text-slate-500">
+                  <p className="mt-0.5 text-[11px] text-slate-600">
                     CRF {options.smartSizeCap ? '22' : '21'} • {options.targetFps} fps
                     {sizeEstimate.maxRateKbps
                       ? ` • Cap <= ${sizeEstimate.maxRateKbps}k`
                       : ' • Tanpa Cap'}
                   </p>
+                  {sizeEstimate.note && (
+                    <p className="mt-0.5 text-[10px] text-[#4A6B63]">{sizeEstimate.note}</p>
+                  )}
                   {sizeEstimate.calibrationSamples && sizeEstimate.calibrationSamples > 0 ? (
-                    <p className="mt-0.5 text-[10px] font-medium text-slate-400">
+                    <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">
                       Dikalibrasi dari {sizeEstimate.calibrationSamples} proses sebelumnya
                     </p>
                   ) : null}

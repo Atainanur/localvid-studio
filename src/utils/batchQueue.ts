@@ -34,6 +34,8 @@ export interface BatchQueueItem {
   /** Nomor urut 1-based (1, 2, 3, ...) */
   index: number
   file: File
+  /** [BUG-5R-05] Nama file asli yang pertama kali diunggah pengguna (tidak pernah tertukar nama output branded) */
+  originalFileName: string
   extension: string
   metadata: VideoMetadata | null
   isReadingMetadata: boolean
@@ -94,12 +96,14 @@ export function createBatchQueueItem(
   file: File,
   index: number,
   initialMetadata: VideoMetadata | null = null,
+  originalFileName?: string,
 ): BatchQueueItem {
   batchIdCounter += 1
   return {
     id: `batch-${Date.now()}-${batchIdCounter}`,
     index,
     file,
+    originalFileName: originalFileName ?? file.name,
     extension: getFileExtension(file.name) || 'mp4',
     metadata: initialMetadata,
     isReadingMetadata: initialMetadata === null,

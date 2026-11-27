@@ -355,7 +355,7 @@ export function CompressTabPanel({
                 whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
                 whileTap={!disabled ? { scale: 0.98 } : undefined}
                 transition={CARD_SPRING}
-                className={`flex min-h-22 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                className={`flex min-h-22 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                   selected ? 'mint-option-card-active' : 'mint-option-card'
                 }`}
               >
@@ -365,7 +365,7 @@ export function CompressTabPanel({
                     <span
                       className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${
                         selected
-                          ? 'bg-[#14A085] text-white'
+                          ? 'bg-[#0D6E5D] text-white'
                           : 'bg-[#E8FFF5] text-[#0D6E5D] ring-1 ring-[#B5F5DB]'
                       }`}
                     >
@@ -434,7 +434,7 @@ export function CompressTabPanel({
                     <span className="text-[11px] font-semibold text-[#4A6B63]">
                       (perkiraan)
                     </span>{' '}
-                    <span className="text-xs font-bold text-[#14A085]">
+                    <span className="text-xs font-bold text-[#0D6E5D]">
                       (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}%)
                     </span>
                   </p>
@@ -446,7 +446,7 @@ export function CompressTabPanel({
                       (perkiraan)
                     </span>
                     {sizeEstimate.savingsPercentMax > 5 && (
-                      <span className="ml-1.5 text-xs font-bold text-[#14A085]">
+                      <span className="ml-1.5 text-xs font-bold text-[#0D6E5D]">
                         (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}-
                         {Math.max(0, Math.round(sizeEstimate.savingsPercentMax))}%)
                       </span>
@@ -506,7 +506,7 @@ export function CompressTabPanel({
                 type="button"
                 disabled={disabled}
                 onClick={() => onChange(resetPreservedAdvancedOptions(options))}
-                className="cursor-pointer text-[11px] font-bold text-[#0D6E5D] underline underline-offset-2 hover:text-[#0D2B24] disabled:opacity-50"
+                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center rounded-lg px-2.5 text-xs font-bold text-[#0D6E5D] underline underline-offset-2 hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
               >
                 Reset Opsi Lanjutan
               </button>
@@ -522,7 +522,7 @@ export function CompressTabPanel({
               type="button"
               disabled={disabled}
               onClick={() => handleSelectTemplate('custom')}
-              className="inline-flex cursor-pointer touch-manipulation items-center gap-1 font-bold text-[#0D6E5D] underline-offset-4 transition-colors hover:text-[#0D2B24] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50"
+              className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1 rounded-lg px-2 font-bold text-[#0D6E5D] underline-offset-4 transition-colors hover:text-[#0D2B24] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
             >
               <span>Pilih Custom / Manual</span>
               <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
@@ -563,7 +563,7 @@ export function CompressTabPanel({
                     whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
                     whileTap={!disabled ? { scale: 0.98 } : undefined}
                     transition={CARD_SPRING}
-                    className={`flex min-h-16 cursor-pointer touch-manipulation flex-col items-start justify-between rounded-2xl p-3 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                    className={`flex min-h-16 cursor-pointer touch-manipulation flex-col items-start justify-between rounded-2xl p-3 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                       selected ? 'mint-option-card-active' : 'mint-option-card'
                     }`}
                   >
@@ -617,7 +617,7 @@ export function CompressTabPanel({
                   type="button"
                   disabled={disabled || isVideoCopy}
                   onClick={() => update({ compressionMode: 'crf', customCrf: null })}
-                  className={`min-h-10 cursor-pointer touch-manipulation rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`min-h-11 cursor-pointer touch-manipulation rounded-lg px-3.5 py-2 text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
                     options.compressionMode === 'crf'
                       ? 'bg-white text-[#0D6E5D] shadow-xs'
                       : 'text-[#4A6B63] hover:text-[#0D2B24]'
@@ -635,7 +635,7 @@ export function CompressTabPanel({
                       targetSizeMB: clampedTargetMB,
                     })
                   }}
-                  className={`min-h-10 cursor-pointer touch-manipulation rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`min-h-11 cursor-pointer touch-manipulation rounded-lg px-3.5 py-2 text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
                     options.compressionMode === 'target-size'
                       ? 'bg-white text-[#0D6E5D] shadow-xs'
                       : 'text-[#4A6B63] hover:text-[#0D2B24]'
@@ -670,7 +670,7 @@ export function CompressTabPanel({
                       whileHover={!isMobile && !disabled ? { y: -2 } : undefined}
                       whileTap={!disabled ? { scale: 0.98 } : undefined}
                       transition={CARD_SPRING}
-                      className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-3.5 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                      className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-3.5 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                         selected ? 'mint-option-card-active' : 'mint-option-card'
                       }`}
                     >
@@ -679,7 +679,7 @@ export function CompressTabPanel({
                           <span
                             className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
                               selected
-                                ? 'bg-[#14A085] text-white'
+                                ? 'bg-[#0D6E5D] text-white'
                                 : 'bg-[#E8FFF5] text-[#0D6E5D]'
                             }`}
                           >
@@ -756,7 +756,7 @@ export function CompressTabPanel({
                         commitTargetSizeValue(targetSizeText)
                       }}
                       onKeyDown={handleTargetSizeKeyDown}
-                      className="min-h-11 w-28 rounded-xl border border-[#6DE7C1] bg-white px-3 py-2 text-right text-sm font-bold text-[#0D2B24] tabular-nums focus:border-[#14A085] focus:outline-none focus:ring-2 focus:ring-[#2EC7A4]/30 disabled:opacity-60"
+                      className="min-h-11 w-28 rounded-xl border border-[#6DE7C1] bg-white px-3 py-2 text-right text-sm font-bold text-[#0D2B24] tabular-nums focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1 disabled:opacity-60"
                     />
                     <span className="text-sm font-bold text-[#0D6E5D]">MB</span>
                   </div>
@@ -824,7 +824,7 @@ export function CompressTabPanel({
                     <span className="text-[11px] font-semibold text-[#4A6B63]">
                       (perkiraan)
                     </span>{' '}
-                    <span className="text-xs font-bold text-[#14A085]">
+                    <span className="text-xs font-bold text-[#0D6E5D]">
                       (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}%)
                     </span>
                   </p>
@@ -836,7 +836,7 @@ export function CompressTabPanel({
                       (perkiraan)
                     </span>
                     {sizeEstimate.savingsPercentMax > 5 && (
-                      <span className="ml-1.5 text-xs font-bold text-[#14A085]">
+                      <span className="ml-1.5 text-xs font-bold text-[#0D6E5D]">
                         (Hemat ~{Math.max(0, Math.round(sizeEstimate.savingsPercentMin))}-
                         {Math.max(0, Math.round(sizeEstimate.savingsPercentMax))}%)
                       </span>
@@ -874,7 +874,7 @@ export function CompressTabPanel({
               type="button"
               onClick={() => setAdvancedOpen((prev) => !prev)}
               aria-expanded={advancedOpen}
-              className="flex min-h-13 w-full cursor-pointer touch-manipulation items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[#E8FFF5]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#14A085]"
+              className="flex min-h-13 w-full cursor-pointer touch-manipulation items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[#E8FFF5]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0D6E5D]"
             >
               <div className="flex items-center gap-2.5">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-[#14A085] ring-1 ring-[#B5F5DB]">
@@ -943,7 +943,7 @@ export function CompressTabPanel({
                         onChange={(e) =>
                           update({ videoCodec: e.target.value as CompressVideoCodec })
                         }
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1 disabled:bg-slate-100"
                       >
                         {VIDEO_CODEC_OPTIONS.map((opt) => (
                           <option key={opt.value} value={opt.value}>
@@ -973,7 +973,7 @@ export function CompressTabPanel({
                             maxResolutionOnly: false,
                           })
                         }
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100 disabled:text-slate-400"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1 disabled:bg-slate-100 disabled:text-slate-400"
                       >
                         <option value="no-change">No change (Tidak berubah)</option>
                         <option value="resolution">Change Resolution (Ubah Resolusi)</option>
@@ -1003,7 +1003,7 @@ export function CompressTabPanel({
                               maxResolutionOnly: false,
                             })
                           }
-                          className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100"
+                          className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1 disabled:bg-slate-100"
                         >
                           {RESOLUTION_PRESET_OPTIONS.map((r) => (
                             <option key={r.value} value={r.value}>
@@ -1038,7 +1038,7 @@ export function CompressTabPanel({
                               value={options.customWidth}
                               disabled={disabled}
                               onChange={(e) => update({ customWidth: e.target.value })}
-                              className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900"
+                              className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1"
                             />
                           </div>
                           <div>
@@ -1058,7 +1058,7 @@ export function CompressTabPanel({
                               value={options.customHeight}
                               disabled={disabled}
                               onChange={(e) => update({ customHeight: e.target.value })}
-                              className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900"
+                              className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1"
                             />
                           </div>
                         </div>
@@ -1079,7 +1079,7 @@ export function CompressTabPanel({
                           onChange={(e) =>
                             update({ aspectRatio: e.target.value as AspectRatioPreset })
                           }
-                          className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100"
+                          className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1 disabled:bg-slate-100"
                         >
                           {ASPECT_RATIO_OPTIONS.map((ar) => (
                             <option key={ar.value} value={ar.value}>
@@ -1102,7 +1102,7 @@ export function CompressTabPanel({
                         value={options.frameRate}
                         disabled={disabled || isVideoCopy}
                         onChange={(e) => update({ frameRate: e.target.value as FrameRateOption })}
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100 disabled:text-slate-400"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1 disabled:bg-slate-100 disabled:text-slate-400"
                       >
                         {FRAME_RATE_OPTIONS.map((fps) => (
                           <option key={fps.value} value={fps.value}>
@@ -1127,7 +1127,7 @@ export function CompressTabPanel({
                         value={options.rotate}
                         disabled={disabled || isVideoCopy}
                         onChange={(e) => update({ rotate: e.target.value as RotateOption })}
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100 disabled:text-slate-400"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1 disabled:bg-slate-100 disabled:text-slate-400"
                       >
                         {ROTATE_OPTIONS.map((rot) => (
                           <option key={rot.value} value={rot.value}>
@@ -1149,7 +1149,7 @@ export function CompressTabPanel({
                         value={options.flip}
                         disabled={disabled || isVideoCopy}
                         onChange={(e) => update({ flip: e.target.value as FlipOption })}
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100 disabled:text-slate-400"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1 disabled:bg-slate-100 disabled:text-slate-400"
                       >
                         {FLIP_OPTIONS.map((f) => (
                           <option key={f.value} value={f.value}>
@@ -1203,7 +1203,7 @@ export function CompressTabPanel({
                         onChange={(e) =>
                           update({ audioCodec: e.target.value as CompressAudioCodec })
                         }
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100 disabled:text-slate-400"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1 disabled:bg-slate-100 disabled:text-slate-400"
                       >
                         {AUDIO_CODEC_OPTIONS.map((ac) => (
                           <option key={ac.value} value={ac.value}>
@@ -1317,7 +1317,7 @@ export function CompressTabPanel({
                           onClick={() =>
                             update({ trimEnd: formatSecondsToTimecode(sourceDurationSec) })
                           }
-                          className="cursor-pointer rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                          className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
                         >
                           Isi Akhir ({formatSecondsToTimecode(sourceDurationSec)})
                         </button>
@@ -1328,7 +1328,7 @@ export function CompressTabPanel({
                             onClick={() =>
                               update({ trimStart: '00:00:00.00', trimEnd: '00:00:00.00' })
                             }
-                            className="cursor-pointer rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500 hover:text-slate-900"
+                            className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
                           >
                             Reset
                           </button>
@@ -1352,7 +1352,7 @@ export function CompressTabPanel({
                         disabled={disabled}
                         placeholder="00:00:00.00"
                         onChange={(e) => update({ trimStart: e.target.value })}
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1 disabled:bg-slate-100"
                       />
                     </div>
                     <div>
@@ -1369,7 +1369,7 @@ export function CompressTabPanel({
                         disabled={disabled}
                         placeholder="00:00:00.00"
                         onChange={(e) => update({ trimEnd: e.target.value })}
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:bg-slate-100"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1 disabled:bg-slate-100"
                       />
                     </div>
                   </div>

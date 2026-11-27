@@ -55,12 +55,49 @@ function buildRmbgProcessorConfig(inferSize: number) {
 }
 
 const MODEL_FETCH_TIMEOUT_MS = 15000
+const MODEL_PREP_HEARTBEAT_AFTER_MS = 45_000
 const SEEK_TIMEOUT_MS = 3500
 const PREVIEW_MAX_SIDE_PX = 640
 /** [BUG-4R-05c] Resolusi kerja mask maksimal 320px sisi terpanjang (< 1 ms cleanup + closing & minim readback) */
 const MASK_WORK_MAX_SIDE_PX = 320
 /** Ambang benchmark WebGPU (ms): jika lebih lambat, uji Multi-Thread WASM SIMD q8 */
 const WEBGPU_SLOW_BENCHMARK_MS = 2500
+
+function formatLogTimestamp(): string {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+}
+
+/**
+ * [BUG-5R-02] Memisahkan pembatalan per-pemanggil (mis. pratinjau unmount saat tombol Proses diklik)
+ * dari promise unduhan/inisialisasi model bersama agar tidak membocorkan AbortError diam-diam ke render penuh.
+ */
+function raceWithAbortSignal<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+  abortMessage = 'Proses Auto Green Screen dibatalkan oleh pengguna.',
+): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(new DOMException(abortMessage, 'AbortError'))
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      reject(new DOMException(abortMessage, 'AbortError'))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (err) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(err)
+      },
+    )
+  })
+}
 
 export type ChromaEngineBadge =
   | 'MediaPipe GPU'
@@ -179,9 +216,32 @@ let mediaPipeLoadPromise: Promise<ActiveMediaPipeHandle> | null = null
 // Cache instance & processor AI RMBG-1.4 (Transformers.js)
 let cachedRmbgHandle: ActiveRmbgHandle | null = null
 let rmbgLoadPromise: Promise<ActiveRmbgHandle> | null = null
+let rmbgLoadAbortController: AbortController | null = null
+const rmbgStatusListeners = new Set<(msg: string, downloadPercent?: number) => void>()
+const rmbgLogListeners = new Set<(msg: string) => void>()
 const rmbgProcessorCache = new Map<number, DynamicProcessor>()
 let rmbgRequiresFixed1024 = false
 let rmbgPreferWasmAfterBenchmark = false
+
+function emitRmbgStatus(msg: string, downloadPercent?: number): void {
+  for (const listener of rmbgStatusListeners) {
+    try {
+      listener(msg, downloadPercent)
+    } catch {
+      // Abaikan listener error
+    }
+  }
+}
+
+function emitRmbgLog(msg: string): void {
+  for (const listener of rmbgLogListeners) {
+    try {
+      listener(msg)
+    } catch {
+      // Abaikan listener error
+    }
+  }
+}
 
 function readCachedRmbgBackendPref(): 'webgpu' | 'wasm' | null {
   if (typeof window === 'undefined') return null
@@ -269,6 +329,10 @@ export async function disposeRmbgModelInstance(): Promise<void> {
   const handle = cachedRmbgHandle
   cachedRmbgHandle = null
   rmbgLoadPromise = null
+  if (rmbgLoadAbortController) {
+    rmbgLoadAbortController.abort()
+    rmbgLoadAbortController = null
+  }
   if (handle?.model && typeof handle.model.dispose === 'function') {
     try {
       await handle.model.dispose()
@@ -493,7 +557,7 @@ async function getOrLoadMediaPipeHandle(
   }
 
   if (mediaPipeLoadPromise) {
-    const loaded = await mediaPipeLoadPromise
+    const loaded = await raceWithAbortSignal(mediaPipeLoadPromise, signal)
     if (loaded.variant === variant) {
       if (loaded.runningMode !== desiredMode) {
         await loaded.segmenter.setOptions({ runningMode: desiredMode })
@@ -504,10 +568,18 @@ async function getOrLoadMediaPipeHandle(
     disposeChromaPreviewSegmenter()
   }
 
-  const pending = createMediaPipeSegmenter(variant, desiredMode, signal, onLog, onStatus)
+  // Isolasi signal load agar abort dari pratinjau tidak membatalkan pipeline render yang menunggu
+  const sharedController = new AbortController()
+  const pending = createMediaPipeSegmenter(
+    variant,
+    desiredMode,
+    sharedController.signal,
+    onLog,
+    onStatus,
+  )
   mediaPipeLoadPromise = pending
   try {
-    const handle = await pending
+    const handle = await raceWithAbortSignal(pending, signal)
     cachedMediaPipeHandle = handle
     return handle
   } finally {
@@ -722,14 +794,17 @@ function createDownloadProgressReporter(
   expectedTotalMB: number,
   signal: AbortSignal,
   onStatus?: (msg: string, downloadPercent?: number) => void,
+  onLog?: (msg: string) => void,
 ) {
   let lastReportedPct = -1
+  let loggedStart = false
+  let loggedDone = false
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (info: any) => {
     if (signal.aborted || !info) return
+    const isWeightsFile =
+      typeof info.file === 'string' && info.file.toLowerCase().includes('.onnx')
     if (info.status === 'progress') {
-      const isWeightsFile =
-        typeof info.file === 'string' && info.file.toLowerCase().includes('.onnx')
       const hasByteMetrics =
         typeof info.loaded === 'number' &&
         typeof info.total === 'number' &&
@@ -757,15 +832,23 @@ function createDownloadProgressReporter(
           )
         }
       }
-    } else if (
-      info.status === 'initiate' &&
-      typeof info.file === 'string' &&
-      info.file.includes('.onnx')
-    ) {
+    } else if (info.status === 'initiate' && isWeightsFile) {
+      if (!loggedStart) {
+        loggedStart = true
+        onLog?.(
+          `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Mulai unduh bobot model ${info.file} (${sizeNote})...`,
+        )
+      }
       onStatus?.(
         `Mengunduh model AI Semua Objek (${sizeNote}): 0.0 MB / ~${expectedTotalMB} MB (0%)`,
         0,
       )
+    } else if (info.status === 'done' && isWeightsFile && !loggedDone) {
+      loggedDone = true
+      onLog?.(
+        `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Selesai unduh bobot model ${info.file} (${sizeNote}). Menginisialisasi sesi ONNX...`,
+      )
+      onStatus?.(`Unduhan selesai (${sizeNote}), menginisialisasi sesi ONNX...`, 100)
     }
   }
 }
@@ -781,9 +864,13 @@ async function createRmbgWasmQ8Handle(
   await configureTransformersEnv(transformers, onLog)
 
   const { AutoModel, RawImage } = transformers
-  const progressCb = createDownloadProgressReporter('~44 MB q8', 44, signal, onStatus)
+  const progressCb = createDownloadProgressReporter('~44 MB q8', 44, signal, onStatus, onLog)
 
+  onLog(
+    `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Menyiapkan & menginisialisasi sesi ONNX RMBG-1.4 (Multi-Thread WASM SIMD q8)...`,
+  )
   onStatus?.('Menyiapkan AI RMBG-1.4 (Multi-Thread WASM SIMD q8)...')
+  const tStart = performance.now()
   try {
     const wasmModel = await AutoModel.from_pretrained(RMBG_MODEL_ID, {
       device: 'wasm',
@@ -793,7 +880,9 @@ async function createRmbgWasmQ8Handle(
       progress_callback: progressCb,
     })
     checkAborted(signal)
-    onLog(`[LocalVid Chroma] Model ${RMBG_MODEL_ID} siap pada Multi-Thread WASM SIMD (dtype=q8).`)
+    onLog(
+      `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Init sesi ONNX ${RMBG_MODEL_ID} selesai pada Multi-Thread WASM SIMD (dtype=q8, ${((performance.now() - tStart) / 1000).toFixed(1)} dtk).`,
+    )
     return {
       model: wasmModel,
       RawImage,
@@ -802,20 +891,31 @@ async function createRmbgWasmQ8Handle(
       benchmarked: true,
     }
   } catch (wasmQ8Err) {
-    if (signal.aborted || (wasmQ8Err instanceof DOMException && wasmQ8Err.name === 'AbortError')) {
+    if (signal.aborted) {
       throw wasmQ8Err
     }
-    const errMsg = wasmQ8Err instanceof Error ? wasmQ8Err.message : String(wasmQ8Err)
-    onLog(`[LocalVid Chroma] WASM q8 gagal (${errMsg}), mencoba fallback WASM fp32...`)
+    const errMsg = safeErrorMessage(wasmQ8Err, 'Gagal memuat WASM q8.')
+    onLog(
+      `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] WASM q8 gagal (${errMsg}), mencoba fallback WASM fp32...`,
+    )
+    const tFp32 = performance.now()
     const wasmFp32Model = await AutoModel.from_pretrained(RMBG_MODEL_ID, {
       device: 'wasm',
       dtype: 'fp32',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       config: { model_type: 'custom' } as any,
-      progress_callback: createDownloadProgressReporter('~176 MB fp32', 176, signal, onStatus),
+      progress_callback: createDownloadProgressReporter(
+        '~176 MB fp32',
+        176,
+        signal,
+        onStatus,
+        onLog,
+      ),
     })
     checkAborted(signal)
-    onLog(`[LocalVid Chroma] Model ${RMBG_MODEL_ID} siap pada WASM (dtype=fp32).`)
+    onLog(
+      `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Init sesi ONNX ${RMBG_MODEL_ID} selesai pada WASM (dtype=fp32, ${((performance.now() - tFp32) / 1000).toFixed(1)} dtk).`,
+    )
     return {
       model: wasmFp32Model,
       RawImage,
@@ -833,6 +933,9 @@ async function createRmbgHandle(
 ): Promise<ActiveRmbgHandle> {
   checkAborted(signal)
 
+  onLog(
+    `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Memuat modul Transformers.js untuk AI RMBG-1.4...`,
+  )
   onStatus?.('Memuat modul AI Semua Objek (Transformers.js)...', 0)
   const transformers = await import('@huggingface/transformers')
   checkAborted(signal)
@@ -846,7 +949,7 @@ async function createRmbgHandle(
   if (rmbgPreferWasmAfterBenchmark || cachedBackendPref === 'wasm') {
     rmbgPreferWasmAfterBenchmark = true
     onLog(
-      '[LocalVid Chroma] Menggunakan Multi-Thread WASM SIMD q8 sesuai cache benchmark sesi ini.',
+      `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Menggunakan Multi-Thread WASM SIMD q8 sesuai cache benchmark sesi ini.`,
     )
     return createRmbgWasmQ8Handle(signal, onLog, onStatus)
   }
@@ -861,8 +964,9 @@ async function createRmbgHandle(
     const expectedMB = webgpuDtype === 'fp16' ? 88 : 176
 
     try {
+      const tGpu = performance.now()
       onLog(
-        `[LocalVid Chroma] Mencoba WebGPU ${RMBG_MODEL_ID} (dtype=${webgpuDtype}, shader-f16=${String(gpuInfo.hasShaderF16)})...`,
+        `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Mencoba WebGPU ${RMBG_MODEL_ID} (dtype=${webgpuDtype}, shader-f16=${String(gpuInfo.hasShaderF16)})...`,
       )
       onStatus?.(`Menyiapkan AI RMBG-1.4 WebGPU (${webgpuDtype})...`)
 
@@ -871,10 +975,18 @@ async function createRmbgHandle(
         dtype: webgpuDtype,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         config: { model_type: 'custom' } as any,
-        progress_callback: createDownloadProgressReporter(sizeNote, expectedMB, signal, onStatus),
+        progress_callback: createDownloadProgressReporter(
+          sizeNote,
+          expectedMB,
+          signal,
+          onStatus,
+          onLog,
+        ),
       })
       checkAborted(signal)
-      onLog(`[LocalVid Chroma] Model ${RMBG_MODEL_ID} siap pada WebGPU (dtype=${webgpuDtype}).`)
+      onLog(
+        `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Init sesi ONNX ${RMBG_MODEL_ID} selesai pada WebGPU (dtype=${webgpuDtype}, ${((performance.now() - tGpu) / 1000).toFixed(1)} dtk).`,
+      )
       return {
         model: webgpuModel,
         RawImage,
@@ -883,16 +995,18 @@ async function createRmbgHandle(
         benchmarked: cachedBackendPref === 'webgpu',
       }
     } catch (webgpuErr) {
-      if (signal.aborted || (webgpuErr instanceof DOMException && webgpuErr.name === 'AbortError')) {
+      if (signal.aborted) {
         throw webgpuErr
       }
-      const errMsg = webgpuErr instanceof Error ? webgpuErr.message : String(webgpuErr)
+      const errMsg = safeErrorMessage(webgpuErr, 'WebGPU tidak tersedia atau gagal inisialisasi.')
       onLog(
-        `[LocalVid Chroma] WebGPU ${webgpuDtype} tidak tersedia atau gagal (${errMsg}), beralih otomatis ke Multi-Thread WASM SIMD q8.`,
+        `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] WebGPU ${webgpuDtype} tidak tersedia atau gagal (${errMsg}), beralih otomatis ke Multi-Thread WASM SIMD q8.`,
       )
     }
   } else {
-    onLog('[LocalVid Chroma] WebGPU tidak tersedia, menggunakan Multi-Thread WASM SIMD q8.')
+    onLog(
+      `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] WebGPU tidak tersedia, menggunakan Multi-Thread WASM SIMD q8.`,
+    )
   }
 
   return createRmbgWasmQ8Handle(signal, onLog, onStatus)
@@ -904,22 +1018,48 @@ async function getOrLoadRmbgHandle(
   onStatus?: (msg: string, downloadPercent?: number) => void,
 ): Promise<ActiveRmbgHandle> {
   if (cachedRmbgHandle) {
+    onLog(
+      `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Menggunakan sesi AI RMBG-1.4 dari cache memori (${cachedRmbgHandle.device}, ${cachedRmbgHandle.dtype}).`,
+    )
     return cachedRmbgHandle
   }
-  if (rmbgLoadPromise) {
-    return rmbgLoadPromise
-  }
 
-  const pending = createRmbgHandle(signal, onLog, onStatus)
-  rmbgLoadPromise = pending
+  rmbgLogListeners.add(onLog)
+  if (onStatus) rmbgStatusListeners.add(onStatus)
+
   try {
-    const handle = await pending
-    cachedRmbgHandle = handle
-    return handle
-  } finally {
-    if (rmbgLoadPromise === pending) {
-      rmbgLoadPromise = null
+    if (!rmbgLoadPromise) {
+      // [BUG-5R-02] Isolasi AbortController pemuatan model dari pratinjau agar batalnya pratinjau
+      // saat klik "Proses Video" TIDAK pernah menyuntikkan AbortError diam-diam ke render penuh!
+      const sharedController = new AbortController()
+      rmbgLoadAbortController = sharedController
+      const pending = createRmbgHandle(sharedController.signal, emitRmbgLog, emitRmbgStatus)
+      rmbgLoadPromise = pending
+      pending.then(
+        (loaded) => {
+          cachedRmbgHandle = loaded
+        },
+        () => {
+          // Biarkan caller menerima rejection terstruktur dari promise ini
+        },
+      ).finally(() => {
+        if (rmbgLoadPromise === pending) {
+          rmbgLoadPromise = null
+        }
+        if (rmbgLoadAbortController === sharedController) {
+          rmbgLoadAbortController = null
+        }
+      })
+    } else {
+      onLog(
+        `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Menunggu unduhan/inisialisasi AI RMBG-1.4 yang sedang berjalan...`,
+      )
     }
+
+    return await raceWithAbortSignal(rmbgLoadPromise, signal)
+  } finally {
+    rmbgLogListeners.delete(onLog)
+    if (onStatus) rmbgStatusListeners.delete(onStatus)
   }
 }
 
@@ -1643,12 +1783,34 @@ function compositeProbBufferToOutput(
     }
   }
 
-  // 3. Edge Shift akurat (-3..+3): negatif -> erode (buang halo), positif -> dilate (perluas mask)
+  // 3. [BUG-5R-07] Edge Shift akurat (-3..+3) dengan erosi tepi lembut khusus AI RMBG Semua Objek:
+  // Pisahkan ambang probabilitas tepi (edgeLow) agar erosi tepi tidak menggigit tajam sisi objek datar,
+  // sembari tetap mempertahankan hole-fill internal yang sudah berhasil.
   const shiftSteps = Math.min(3, Math.max(-3, Math.round(options.edgeShift)))
+  const isAllObjects = options.subjectMode === 'all-objects'
+  const edgeSoftLow = Math.max(0.04, options.threshold - 0.22)
+  const edgeCoreFloor = Math.max(0.12, options.threshold - 0.08)
+
   if (shiftSteps < 0 && workW >= 4 && workH >= 4) {
     const iterations = Math.abs(shiftSteps)
     for (let s = 0; s < iterations; s += 1) {
       erode3x3(activeAlpha, scratch.alphaTemp, spareAlpha, workW, workH)
+      if (isAllObjects) {
+        for (let i = 0; i < totalPixels; i += 1) {
+          const prevA = activeAlpha[i]
+          const erodedA = spareAlpha[i]
+          if (prevA > erodedA) {
+            const p = probBuffer[i]
+            if (p >= edgeCoreFloor) {
+              // Sisi objek berprobabilitas solid: erosi sangat lembut agar bebas gigitan tajam
+              spareAlpha[i] = Math.round(erodedA * 0.42 + prevA * 0.58)
+            } else if (p >= edgeSoftLow) {
+              // Zona transisi tepi: transisi halus anti-halo
+              spareAlpha[i] = Math.round(erodedA * 0.72 + prevA * 0.28)
+            }
+          }
+        }
+      }
       const swap = activeAlpha
       activeAlpha = spareAlpha
       spareAlpha = swap
@@ -1672,13 +1834,18 @@ function compositeProbBufferToOutput(
   }
   scratch.maskWorkCtx.putImageData(scratch.maskWorkImageData, 0, 0)
 
-  // 4. Feather blur cepat pada kanvas mask kerja (maks 384px -> sangat cepat oleh GPU)
+  // 4. [BUG-5R-07] Feather blur halus 1-2px pada tepi mask agar transisi sisi objek datar mulus
   const { maskSmoothCtx, fgCtx } = scratch
   const featherPx = Math.max(0, options.edgeFeather)
+  const rawScaledFeather = featherPx * (Math.max(workW, workH) / Math.max(dstW, dstH))
   const scaledFeather =
     featherPx > 0.05
-      ? Math.max(0.5, featherPx * (Math.max(workW, workH) / Math.max(dstW, dstH)))
-      : 0
+      ? isAllObjects
+        ? Math.max(0.85, Math.min(2.2, rawScaledFeather * 1.45))
+        : Math.max(0.5, rawScaledFeather)
+      : isAllObjects
+        ? 0.75
+        : 0
 
   maskSmoothCtx.clearRect(0, 0, workW, workH)
   maskSmoothCtx.imageSmoothingEnabled = true
@@ -1692,10 +1859,11 @@ function compositeProbBufferToOutput(
   }
 
   // Despill / pembersihan ekor halo abu-abu kotor pada tepi feathered untuk latar solid
+  // Khusus RMBG Semua Objek gunakan tailCut lebih lembut (12) agar feather 1-2px tidak terpotong kasar
   if (scaledFeather > 0 && options.bgMode !== 'blur') {
     const smoothData = maskSmoothCtx.getImageData(0, 0, workW, workH)
     const sd = smoothData.data
-    const tailCut = 22
+    const tailCut = isAllObjects ? 12 : 22
     const invTail = 255 / (255 - tailCut)
     for (let i = 3; i < sd.length; i += 4) {
       const a = sd[i]
@@ -2281,58 +2449,108 @@ export async function runChromaKeyPipeline({
     let engineBadge: ChromaEngineBadge = 'MediaPipe GPU'
     let delegateLabel = 'MediaPipe GPU (VIDEO Mode)'
 
-    if (options.subjectMode === 'all-objects') {
-      onProgress({
-        phase: 'loading-model',
-        label: 'Menyiapkan model AI Semua Objek (RMBG-1.4)...',
-        currentFrame: 0,
-        totalFrames,
-        percent: 6,
-      })
-
-      rmbgHandle = await getOrLoadRmbgHandle(signal, onLog, (status, downloadPercent) => {
-        const mappedPct =
-          typeof downloadPercent === 'number' ? Math.round(5 + downloadPercent * 0.06) : 8
+    // [BUG-5R-02] Bungkus seluruh jalur model-prep (unduh + init session + heartbeat >45 dtk) dalam try/catch terstruktur
+    let modelPrepStage =
+      options.subjectMode === 'all-objects'
+        ? 'unduh & inisialisasi sesi ONNX RMBG-1.4'
+        : 'unduh & inisialisasi MediaPipe VIDEO'
+    let lastPrepActivityAt = Date.now()
+    const prepStartedAt = Date.now()
+    const modelPrepHeartbeatId = window.setInterval(() => {
+      if (signal.aborted) return
+      const idleMs = Date.now() - lastPrepActivityAt
+      if (idleMs >= MODEL_PREP_HEARTBEAT_AFTER_MS) {
+        const totalSec = Math.round((Date.now() - prepStartedAt) / 1000)
+        const waitLabel =
+          options.subjectMode === 'all-objects'
+            ? 'Model AI masih dimuat (~44 MB pada unduhan pertama), mohon tunggu...'
+            : 'Model MediaPipe masih dimuat, mohon tunggu...'
+        onLog(
+          `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Heartbeat (${totalSec} dtk): ${waitLabel}`,
+        )
         onProgress({
           phase: 'loading-model',
-          label: status,
+          label: waitLabel,
           currentFrame: 0,
           totalFrames,
-          percent: mappedPct,
-          downloadPercent,
+          percent: 8,
         })
-      })
-      engineBadge = rmbgHandle.device === 'webgpu' ? 'AI RMBG-1.4 WebGPU' : 'AI RMBG-1.4 WASM'
-      delegateLabel =
-        rmbgHandle.device === 'webgpu'
-          ? `AI RMBG-1.4 (WebGPU ${rmbgHandle.dtype} • ${speedDef.shortTag})`
-          : `AI RMBG-1.4 (WASM SIMD ${rmbgHandle.dtype} • ${speedDef.shortTag})`
-    } else {
-      const variant: ModelVariant = srcW > srcH ? 'landscape' : 'portrait'
-      onProgress({
-        phase: 'loading-model',
-        label: 'Menyiapkan MediaPipe VIDEO Mode (Subjek Manusia)...',
-        currentFrame: 0,
-        totalFrames,
-        percent: 8,
-      })
+      }
+    }, 5000)
 
-      // Lepas instance pratinjau lama agar timestamp VIDEO mode selalu mulai mulus dari 1 ms
-      disposeChromaPreviewSegmenter()
-      mpHandle = await getOrLoadMediaPipeHandle(variant, 'VIDEO', signal, onLog, (status) => {
+    try {
+      if (options.subjectMode === 'all-objects') {
         onProgress({
           phase: 'loading-model',
-          label: status,
+          label: 'Menyiapkan model AI Semua Objek (RMBG-1.4)...',
           currentFrame: 0,
           totalFrames,
-          percent: 9,
+          percent: 6,
         })
-      })
-      engineBadge = mpHandle.delegate === 'GPU' ? 'MediaPipe GPU' : 'MediaPipe CPU'
-      delegateLabel =
-        mpHandle.delegate === 'GPU'
-          ? 'MediaPipe GPU (VIDEO Mode)'
-          : 'MediaPipe CPU (VIDEO Mode)'
+
+        rmbgHandle = await getOrLoadRmbgHandle(signal, onLog, (status, downloadPercent) => {
+          lastPrepActivityAt = Date.now()
+          const mappedPct =
+            typeof downloadPercent === 'number' ? Math.round(5 + downloadPercent * 0.06) : 8
+          onProgress({
+            phase: 'loading-model',
+            label: status,
+            currentFrame: 0,
+            totalFrames,
+            percent: mappedPct,
+            downloadPercent,
+          })
+        })
+        lastPrepActivityAt = Date.now()
+        engineBadge = rmbgHandle.device === 'webgpu' ? 'AI RMBG-1.4 WebGPU' : 'AI RMBG-1.4 WASM'
+        delegateLabel =
+          rmbgHandle.device === 'webgpu'
+            ? `AI RMBG-1.4 (WebGPU ${rmbgHandle.dtype} • ${speedDef.shortTag})`
+            : `AI RMBG-1.4 (WASM SIMD ${rmbgHandle.dtype} • ${speedDef.shortTag})`
+      } else {
+        const variant: ModelVariant = srcW > srcH ? 'landscape' : 'portrait'
+        onProgress({
+          phase: 'loading-model',
+          label: 'Menyiapkan MediaPipe VIDEO Mode (Subjek Manusia)...',
+          currentFrame: 0,
+          totalFrames,
+          percent: 8,
+        })
+
+        // Lepas instance pratinjau lama agar timestamp VIDEO mode selalu mulai mulus dari 1 ms
+        disposeChromaPreviewSegmenter()
+        mpHandle = await getOrLoadMediaPipeHandle(variant, 'VIDEO', signal, onLog, (status) => {
+          lastPrepActivityAt = Date.now()
+          onProgress({
+            phase: 'loading-model',
+            label: status,
+            currentFrame: 0,
+            totalFrames,
+            percent: 9,
+          })
+        })
+        lastPrepActivityAt = Date.now()
+        engineBadge = mpHandle.delegate === 'GPU' ? 'MediaPipe GPU' : 'MediaPipe CPU'
+        delegateLabel =
+          mpHandle.delegate === 'GPU'
+            ? 'MediaPipe GPU (VIDEO Mode)'
+            : 'MediaPipe CPU (VIDEO Mode)'
+      }
+    } catch (prepErr) {
+      if (signal.aborted) {
+        throw prepErr
+      }
+      const prepReason = safeErrorMessage(
+        prepErr,
+        'Gagal mengunduh atau menginisialisasi model AI segmentasi.',
+      )
+      const structuredError = `Gagal menyiapkan model Auto Green Screen (${modelPrepStage}): ${prepReason}. Periksa koneksi internet lalu klik Coba Lagi.`
+      onLog(
+        `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] ERROR: ${structuredError}`,
+      )
+      throw new Error(structuredError)
+    } finally {
+      window.clearInterval(modelPrepHeartbeatId)
     }
 
     checkAborted(signal)
@@ -2473,34 +2691,82 @@ export async function runChromaKeyPipeline({
         await captureFrameToCanvas(frameIdx, targetCtx)
         checkAborted(signal)
 
-        const { activeHandle } = await runRmbgInferenceToProbBuffer(
-          targetCanvas,
-          rmbgHandle!,
-          options.speedProfile,
-          destProb,
-          scratch!.workW,
-          scratch!.workH,
-          signal,
-          onLog,
-          (status, dlPct) => {
-            onProgress({
-              phase: 'segmenting',
-              label: status,
-              currentFrame: writtenFrames,
-              totalFrames,
-              percent: Math.min(86, Math.round(12 + (writtenFrames / totalFrames) * 74)),
-              engineLabel: engineBadge,
-              downloadPercent: dlPct,
-              modeTag,
-            })
-          },
-          !loggedMaskInfo
-            ? (info) => {
-                loggedMaskInfo = true
-                onLog(`[LocalVid Chroma] Info mask frame pertama: ${info}`)
-              }
-            : undefined,
-        )
+        const isFirstInference = !loggedMaskInfo
+        let firstInferHeartbeatId: number | null = null
+        if (isFirstInference) {
+          onLog(
+            `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Memulai inferensi frame 1 AI RMBG-1.4...`,
+          )
+          const firstInferStart = Date.now()
+          firstInferHeartbeatId = window.setInterval(() => {
+            if (signal.aborted) return
+            if (Date.now() - firstInferStart >= MODEL_PREP_HEARTBEAT_AFTER_MS) {
+              const waitLabel =
+                'Model AI masih dimuat (~44 MB pada unduhan pertama), mohon tunggu...'
+              onLog(
+                `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Heartbeat inferensi frame 1 (${Math.round(
+                  (Date.now() - firstInferStart) / 1000,
+                )} dtk): ${waitLabel}`,
+              )
+              onProgress({
+                phase: 'loading-model',
+                label: waitLabel,
+                currentFrame: writtenFrames,
+                totalFrames,
+                percent: 11,
+                engineLabel: engineBadge,
+                modeTag,
+              })
+            }
+          }, 5000)
+        }
+
+        let activeHandle: ActiveRmbgHandle
+        try {
+          const outcome = await runRmbgInferenceToProbBuffer(
+            targetCanvas,
+            rmbgHandle!,
+            options.speedProfile,
+            destProb,
+            scratch!.workW,
+            scratch!.workH,
+            signal,
+            onLog,
+            (status, dlPct) => {
+              onProgress({
+                phase: 'segmenting',
+                label: status,
+                currentFrame: writtenFrames,
+                totalFrames,
+                percent: Math.min(86, Math.round(12 + (writtenFrames / totalFrames) * 74)),
+                engineLabel: engineBadge,
+                downloadPercent: dlPct,
+                modeTag,
+              })
+            },
+            !loggedMaskInfo
+              ? (info) => {
+                  loggedMaskInfo = true
+                  onLog(
+                    `[${formatLogTimestamp()}] [LocalVid Chroma] [model-prep] Inferensi frame 1 selesai: ${info}`,
+                  )
+                }
+              : undefined,
+          )
+          activeHandle = outcome.activeHandle
+        } catch (inferErr) {
+          if (signal.aborted) throw inferErr
+          const inferReason = safeErrorMessage(inferErr, 'Inferensi AI RMBG-1.4 gagal.')
+          const msg = isFirstInference
+            ? `Gagal pada inferensi frame pertama AI RMBG-1.4: ${inferReason}. Klik Coba Lagi atau coba mode Subjek Manusia.`
+            : `Gagal segmentasi AI RMBG-1.4 pada frame ke-${frameIdx + 1}: ${inferReason}`
+          onLog(`[${formatLogTimestamp()}] [LocalVid Chroma] ERROR: ${msg}`)
+          throw new Error(msg)
+        } finally {
+          if (firstInferHeartbeatId !== null) {
+            window.clearInterval(firstInferHeartbeatId)
+          }
+        }
         rmbgHandle = activeHandle
         engineBadge = activeHandle.device === 'webgpu' ? 'AI RMBG-1.4 WebGPU' : 'AI RMBG-1.4 WASM'
         delegateLabel =
@@ -2734,6 +3000,15 @@ export async function runChromaKeyPipeline({
         await ffmpeg.deleteFile(outputFileName)
       } catch {
         // Abaikan bila file parsial tidak ada
+      }
+      // [BUG-5R-01] Pastikan file input masih tersedia di MEMFS sebelum retry AAC
+      try {
+        const entries = await ffmpeg.listDir('.')
+        if (!entries.some((entry) => !entry.isDir && entry.name === inputFileName)) {
+          await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile))
+        }
+      } catch {
+        await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile))
       }
 
       assembleExit = await ffmpeg.exec(

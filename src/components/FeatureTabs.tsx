@@ -144,43 +144,51 @@ interface FeatureTabsProps {
 const TABS: ReadonlyArray<{
   id: FeatureTabId
   label: string
+  fullTitle: string
   badge?: string
   Icon: typeof ArrowLeftRight
 }> = [
   {
     id: 'convert',
-    label: 'Ubah Ekstensi',
+    label: 'Ubah Format',
+    fullTitle: 'Ubah Ekstensi',
     Icon: ArrowLeftRight,
   },
   {
     id: 'compress',
-    label: 'Kompres Video',
+    label: 'Kompres',
+    fullTitle: 'Kompres Video',
     Icon: Minimize2,
   },
   {
     id: 'enhance',
-    label: 'Jernihkan & HD',
+    label: 'Jernihkan',
+    fullTitle: 'Jernihkan & HD',
     Icon: Sparkles,
   },
   {
     id: 'stabilize',
     label: 'Stabilizer',
+    fullTitle: 'Stabilizer Video',
     Icon: Video,
   },
   {
     id: 'ai-upscale',
-    label: 'AI HD Upscaler',
+    label: 'AI Upscale',
+    fullTitle: 'AI HD Upscaler (Beta)',
     badge: 'Beta',
     Icon: Cpu,
   },
   {
     id: 'audio-denoise',
-    label: 'Bersihkan Audio',
+    label: 'Audio',
+    fullTitle: 'Bersihkan Audio',
     Icon: AudioLines,
   },
   {
     id: 'auto-chroma',
-    label: 'Auto Green Screen',
+    label: 'Green Screen',
+    fullTitle: 'Auto Green Screen',
     Icon: UserSquare2,
   },
 ]
@@ -233,8 +241,26 @@ export function FeatureTabs({
   resultView,
 }: FeatureTabsProps) {
   const [compareOriginal, setCompareOriginal] = useState(false)
+  const [showTabFadeRight, setShowTabFadeRight] = useState(false)
   const tabListRef = useRef<HTMLDivElement | null>(null)
   const tabButtonRefs = useRef<Partial<Record<FeatureTabId, HTMLButtonElement | null>>>({})
+
+  // [BUG-5R-04] Deteksi overflow horizontal strip tab pada layar kecil untuk menampilkan efek fade tepi kanan
+  useEffect(() => {
+    const tabList = tabListRef.current
+    if (!tabList) return
+    const updateFade = () => {
+      const canScrollRight = tabList.scrollWidth - tabList.clientWidth - tabList.scrollLeft > 6
+      setShowTabFadeRight(canScrollRight)
+    }
+    updateFade()
+    tabList.addEventListener('scroll', updateFade, { passive: true })
+    window.addEventListener('resize', updateFade, { passive: true })
+    return () => {
+      tabList.removeEventListener('scroll', updateFade)
+      window.removeEventListener('resize', updateFade)
+    }
+  }, [activeTab])
 
   // Geser halus hanya kontainer horizontal strip tab agar tidak pernah menarik scroll vertikal
   useEffect(() => {
@@ -356,89 +382,97 @@ export function FeatureTabs({
       transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
       className="bento-card overflow-hidden rounded-3xl bg-white"
     >
-      {/* Baris Navigasi 7 Tab - 1 baris rapi di Desktop (7 kolom pas tanpa terpotong) dan horizontal scroll di Mobile */}
+      {/* [BUG-5R-04] Baris Navigasi 7 Tab: 1 baris utuh tanpa terpotong di Desktop + efek fade tepi kanan di layar kecil */}
       <div className="border-b border-[#E2F3EC] bg-[#F7FFFC] p-2.5 sm:p-3">
-        <div
-          ref={tabListRef}
-          role="tablist"
-          aria-label="Fitur pengolah video"
-          className="flex flex-nowrap gap-1.5 overflow-x-auto snap-x snap-mandatory rounded-2xl border border-[#B5F5DB] bg-white p-1.5 shadow-[0_6px_18px_-10px_rgba(13,110,93,0.14)] [scrollbar-width:thin] [scrollbar-color:#6de7c1_transparent] lg:grid lg:grid-cols-7 lg:gap-1 lg:overflow-visible [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#B5F5DB] hover:[&::-webkit-scrollbar-thumb]:bg-[#6DE7C1]"
-        >
-          {TABS.map(({ id, label, badge, Icon }) => {
-            const isActive = activeTab === id
-            const stepIndex = pipelineSteps.findIndex((s) => s.tabId === id)
-            const installedStep = stepIndex >= 0 ? pipelineSteps[stepIndex] : null
-            const batchAppliedInfo =
-              batchModeInfo && batchAppliedFeatureMap ? (batchAppliedFeatureMap[id] ?? null) : null
-            const isBatchApplied = Boolean(batchAppliedInfo && batchAppliedInfo.count > 0)
-            const hasAppliedEffect = Boolean(installedStep) || isBatchApplied
+        <div className="relative">
+          <div
+            ref={tabListRef}
+            role="tablist"
+            aria-label="Fitur pengolah video"
+            className="flex flex-nowrap gap-1.5 overflow-x-auto snap-x snap-mandatory rounded-2xl border border-[#B5F5DB] bg-white p-1.5 shadow-[0_6px_18px_-10px_rgba(13,110,93,0.14)] [scrollbar-width:thin] [scrollbar-color:#6de7c1_transparent] lg:grid lg:grid-cols-7 lg:gap-1 lg:overflow-visible [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#B5F5DB] hover:[&::-webkit-scrollbar-thumb]:bg-[#6DE7C1]"
+          >
+            {TABS.map(({ id, label, fullTitle, badge, Icon }) => {
+              const isActive = activeTab === id
+              const stepIndex = pipelineSteps.findIndex((s) => s.tabId === id)
+              const installedStep = stepIndex >= 0 ? pipelineSteps[stepIndex] : null
+              const batchAppliedInfo =
+                batchModeInfo && batchAppliedFeatureMap ? (batchAppliedFeatureMap[id] ?? null) : null
+              const isBatchApplied = Boolean(batchAppliedInfo && batchAppliedInfo.count > 0)
+              const hasAppliedEffect = Boolean(installedStep) || isBatchApplied
 
-            return (
-              <motion.button
-                key={id}
-                ref={(el) => {
-                  tabButtonRefs.current[id] = el
-                }}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                disabled={disabled}
-                whileTap={!disabled ? { scale: 0.98 } : undefined}
-                transition={CARD_SPRING}
-                title={
-                  disabled
-                    ? 'Proses sedang berjalan, tunggu selesai atau klik Batalkan untuk pindah tab'
-                    : installedStep
-                      ? `${label} sudah terpasang (Tahap ke-${stepIndex + 1}: ${installedStep.summary}). Klik untuk ubah setelan.`
-                      : isBatchApplied
-                        ? 'Fitur ini sudah diterapkan ke antrean video'
-                        : label
-                }
-                onClick={() => onTabChange(id)}
-                className={`flex min-h-11 shrink-0 snap-start cursor-pointer touch-manipulation items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold transition-[background-color,color,box-shadow,border-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60 lg:w-full lg:min-w-0 lg:gap-1.5 lg:px-2 lg:text-[11px] xl:px-2.5 xl:text-xs ${
-                  isActive
-                    ? 'mint-tab-active border border-transparent'
-                    : hasAppliedEffect
-                      ? 'border border-[#6DE7C1] bg-[#E8FFF5] text-[#0D6E5D] hover:bg-[#dcfcee]'
-                      : 'border border-transparent text-[#4A6B63] hover:bg-[#F7FFFC] hover:text-[#0D6E5D]'
-                }`}
-              >
-                <span
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors lg:h-6 lg:w-6 ${
+              return (
+                <motion.button
+                  key={id}
+                  ref={(el) => {
+                    tabButtonRefs.current[id] = el
+                  }}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  disabled={disabled}
+                  whileTap={!disabled ? { scale: 0.98 } : undefined}
+                  transition={CARD_SPRING}
+                  title={
+                    disabled
+                      ? 'Proses sedang berjalan, tunggu selesai atau klik Batalkan untuk pindah tab'
+                      : installedStep
+                        ? `${fullTitle} sudah terpasang (Tahap ke-${stepIndex + 1}: ${installedStep.summary}). Klik untuk ubah setelan.`
+                        : isBatchApplied
+                          ? `${fullTitle}: fitur ini sudah diterapkan ke antrean video`
+                          : fullTitle
+                  }
+                  onClick={() => onTabChange(id)}
+                  className={`flex min-h-11 shrink-0 snap-start cursor-pointer touch-manipulation items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold transition-[background-color,color,box-shadow,border-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 lg:w-full lg:min-w-0 lg:gap-1 lg:px-1.5 lg:text-[11px] xl:gap-1.5 xl:px-2.5 xl:text-xs ${
                     isActive
-                      ? 'bg-white/20 text-white'
+                      ? 'mint-tab-active border border-transparent'
                       : hasAppliedEffect
-                        ? 'bg-[#B5F5DB] text-[#0D6E5D]'
-                        : 'bg-[#E8FFF5] text-[#14A085]'
+                        ? 'border border-[#6DE7C1] bg-[#E8FFF5] text-[#0D6E5D] hover:bg-[#dcfcee]'
+                        : 'border border-transparent text-[#4A6B63] hover:bg-[#F7FFFC] hover:text-[#0D6E5D]'
                   }`}
                 >
-                  <Icon aria-hidden="true" className="h-4 w-4 lg:h-3.5 lg:w-3.5" />
-                </span>
-                <span className="truncate">{label}</span>
-                {badge && !hasAppliedEffect && (
                   <span
-                    className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors lg:h-6 lg:w-6 ${
                       isActive
                         ? 'bg-white/20 text-white'
-                        : 'bg-[#E8FFF5] text-[#0D6E5D] ring-1 ring-[#B5F5DB]'
+                        : hasAppliedEffect
+                          ? 'bg-[#B5F5DB] text-[#0D6E5D]'
+                          : 'bg-[#E8FFF5] text-[#0D6E5D]'
                     }`}
                   >
-                    {badge}
+                    <Icon aria-hidden="true" className="h-4 w-4 lg:h-3.5 lg:w-3.5" />
                   </span>
-                )}
-                {batchAppliedInfo && batchAppliedInfo.count > 1 && (
-                  <span
-                    aria-label={`Fitur sudah diterapkan ${batchAppliedInfo.count} kali`}
-                    className={`inline-flex h-4 shrink-0 items-center justify-center rounded-full px-1 text-[9px] font-extrabold tabular-nums ${
-                      isActive ? 'bg-white/25 text-white' : 'bg-[#B5F5DB] text-[#0D6E5D]'
-                    }`}
-                  >
-                    {batchAppliedInfo.count}x
-                  </span>
-                )}
-              </motion.button>
-            )
-          })}
+                  <span className="whitespace-nowrap">{label}</span>
+                  {badge && !hasAppliedEffect && (
+                    <span
+                      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                        isActive
+                          ? 'bg-white text-[#0D6E5D]'
+                          : 'bg-[#E8FFF5] text-[#0D6E5D] ring-1 ring-[#B5F5DB]'
+                      }`}
+                    >
+                      {badge}
+                    </span>
+                  )}
+                  {batchAppliedInfo && batchAppliedInfo.count > 1 && (
+                    <span
+                      aria-label={`Fitur sudah diterapkan ${batchAppliedInfo.count} kali`}
+                      className={`inline-flex h-4 shrink-0 items-center justify-center rounded-full px-1.5 text-[9px] font-extrabold tabular-nums ${
+                        isActive ? 'bg-white text-[#0D6E5D]' : 'bg-[#0D6E5D] text-white'
+                      }`}
+                    >
+                      {batchAppliedInfo.count}x
+                    </span>
+                  )}
+                </motion.button>
+              )
+            })}
+          </div>
+          {showTabFadeRight && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-1.5 right-1.5 w-10 rounded-r-xl bg-gradient-to-l from-white via-white/90 to-transparent lg:hidden"
+            />
+          )}
         </div>
       </div>
 
@@ -475,7 +509,7 @@ export function FeatureTabs({
                   type="button"
                   disabled={disabled}
                   onClick={savedBatchResultBanner.onRestore}
-                  className="mint-secondary-btn inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:opacity-50"
+                  className="mint-secondary-btn inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:opacity-50"
                 >
                   <Eye aria-hidden="true" className="h-3.5 w-3.5" />
                   <span>Lihat Hasil Batch</span>
@@ -539,7 +573,7 @@ export function FeatureTabs({
                   className="animate-lv-fade-up mb-5 flex flex-col gap-3 rounded-2xl border border-[#6DE7C1] bg-[#E8FFF5] px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[#14A085] px-2.5 py-1 text-[11px] font-bold text-white">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[#0D6E5D] px-2.5 py-1 text-[11px] font-bold text-white">
                       <span>Efek Terpasang (Tahap ke-{activeStepIdx + 1})</span>
                     </span>
                     <span className="font-semibold text-[#0D2B24]">{activeStep.summary}</span>
@@ -550,7 +584,7 @@ export function FeatureTabs({
                       type="button"
                       disabled={disabled}
                       onClick={() => onViewStepResult(activeStep.id)}
-                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Eye aria-hidden="true" className="h-3.5 w-3.5" />
                       <span>Lihat Hasil</span>
@@ -636,7 +670,7 @@ export function FeatureTabs({
                       whileTap={!disabled ? { scale: 0.98 } : undefined}
                       transition={CARD_SPRING}
                       onClick={() => onOutputFormatChange(item.value)}
-                      className={`flex min-h-20 cursor-pointer touch-manipulation flex-col items-start justify-between rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                      className={`flex min-h-20 cursor-pointer touch-manipulation flex-col items-start justify-between rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                         selected ? 'mint-option-card-active' : 'mint-option-card'
                       }`}
                     >
@@ -709,7 +743,7 @@ export function FeatureTabs({
                   aria-label="Aktifkan Mode Kilat Fast Remux"
                   disabled={disabled}
                   onClick={() => onFastRemuxChange(!fastRemux)}
-                  className={`relative mt-1 inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`relative mt-1 inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
                     fastRemux
                       ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
                       : 'bg-[#B5F5DB]'
@@ -801,7 +835,7 @@ export function FeatureTabs({
                       whileTap={!disabled ? { scale: 0.98 } : undefined}
                       transition={CARD_SPRING}
                       onClick={() => toggleEnhanceBool(key)}
-                      className={`flex min-h-22 cursor-pointer touch-manipulation items-start gap-3.5 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                      className={`flex min-h-22 cursor-pointer touch-manipulation items-start gap-3.5 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                         enabled ? 'mint-option-card-active' : 'mint-option-card'
                       }`}
                     >
@@ -856,7 +890,7 @@ export function FeatureTabs({
                           type="button"
                           disabled={disabled}
                           onClick={() => handleScaleAlgorithmChange(opt.value)}
-                          className={`min-h-11 cursor-pointer touch-manipulation rounded-xl border px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-60 ${
+                          className={`min-h-11 cursor-pointer touch-manipulation rounded-xl border px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-60 ${
                             active
                               ? 'border-[#14A085] bg-white text-[#0D6E5D] shadow-xs ring-1 ring-[#6DE7C1]'
                               : 'border-[#B5F5DB] bg-white/75 text-[#4A6B63] hover:bg-white'
@@ -904,7 +938,7 @@ export function FeatureTabs({
                         </strong>
                       </span>
                       {batchModeInfo && batchModeInfo.items.length > 1 && (
-                        <label className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2 py-0.5 text-[11px] font-semibold text-slate-200">
+                        <label className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-slate-200">
                           <span>Pratinjau dari:</span>
                           <select
                             aria-label="Pilih video referensi pratinjau warna"
@@ -913,7 +947,7 @@ export function FeatureTabs({
                             onChange={(e) =>
                               batchModeInfo.onPreviewItemIdChange(e.target.value)
                             }
-                            className="cursor-pointer rounded bg-slate-900 px-1.5 py-0.5 text-[11px] font-bold text-white focus:outline-none focus:ring-1 focus:ring-[#6DE7C1] disabled:opacity-50"
+                            className="min-h-11 cursor-pointer rounded bg-slate-900 px-2 py-1 text-[11px] font-bold text-white focus:outline-none focus:ring-2 focus:ring-[#6DE7C1] disabled:opacity-50"
                           >
                             {batchModeInfo.items.map((bItem) => (
                               <option key={bItem.id} value={bItem.id}>
@@ -928,7 +962,7 @@ export function FeatureTabs({
                       <button
                         type="button"
                         onClick={() => setCompareOriginal((prev) => !prev)}
-                        className="cursor-pointer touch-manipulation rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-slate-200 transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6DE7C1]"
+                        className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6DE7C1] focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
                       >
                         {compareOriginal ? 'Lihat Efek Filter' : 'Bandingkan Original'}
                       </button>
@@ -970,7 +1004,7 @@ export function FeatureTabs({
                       whileTap={!disabled ? { scale: 0.98 } : undefined}
                       transition={CARD_SPRING}
                       onClick={() => handleColorFilterChange(preset.id)}
-                      className={`flex min-h-20 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                      className={`flex min-h-20 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                         selected ? 'mint-option-card-active' : 'mint-option-card'
                       }`}
                     >
@@ -1012,8 +1046,11 @@ export function FeatureTabs({
                     </span>
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-[#4A6B63]">
-                    Membatasi bitrate puncak (-maxrate) secara proporsional agar hasil upscale atau
-                    penjernihan tetap tajam tanpa membengkak berlebihan.
+                    Membatasi bitrate puncak (-maxrate) secara proporsional serta menggunakan skala{' '}
+                    <code className="rounded bg-white px-1 py-0.5 font-semibold text-[#0D6E5D]">
+                      fast_bilinear
+                    </code>{' '}
+                    saat Upscale 1080p agar render 10-20% lebih cepat tanpa membengkak berlebihan.
                   </p>
                 </div>
                 <button
@@ -1028,7 +1065,7 @@ export function FeatureTabs({
                       smartSizeCap: !enhanceOptions.smartSizeCap,
                     })
                   }
-                  className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                  className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
                     enhanceOptions.smartSizeCap
                       ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
                       : 'bg-[#B5F5DB]'
@@ -1163,7 +1200,7 @@ export function FeatureTabs({
                       whileTap={!disabled ? { scale: 0.98 } : undefined}
                       transition={CARD_SPRING}
                       onClick={() => onStabilizerLevelChange(opt.id)}
-                      className={`flex min-h-28 cursor-pointer touch-manipulation flex-col justify-between gap-3 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                      className={`flex min-h-28 cursor-pointer touch-manipulation flex-col justify-between gap-3 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                         selected ? 'mint-option-card-active' : 'mint-option-card'
                       }`}
                     >
@@ -1172,7 +1209,7 @@ export function FeatureTabs({
                           <span
                             className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
                               selected
-                                ? 'bg-[#14A085] text-white'
+                                ? 'bg-[#0D6E5D] text-white'
                                 : 'bg-[#E8FFF5] text-[#0D6E5D]'
                             }`}
                           >
@@ -1288,7 +1325,7 @@ export function FeatureTabs({
                 <button
                   type="button"
                   onClick={() => onTabChange('enhance')}
-                  className="mint-cta-btn inline-flex min-h-11 w-full cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 sm:w-auto sm:text-sm"
+                  className="mint-cta-btn inline-flex min-h-11 w-full cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 sm:w-auto sm:text-sm"
                 >
                   <Sparkles aria-hidden="true" className="h-4 w-4" />
                   <span>Buka Tab Jernihkan &amp; HD</span>
@@ -1328,7 +1365,7 @@ export function FeatureTabs({
                           <strong className="font-bold text-[#0D2B24]">
                             {aiMaxDurationSec} detik
                           </strong>
-                          ).
+                          ). Proses WebGL2 memakan waktu ~1-2 menit per 6 detik video.
                         </p>
                       </div>
                     </div>
@@ -1362,7 +1399,10 @@ export function FeatureTabs({
                           <strong className="font-bold text-[#0D2B24]">
                             {aiMaxDurationSec} detik
                           </strong>
-                          .
+                          . Estimasi waktu:{' '}
+                          {aiSettings.enginePreference === 'webgl2-shader'
+                            ? 'proses WebGL2 memakan waktu ~1-2 menit per 6 detik video.'
+                            : 'proses WebGPU/ONNX memakan waktu ~30-90 detik per 6 detik video (mode WebGL2 ~1-2 menit).'}
                         </p>
                       </div>
                     </div>
@@ -1475,7 +1515,7 @@ export function FeatureTabs({
                               : undefined
                           }
                           onClick={() => handleAiEnginePreference(mode.id)}
-                          className={`flex touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 ${
+                          className={`flex touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 ${
                             mode.unavailable
                               ? 'cursor-not-allowed border border-[#E2F3EC] bg-[#F4FFFA] opacity-45 grayscale-[35%]'
                               : active
@@ -1490,7 +1530,7 @@ export function FeatureTabs({
                                   mode.unavailable
                                     ? 'bg-[#E2F3EC] text-[#4A6B63]'
                                     : active
-                                      ? 'bg-[#14A085] text-white'
+                                      ? 'bg-[#0D6E5D] text-white'
                                       : 'bg-[#E8FFF5] text-[#0D6E5D]'
                                 }`}
                               >
@@ -1531,7 +1571,7 @@ export function FeatureTabs({
                               whileTap={!disabled ? { scale: 0.98 } : undefined}
                               transition={CARD_SPRING}
                               onClick={() => handleSelectAiPreset(preset.id)}
-                              className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2.5 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                              className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2.5 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                                 selected ? 'mint-option-card-active' : 'mint-option-card'
                               }`}
                             >
@@ -1541,7 +1581,7 @@ export function FeatureTabs({
                                     <span
                                       className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold ${
                                         selected
-                                          ? 'bg-[#14A085] text-white'
+                                          ? 'bg-[#0D6E5D] text-white'
                                           : 'bg-[#E8FFF5] text-[#0D6E5D]'
                                       }`}
                                     >
@@ -1586,7 +1626,7 @@ export function FeatureTabs({
                           })
                         }
                         placeholder="https://huggingface.co/.../resolve/main/model.onnx"
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-[#B5F5DB] bg-white px-3.5 py-2.5 text-xs text-[#0D2B24] placeholder-[#4A6B63]/60 transition-colors focus:border-[#14A085] focus:outline-none focus:ring-2 focus:ring-[#2EC7A4]/30 disabled:bg-[#F4FFFA] disabled:opacity-60"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-[#B5F5DB] bg-white px-3.5 py-2.5 text-xs text-[#0D2B24] placeholder-[#4A6B63]/60 transition-colors focus:border-[#0D6E5D] focus:outline-none focus:ring-2 focus:ring-[#0D6E5D] focus:ring-offset-1 disabled:bg-[#F4FFFA] disabled:opacity-60"
                       />
                       {!modelUrlValid && (
                         <p className="mt-1.5 text-xs font-medium text-amber-800">
@@ -1624,9 +1664,9 @@ export function FeatureTabs({
                             onClick={() =>
                               onAiSettingsChange({ ...aiSettings, targetFps: opt.value })
                             }
-                            className={`min-h-12 cursor-pointer touch-manipulation rounded-xl border px-2 py-2 text-center transition-[border-color,background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                            className={`min-h-12 cursor-pointer touch-manipulation rounded-xl border px-2 py-2 text-center transition-[border-color,background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                               active
-                                ? 'border-[#14A085] bg-[#14A085] text-white shadow-xs'
+                                ? 'border-[#0D6E5D] bg-[#0D6E5D] text-white shadow-xs'
                                 : 'border-[#E2F3EC] bg-white text-[#0D2B24] hover:border-[#6DE7C1] hover:bg-[#F7FFFC]'
                             }`}
                           >
@@ -1666,7 +1706,7 @@ export function FeatureTabs({
                           normalizeTo1080p: !aiSettings.normalizeTo1080p,
                         })
                       }
-                      className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+                      className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
                         aiSettings.normalizeTo1080p
                           ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
                           : 'bg-[#B5F5DB]'
@@ -1710,7 +1750,7 @@ export function FeatureTabs({
                           smartSizeCap: !aiSettings.smartSizeCap,
                         })
                       }
-                      className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                      className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
                         aiSettings.smartSizeCap
                           ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
                           : 'bg-[#B5F5DB]'
@@ -1756,6 +1796,11 @@ export function FeatureTabs({
                             ? ` • Cap ≤ ${aiSizeEstimate.maxRateKbps}k`
                             : ' • Tanpa Cap'}
                         </p>
+                        {aiSizeEstimate.note && (
+                          <p className="mt-0.5 text-[11px] font-medium text-[#0D6E5D]">
+                            {aiSizeEstimate.note}
+                          </p>
+                        )}
                         {aiSizeEstimate.calibrationSamples !== undefined &&
                           aiSizeEstimate.calibrationSamples > 0 && (
                             <p className="mt-0.5 text-[10px] font-medium text-[#0D6E5D]">

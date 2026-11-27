@@ -136,7 +136,7 @@ export function AudioDenoiseTabPanel({
                 whileHover={!disabled ? { y: -2 } : undefined}
                 whileTap={!disabled ? { scale: 0.98 } : undefined}
                 transition={CARD_SPRING}
-                className={`flex min-h-24 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                className={`flex min-h-24 cursor-pointer touch-manipulation flex-col justify-between gap-2 rounded-2xl p-3.5 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                   selected ? 'mint-option-card-active' : 'mint-option-card'
                 }`}
               >
@@ -145,7 +145,7 @@ export function AudioDenoiseTabPanel({
                     <span
                       className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${
                         selected
-                          ? 'bg-[#14A085] text-white'
+                          ? 'bg-[#0D6E5D] text-white'
                           : 'bg-[#E8FFF5] text-[#0D6E5D] ring-1 ring-[#B5F5DB]'
                       }`}
                     >
@@ -300,7 +300,7 @@ export function AudioDenoiseTabPanel({
                 aria-label="Aktifkan Noise Gate Bungkam Angin di Jeda"
                 disabled={disabled}
                 onClick={() => updateCustomParam({ noiseGate: !options.noiseGate })}
-                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
                   options.noiseGate
                     ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
                     : 'bg-[#B5F5DB]'
@@ -334,7 +334,7 @@ export function AudioDenoiseTabPanel({
                 onClick={() =>
                   updateCustomParam({ twoStageWindReduction: !options.twoStageWindReduction })
                 }
-                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
                   options.twoStageWindReduction
                     ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
                     : 'bg-[#B5F5DB]'
@@ -383,7 +383,7 @@ export function AudioDenoiseTabPanel({
               aria-label="Aktifkan Jernihkan Vokal Voice Clarity EQ"
               disabled={disabled}
               onClick={() => updateOption({ voiceClarity: !options.voiceClarity })}
-              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
                 options.voiceClarity
                   ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
                   : 'bg-[#B5F5DB]'
@@ -415,7 +415,7 @@ export function AudioDenoiseTabPanel({
               aria-label="Aktifkan Ratakan Volume Auto Leveling"
               disabled={disabled}
               onClick={() => updateOption({ autoLeveling: !options.autoLeveling })}
-              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-50 ${
+              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50 ${
                 options.autoLeveling
                   ? 'bg-gradient-to-r from-[#2EC7A4] to-[#14A085]'
                   : 'bg-[#B5F5DB]'
@@ -449,7 +449,7 @@ export function AudioDenoiseTabPanel({
                   type="button"
                   disabled={disabled}
                   onClick={() => updateOption({ volumePercent: 100 })}
-                  className="cursor-pointer text-[11px] font-semibold text-[#0D6E5D] underline underline-offset-2 hover:text-[#0D2B24] disabled:opacity-50"
+                  className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center rounded-lg px-2.5 text-xs font-semibold text-[#0D6E5D] underline underline-offset-2 hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
                 >
                   Reset 100%
                 </button>
@@ -514,7 +514,7 @@ export function AudioDenoiseTabPanel({
                 whileHover={!disabled ? { y: -2 } : undefined}
                 whileTap={!disabled ? { scale: 0.98 } : undefined}
                 transition={CARD_SPRING}
-                className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2.5 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                className={`flex cursor-pointer touch-manipulation flex-col justify-between gap-2.5 rounded-2xl p-4 text-left transition-[border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                   selected ? 'mint-option-card-active' : 'mint-option-card'
                 }`}
               >
@@ -596,8 +596,8 @@ export function AudioDenoiseTabPanel({
         </p>
 
         {/* [UX #23] Lipat detail filter teknis ke accordion default tertutup agar tampilan tenang */}
-        <details className="rounded-xl border border-[#E2F3EC] bg-[#F7FFFC] px-3.5 py-2.5 text-xs text-[#4A6B63]">
-          <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 font-semibold text-[#0D6E5D] select-none hover:text-[#0D2B24]">
+        <details className="rounded-xl border border-[#E2F3EC] bg-[#F7FFFC] px-3.5 py-2 text-xs text-[#4A6B63]">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded-lg font-semibold text-[#0D6E5D] select-none hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2">
             <span>Lihat Detail Filter Teknis</span>
             <span className="text-[11px] text-[#4A6B63]">({afChain.length} filter)</span>
           </summary>
@@ -608,7 +608,7 @@ export function AudioDenoiseTabPanel({
                 type="button"
                 onClick={() => void handleCopyFilterChain()}
                 aria-label="Salin rantai filter audio"
-                className="mint-secondary-btn inline-flex min-h-9 shrink-0 cursor-pointer touch-manipulation items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085]"
+                className="mint-secondary-btn inline-flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
               >
                 {copiedChain ? (
                   <span className="text-[#0D6E5D]">Tersalin</span>

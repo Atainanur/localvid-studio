@@ -51,6 +51,8 @@ const CTA_SPRING = {
 
 interface UploadZoneProps {
   selectedVideo: SelectedVideo | null
+  /** [BUG-5R-05] Nama file asli yang diunggah pengguna (kartu upload tidak pernah menampilkan nama branded output) */
+  originalFileName?: string | null
   batchItems: readonly BatchQueueItem[]
   batchPreValidationMap?: ReadonlyMap<string, string>
   batchAppliedHistory?: readonly BatchAppliedHistoryEntry[]
@@ -102,6 +104,7 @@ function getBatchStatusBadge(status: BatchItemStatus, progress: number) {
 
 export function UploadZone({
   selectedVideo,
+  originalFileName,
   batchItems,
   batchPreValidationMap,
   batchAppliedHistory = [],
@@ -287,7 +290,7 @@ export function UploadZone({
               disabled={disabled}
               whileTap={!disabled ? { scale: 0.98 } : undefined}
               transition={CTA_SPRING}
-              className="mint-cta-btn mt-6 inline-flex min-h-12 w-full cursor-pointer touch-manipulation items-center justify-center gap-2.5 rounded-2xl px-7 py-3 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed sm:w-auto sm:text-base"
+              className="mint-cta-btn mt-6 inline-flex min-h-12 w-full cursor-pointer touch-manipulation items-center justify-center gap-2.5 rounded-2xl px-7 py-3 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed sm:w-auto sm:text-base"
             >
               <FileVideo aria-hidden="true" className="h-5 w-5" />
               <span>Pilih Video</span>
@@ -342,7 +345,7 @@ export function UploadZone({
                   type="button"
                   onClick={openAddMorePicker}
                   disabled={disabled || isBatchRunning}
-                  className="mint-secondary-btn inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                  className="mint-secondary-btn inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
                 >
                   <Plus aria-hidden="true" className="h-4 w-4" />
                   <span>Tambah Video</span>
@@ -426,7 +429,7 @@ export function UploadZone({
                       <span
                         className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-xs font-extrabold ${
                           item.status === 'processing'
-                            ? 'bg-[#14A085] text-white'
+                            ? 'bg-[#0D6E5D] text-white'
                             : item.status === 'error'
                               ? 'bg-rose-600 text-white'
                               : 'bg-[#B5F5DB] text-[#0D6E5D]'
@@ -439,9 +442,9 @@ export function UploadZone({
                         <div className="flex flex-wrap items-center gap-1.5">
                           <p
                             className="min-w-0 flex-1 truncate text-xs font-bold text-[#0D2B24] sm:text-sm"
-                            title={item.file.name}
+                            title={item.originalFileName}
                           >
-                            {item.file.name}
+                            {item.originalFileName}
                           </p>
                           <span
                             className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[10px] font-bold ring-1 ${badge.className}`}
@@ -487,9 +490,9 @@ export function UploadZone({
                       type="button"
                       disabled={disabled || isBatchRunning}
                       onClick={() => onRemoveBatchItem(item.id)}
-                      aria-label={`Hapus Video #${item.index} (${item.file.name}) dari antrean`}
+                      aria-label={`Hapus Video #${item.index} (${item.originalFileName}) dari antrean`}
                       title={`Hapus Video #${item.index}`}
-                      className="inline-flex min-h-11 min-w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-rose-200/80 bg-rose-50/50 text-rose-600 transition-colors hover:border-rose-300 hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="inline-flex min-h-11 min-w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-rose-200/80 bg-rose-50/50 text-rose-600 transition-colors hover:border-rose-300 hover:bg-rose-100 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <X aria-hidden="true" className="h-4 w-4" />
                     </button>
@@ -543,9 +546,9 @@ export function UploadZone({
 
                 <h2
                   className="mt-1.5 truncate text-base font-bold text-[#0D2B24]"
-                  title={selectedVideo!.name}
+                  title={originalFileName || selectedVideo!.name}
                 >
-                  {selectedVideo!.name}
+                  {originalFileName || selectedVideo!.name}
                 </h2>
 
                 <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs text-[#4A6B63]">
@@ -583,7 +586,7 @@ export function UploadZone({
                 onClick={openAddMorePicker}
                 disabled={disabled}
                 title={`Tambah video ke-2 atau lebih untuk Mode Antrean (maks ${maxBatchCount} video)`}
-                className="mint-secondary-btn inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                className="mint-secondary-btn inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
               >
                 <Plus aria-hidden="true" className="h-4 w-4" />
                 <span>Tambah Video</span>
@@ -592,7 +595,7 @@ export function UploadZone({
                 type="button"
                 onClick={openFilePicker}
                 disabled={disabled}
-                className="mint-secondary-btn inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                className="mint-secondary-btn inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
               >
                 <Replace aria-hidden="true" className="h-4 w-4" />
                 <span>Ganti Video</span>
@@ -635,7 +638,7 @@ export function UploadZone({
                           disabled={disabled}
                           onClick={() => onSelectStepTab(step.tabId)}
                           title={`Buka tab ${step.tabLabel} (Langkah ke-${idx + 1}: ${step.summary})`}
-                          className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1 rounded-l-full py-1 pl-3 pr-1.5 font-semibold transition-colors hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:cursor-not-allowed disabled:opacity-60"
+                          className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1 rounded-l-full py-1 pl-3 pr-1.5 font-semibold transition-colors hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           <span>{step.tabLabel}</span>
                         </button>

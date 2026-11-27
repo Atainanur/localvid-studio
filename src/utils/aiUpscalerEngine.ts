@@ -57,12 +57,19 @@ export interface RunAiUpscaleResult {
 
 const ORT_WASM_CDN_FALLBACK_VERSION = '1.31.1'
 const MODEL_FETCH_TIMEOUT_MS = 12000
+const MODEL_PREP_HEARTBEAT_AFTER_MS = 45_000
 const SEEK_TIMEOUT_MS = 3500
 const DEFAULT_DYNAMIC_TILE_SIZE = 192
 const DYNAMIC_TILE_OVERLAP = 8
 const MAX_INPUT_SIDE_BEFORE_TILING = 256
 
 const modelBufferCache = new Map<string, Uint8Array>()
+
+function formatLogTimestamp(): string {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+}
 
 /**
  * Menghapus seluruh cache buffer model ONNX di memori (dipanggil saat pembatalan atau terminate)
@@ -986,7 +993,7 @@ async function downloadModelBytesWithTimeout(
 
   try {
     onLog(
-      `[LocalVid AI] Mengunduh model ONNX (timeout ${MODEL_FETCH_TIMEOUT_MS / 1000} dtk) dari ${modelUrl}...`,
+      `[${formatLogTimestamp()}] [LocalVid AI] [model-prep] Memulai unduhan model ONNX (timeout ${MODEL_FETCH_TIMEOUT_MS / 1000} dtk) dari ${modelUrl}...`,
     )
 
     const response = await fetch(modelUrl, {
@@ -1014,7 +1021,7 @@ async function downloadModelBytesWithTimeout(
     modelBufferCache.set(modelUrl, bytes)
 
     onLog(
-      `[LocalVid AI] Model ONNX berhasil diunduh (${(bytes.byteLength / (1024 * 1024)).toFixed(2)} MB).`,
+      `[${formatLogTimestamp()}] [LocalVid AI] [model-prep] Selesai unduh model ONNX (${(bytes.byteLength / (1024 * 1024)).toFixed(2)} MB).`,
     )
     return bytes
   } catch (err) {
@@ -1182,7 +1189,8 @@ async function createOnnxWebGpuEnhancer(
   const modelBytes = await downloadModelBytesWithTimeout(modelUrl, signal, onLog)
   checkAborted(signal)
 
-  onLog('[LocalVid AI] Menginisialisasi sesi ONNX WebGPU...')
+  onLog(`[${formatLogTimestamp()}] [LocalVid AI] [model-prep] Memulai inisialisasi sesi ONNX WebGPU...`)
+  const initStartedAt = performance.now()
   const session = await ort.InferenceSession.create(modelBytes, {
     executionProviders: ['webgpu'],
     graphOptimizationLevel: 'all',
@@ -1190,7 +1198,7 @@ async function createOnnxWebGpuEnhancer(
 
   const spec = inspectModelSpec(session)
   onLog(
-    `[LocalVid AI] Sesi ONNX WebGPU siap • Input "${spec.inputName}" (${spec.channels}-ch, ${spec.inputType}${
+    `[${formatLogTimestamp()}] [LocalVid AI] [model-prep] Sesi ONNX WebGPU siap dalam ${((performance.now() - initStartedAt) / 1000).toFixed(1)} dtk • Input "${spec.inputName}" (${spec.channels}-ch, ${spec.inputType}${
       spec.fixedWidth && spec.fixedHeight
         ? `, fixed ${spec.fixedWidth}×${spec.fixedHeight}`
         : ', dynamic tiled'
@@ -1512,68 +1520,64 @@ export async function runAiUpscalePipeline({
       percent: 8,
     })
 
-    const hasNavigatorGpu = typeof navigator !== 'undefined' && 'gpu' in navigator
-
-    if (settings.enginePreference === 'webgl2-shader') {
-      enhancer = createWebGl2ShaderEnhancer(
-        srcW,
-        srcH,
-        targetDims.width,
-        targetDims.height,
-        onLog,
-      )
-      onLog(`[LocalVid AI] Mesin aktif: ${enhancer.backendName}.`)
-    } else if (settings.enginePreference === 'webgpu-shader') {
-      enhancer = await createWebGpuShaderEnhancer(
-        srcW,
-        srcH,
-        targetDims.width,
-        targetDims.height,
-        onLog,
-      )
-      onLog(`[LocalVid AI] Mesin aktif: ${enhancer.backendName}.`)
-    } else if (!hasNavigatorGpu) {
-      // Jaga aturan keamanan lintas platform: jangan pernah import ONNX bila WebGPU tidak tersedia
-      const fallbackNotice =
-        'Browser tidak mendukung WebGPU (navigator.gpu). Menggunakan Mode Fallback WebGL2 Fast Enhance Shader tanpa memuat modul ONNX.'
-      onLog(`[LocalVid AI] ${fallbackNotice}`)
-      enhancer = createWebGl2ShaderEnhancer(
-        srcW,
-        srcH,
-        targetDims.width,
-        targetDims.height,
-        onLog,
-        fallbackNotice,
-      )
-    } else {
-      try {
-        enhancer = await createOnnxWebGpuEnhancer(
-          settings.modelUrl.trim(),
-          targetDims.width,
-          targetDims.height,
-          signal,
-          onLog,
+    // [BUG-5R-02] Bungkus seluruh fase model-prep (unduh model + init session + heartbeat) dalam try/catch terstruktur
+    let modelPrepStage = 'inisialisasi GPU/model AI'
+    let lastPrepActivityAt = Date.now()
+    const prepStartedAt = Date.now()
+    const prepHeartbeatId = window.setInterval(() => {
+      if (signal.aborted) return
+      const idleMs = Date.now() - lastPrepActivityAt
+      if (idleMs >= MODEL_PREP_HEARTBEAT_AFTER_MS) {
+        const totalSec = Math.round((Date.now() - prepStartedAt) / 1000)
+        const waitMsg = 'Model AI masih dimuat (~44 MB pada unduhan pertama), mohon tunggu...'
+        onLog(
+          `[${formatLogTimestamp()}] [LocalVid AI] [model-prep] Heartbeat (${totalSec} dtk): ${waitMsg}`,
         )
-      } catch (onnxErr) {
-        if (signal.aborted || (onnxErr instanceof DOMException && onnxErr.name === 'AbortError')) {
-          throw onnxErr
-        }
-
-        const reason =
-          onnxErr instanceof Error ? onnxErr.message : 'Model ONNX eksternal gagal dimuat.'
-        const fallbackNotice = `${reason} Beralih otomatis ke WebGPU Fast Enhance Shader lokal (bicubic + unsharp mask + contrast).`
-
-        onLog(`[LocalVid AI] ${fallbackNotice}`)
         onProgress({
           phase: 'loading-model',
-          label: 'Beralih ke WebGPU Fast Enhance Shader lokal...',
+          label: waitMsg,
           currentFrame: 0,
           totalFrames,
-          percent: 10,
-          fallbackNotice,
+          percent: 9,
         })
+      }
+    }, 5000)
 
+    const hasNavigatorGpu = typeof navigator !== 'undefined' && 'gpu' in navigator
+
+    try {
+      onLog(
+        `[${formatLogTimestamp()}] [LocalVid AI] [model-prep] Memulai persiapan mesin AI (${settings.enginePreference}).`,
+      )
+      if (settings.enginePreference === 'webgl2-shader') {
+        modelPrepStage = 'inisialisasi WebGL2 Fast Enhance Shader'
+        enhancer = createWebGl2ShaderEnhancer(
+          srcW,
+          srcH,
+          targetDims.width,
+          targetDims.height,
+          onLog,
+        )
+        lastPrepActivityAt = Date.now()
+        onLog(`[${formatLogTimestamp()}] [LocalVid AI] [model-prep] Mesin aktif: ${enhancer.backendName}.`)
+      } else if (settings.enginePreference === 'webgpu-shader') {
+        modelPrepStage = 'inisialisasi WebGPU Fast Enhance Shader'
         enhancer = await createWebGpuShaderEnhancer(
+          srcW,
+          srcH,
+          targetDims.width,
+          targetDims.height,
+          onLog,
+        )
+        lastPrepActivityAt = Date.now()
+        onLog(`[${formatLogTimestamp()}] [LocalVid AI] [model-prep] Mesin aktif: ${enhancer.backendName}.`)
+      } else if (!hasNavigatorGpu) {
+        modelPrepStage = 'inisialisasi fallback WebGL2 Fast Enhance Shader'
+        // Jaga aturan keamanan lintas platform: jangan pernah import ONNX bila WebGPU tidak tersedia
+        const fallbackNotice =
+          'Browser tidak mendukung WebGPU (navigator.gpu). Menggunakan Mode Fallback WebGL2 Fast Enhance Shader tanpa memuat modul ONNX.'
+        onLog(`[${formatLogTimestamp()}] [LocalVid AI] [model-prep] ${fallbackNotice}`)
+        enhancer = createWebGl2ShaderEnhancer(
           srcW,
           srcH,
           targetDims.width,
@@ -1581,8 +1585,66 @@ export async function runAiUpscalePipeline({
           onLog,
           fallbackNotice,
         )
-        onLog(`[LocalVid AI] Fallback siap: ${enhancer.backendName}.`)
+        lastPrepActivityAt = Date.now()
+      } else {
+        try {
+          modelPrepStage = 'unduh model & inisialisasi sesi ONNX WebGPU'
+          enhancer = await createOnnxWebGpuEnhancer(
+            settings.modelUrl.trim(),
+            targetDims.width,
+            targetDims.height,
+            signal,
+            onLog,
+          )
+          lastPrepActivityAt = Date.now()
+        } catch (onnxErr) {
+          if (signal.aborted) {
+            throw onnxErr
+          }
+
+          const reason =
+            onnxErr instanceof Error ? onnxErr.message : 'Model ONNX eksternal gagal dimuat.'
+          const fallbackNotice = `${reason} Beralih otomatis ke WebGPU Fast Enhance Shader lokal (bicubic + unsharp mask + contrast).`
+
+          lastPrepActivityAt = Date.now()
+          onLog(`[${formatLogTimestamp()}] [LocalVid AI] [model-prep] ${fallbackNotice}`)
+          onProgress({
+            phase: 'loading-model',
+            label: 'Beralih ke WebGPU Fast Enhance Shader lokal...',
+            currentFrame: 0,
+            totalFrames,
+            percent: 10,
+            fallbackNotice,
+          })
+
+          modelPrepStage = 'inisialisasi fallback WebGPU/WebGL2 Shader'
+          enhancer = await createWebGpuShaderEnhancer(
+            srcW,
+            srcH,
+            targetDims.width,
+            targetDims.height,
+            onLog,
+            fallbackNotice,
+          )
+          lastPrepActivityAt = Date.now()
+          onLog(
+            `[${formatLogTimestamp()}] [LocalVid AI] [model-prep] Fallback siap: ${enhancer.backendName}.`,
+          )
+        }
       }
+    } catch (prepErr) {
+      if (signal.aborted) {
+        throw prepErr
+      }
+      const prepReason =
+        prepErr instanceof Error && prepErr.message.trim()
+          ? prepErr.message.trim()
+          : 'Terjadi kesalahan tidak terduga saat menyiapkan model AI.'
+      const structuredMsg = `Gagal menyiapkan AI HD Upscaler (${modelPrepStage}): ${prepReason}`
+      onLog(`[${formatLogTimestamp()}] [LocalVid AI] [model-prep] ERROR: ${structuredMsg}`)
+      throw new Error(structuredMsg)
+    } finally {
+      window.clearInterval(prepHeartbeatId)
     }
 
     checkAborted(signal)
@@ -1642,7 +1704,33 @@ export async function runAiUpscalePipeline({
         srcCtx.drawImage(videoElement, 0, 0, srcW, srcH)
       }
 
-      const enhancedCanvas = await enhancer.processFrame(srcCanvas, signal)
+      if (currentFrame === 1) {
+        onLog(`[${formatLogTimestamp()}] [LocalVid AI] [model-prep] Memulai inferensi frame 1...`)
+      }
+      const firstFrameT0 = currentFrame === 1 ? performance.now() : 0
+      let enhancedCanvas: HTMLCanvasElement
+      try {
+        enhancedCanvas = await enhancer.processFrame(srcCanvas, signal)
+      } catch (inferErr) {
+        if (signal.aborted) throw inferErr
+        const reason =
+          inferErr instanceof Error && inferErr.message.trim()
+            ? inferErr.message.trim()
+            : 'Inferensi GPU gagal.'
+        const msg =
+          currentFrame === 1
+            ? `Gagal pada inferensi frame pertama AI HD Upscaler: ${reason}`
+            : `Gagal memproses frame ke-${currentFrame} AI HD Upscaler: ${reason}`
+        onLog(`[${formatLogTimestamp()}] [LocalVid AI] ERROR: ${msg}`)
+        throw new Error(msg)
+      }
+      if (currentFrame === 1) {
+        onLog(
+          `[${formatLogTimestamp()}] [LocalVid AI] [model-prep] Inferensi frame 1 selesai (${Math.round(
+            performance.now() - firstFrameT0,
+          )} ms).`,
+        )
+      }
       checkAborted(signal)
 
       const jpegBytes = await canvasToJpegUint8Array(enhancedCanvas)
@@ -1741,6 +1829,15 @@ export async function runAiUpscalePipeline({
         await ffmpeg.deleteFile(outputFileName)
       } catch {
         // Abaikan jika file parsial tidak ada
+      }
+      // [BUG-5R-01] Pastikan file input masih tersedia di MEMFS sebelum retry AAC
+      try {
+        const entries = await ffmpeg.listDir('.')
+        if (!entries.some((entry) => !entry.isDir && entry.name === inputFileName)) {
+          await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile))
+        }
+      } catch {
+        await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile))
       }
 
       assembleExit = await ffmpeg.exec(

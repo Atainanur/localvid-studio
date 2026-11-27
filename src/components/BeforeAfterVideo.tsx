@@ -234,7 +234,7 @@ export function BeforeAfterVideo({
           <button
             type="button"
             onClick={() => setMode('split')}
-            className={`inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] ${
+            className={`inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-bold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 ${
               mode === 'split'
                 ? 'bg-white text-[#0D6E5D] shadow-xs'
                 : 'text-[#4A6B63] hover:text-[#0D2B24]'
@@ -246,7 +246,7 @@ export function BeforeAfterVideo({
           <button
             type="button"
             onClick={() => setMode('side-by-side')}
-            className={`inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] ${
+            className={`inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-bold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 ${
               mode === 'side-by-side'
                 ? 'bg-white text-[#0D6E5D] shadow-xs'
                 : 'text-[#4A6B63] hover:text-[#0D2B24]'
@@ -299,7 +299,7 @@ export function BeforeAfterVideo({
           <span className="pointer-events-none absolute top-3 left-3 rounded-full bg-slate-900/90 px-2.5 py-1 text-[11px] font-bold text-white ring-1 ring-white/20">
             Before (Asli)
           </span>
-          <span className="pointer-events-none absolute top-3 right-3 rounded-full bg-[#14A085]/95 px-2.5 py-1 text-[11px] font-bold text-white ring-1 ring-white/25">
+          <span className="pointer-events-none absolute top-3 right-3 rounded-full bg-[#0D6E5D]/95 px-2.5 py-1 text-[11px] font-bold text-white ring-1 ring-white/25">
             {afterLabel}
           </span>
 
@@ -376,7 +376,7 @@ export function BeforeAfterVideo({
             type="button"
             onClick={() => void handleTogglePlay()}
             aria-label={isPlaying ? 'Jeda kedua video' : 'Putar kedua video bersamaan'}
-            className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl bg-[#14A085] text-white shadow-xs transition-[background-color,transform] duration-150 hover:bg-[#0D6E5D] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
+            className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl bg-[#0D6E5D] text-white shadow-xs transition-[background-color,transform] duration-150 hover:bg-[#0A584A] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
           >
             {isPlaying ? (
               <Pause aria-hidden="true" className="h-4 w-4 fill-current" />
@@ -389,7 +389,7 @@ export function BeforeAfterVideo({
             type="button"
             onClick={() => void handleRestart()}
             aria-label="Ulangi dari awal"
-            className="mint-secondary-btn inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
+            className="mint-secondary-btn inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
           >
             <RotateCcw aria-hidden="true" className="h-4 w-4" />
           </button>
@@ -419,7 +419,7 @@ export function BeforeAfterVideo({
           type="button"
           onClick={handleToggleMute}
           aria-label={isMuted ? 'Aktifkan suara video hasil' : 'Bisukan suara video hasil'}
-          className="mint-secondary-btn inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
+          className="mint-secondary-btn inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
         >
           {isMuted ? (
             <VolumeX aria-hidden="true" className="h-4 w-4 text-rose-600" />

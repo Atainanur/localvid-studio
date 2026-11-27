@@ -666,7 +666,7 @@ export function AudioBeforeAfterPlayer({
             </div>
             <span
               className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold text-white ${
-                effectiveSource === 'after' ? 'bg-[#14A085]' : 'bg-amber-600'
+                effectiveSource === 'after' ? 'bg-[#0D6E5D]' : 'bg-amber-700'
               }`}
             >
               <Volume2 aria-hidden="true" className="h-3.5 w-3.5" />
@@ -716,11 +716,11 @@ export function AudioBeforeAfterPlayer({
               type="button"
               disabled={!hasBeforeAudio}
               onClick={() => handleSwitchAudioSource('before')}
-              className="inline-flex cursor-pointer touch-manipulation items-center gap-2 text-left disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-2 rounded-lg px-2 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <span className="text-xs font-bold text-slate-800">Before (Audio Asli)</span>
               {effectiveSource === 'before' && (
-                <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                <span className="rounded-full bg-amber-700 px-2 py-0.5 text-[10px] font-bold text-white">
                   Aktif
                 </span>
               )}
@@ -730,7 +730,7 @@ export function AudioBeforeAfterPlayer({
               <button
                 type="button"
                 onClick={() => handleSwitchAudioSource('before')}
-                className="cursor-pointer touch-manipulation rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-700 transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
+                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-bold text-slate-700 transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
               >
                 Dengar Audio Asli
               </button>
@@ -749,7 +749,7 @@ export function AudioBeforeAfterPlayer({
               if (e.key === 'ArrowRight') seekToTime(currentTime + 1)
               if (e.key === 'ArrowLeft') seekToTime(currentTime - 1)
             }}
-            className="relative h-16 w-full cursor-pointer select-none px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500 sm:h-18"
+            className="relative h-16 w-full cursor-pointer select-none px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0D6E5D] sm:h-18"
           >
             {isDecodingWaveform ? (
               <div className="flex h-full items-center justify-center gap-2 text-xs text-slate-400">
@@ -789,11 +789,11 @@ export function AudioBeforeAfterPlayer({
             <button
               type="button"
               onClick={() => handleSwitchAudioSource('after')}
-              className="inline-flex cursor-pointer touch-manipulation items-center gap-2 text-left"
+              className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-2 rounded-lg px-2 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
             >
               <span className="text-xs font-bold text-slate-900">After (Audio Bersih)</span>
               {effectiveSource === 'after' && (
-                <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                <span className="rounded-full bg-[#0D6E5D] px-2 py-0.5 text-[10px] font-bold text-white">
                   Aktif
                 </span>
               )}
@@ -803,7 +803,7 @@ export function AudioBeforeAfterPlayer({
               <button
                 type="button"
                 onClick={() => handleSwitchAudioSource('after')}
-                className="cursor-pointer touch-manipulation rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-800 transition-colors hover:bg-emerald-100"
+                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-800 transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
               >
                 Dengar Audio Bersih
               </button>
@@ -822,7 +822,7 @@ export function AudioBeforeAfterPlayer({
               if (e.key === 'ArrowRight') seekToTime(currentTime + 1)
               if (e.key === 'ArrowLeft') seekToTime(currentTime - 1)
             }}
-            className="relative h-16 w-full cursor-pointer select-none px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600 sm:h-18"
+            className="relative h-16 w-full cursor-pointer select-none px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0D6E5D] sm:h-18"
           >
             {isDecodingWaveform ? (
               <div className="flex h-full items-center justify-center gap-2 text-xs text-emerald-700/70">
@@ -859,7 +859,7 @@ export function AudioBeforeAfterPlayer({
               type="button"
               onClick={() => void handleTogglePlay()}
               aria-label={isPlaying ? 'Jeda pemutaran' : 'Putar untuk membandingkan audio'}
-              className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl bg-emerald-600 text-white shadow-xs transition-[background-color,transform] duration-150 hover:bg-emerald-700 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
+              className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl bg-[#0D6E5D] text-white shadow-xs transition-[background-color,transform] duration-150 hover:bg-[#0A584A] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
             >
               {isPlaying ? (
                 <Pause aria-hidden="true" className="h-4 w-4 fill-current" />
@@ -872,7 +872,7 @@ export function AudioBeforeAfterPlayer({
               type="button"
               onClick={() => void handleRestart()}
               aria-label="Ulangi ke 00:00"
-              className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
+              className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
             >
               <RotateCcw aria-hidden="true" className="h-4 w-4" />
             </button>
@@ -888,7 +888,7 @@ export function AudioBeforeAfterPlayer({
               type="button"
               onClick={handleToggleMute}
               aria-label={isMuted ? 'Aktifkan suara pemutar' : 'Bisukan suara pemutar'}
-              className="inline-flex min-h-9 min-w-9 cursor-pointer touch-manipulation items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-100"
+              className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
             >
               {isMuted || playerVolume === 0 ? (
                 <VolumeX aria-hidden="true" className="h-4 w-4 text-rose-600" />
@@ -919,9 +919,9 @@ export function AudioBeforeAfterPlayer({
             type="button"
             disabled={!hasBeforeAudio}
             onClick={() => handleSwitchAudioSource('before')}
-            className={`inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 disabled:cursor-not-allowed disabled:opacity-45 sm:text-sm ${
+            className={`inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45 sm:text-sm ${
               effectiveSource === 'before'
-                ? 'border-amber-500 bg-amber-500 text-white shadow-sm'
+                ? 'border-amber-700 bg-amber-700 text-white shadow-sm'
                 : 'border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50'
             }`}
           >
@@ -932,9 +932,9 @@ export function AudioBeforeAfterPlayer({
           <button
             type="button"
             onClick={() => handleSwitchAudioSource('after')}
-            className={`inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 sm:text-sm ${
+            className={`inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 sm:text-sm ${
               effectiveSource === 'after'
-                ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
+                ? 'border-[#0D6E5D] bg-[#0D6E5D] text-white shadow-sm'
                 : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:bg-emerald-50'
             }`}
           >

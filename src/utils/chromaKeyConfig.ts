@@ -72,6 +72,8 @@ export interface ChromaTemplateDefinition {
   badge: string
   description: string
   swatchStyle: string
+  /** [BUG-5R-19] Label kecil penjelas warna kunci chroma (mis. "Warna kunci") */
+  swatchLabel?: string
   isInstant: boolean
 }
 
@@ -135,6 +137,7 @@ export const CHROMA_TEMPLATES: readonly ChromaTemplateDefinition[] = [
     description:
       'Hapus latar di belakang orang menjadi hijau solid standar CapCut, Canva, dan Premiere dengan masking bersih anti berkedip.',
     swatchStyle: 'bg-[#00FF00]',
+    swatchLabel: 'Warna kunci',
     isInstant: true,
   },
   {
@@ -145,6 +148,7 @@ export const CHROMA_TEMPLATES: readonly ChromaTemplateDefinition[] = [
     description:
       'Latar biru solid untuk subjek manusia yang memakai pakaian atau properti berwarna hijau.',
     swatchStyle: 'bg-[#0000FF]',
+    swatchLabel: 'Warna kunci',
     isInstant: true,
   },
   {
@@ -154,7 +158,8 @@ export const CHROMA_TEMPLATES: readonly ChromaTemplateDefinition[] = [
     badge: 'Semua Objek • #00FF00 • Keyframe 3x',
     description:
       'Pisahkan benda mati, produk jualan, kendaraan, atau hewan menjadi hijau solid siap chroma key dengan akselerasi Keyframe 3x.',
-    swatchStyle: 'bg-gradient-to-br from-[#00FF00] via-emerald-400 to-teal-500',
+    swatchStyle: 'bg-[#00FF00]',
+    swatchLabel: 'Warna kunci',
     isInstant: true,
   },
   {
@@ -164,7 +169,7 @@ export const CHROMA_TEMPLATES: readonly ChromaTemplateDefinition[] = [
     badge: 'Semua Objek • #FFFFFF • Keyframe 3x',
     description:
       'Ganti latar benda atau produk menjadi putih bersih ala studio untuk konten promosi dan e-commerce.',
-    swatchStyle: 'bg-gradient-to-br from-white via-slate-100 to-slate-200',
+    swatchStyle: 'bg-white',
     isInstant: true,
   },
   {
@@ -174,7 +179,7 @@ export const CHROMA_TEMPLATES: readonly ChromaTemplateDefinition[] = [
     badge: 'Manusia • Blur 12px • Sinematik',
     description:
       'Buramkan latar belakang secara halus seperti lensa kamera DSLR tanpa mengganti background asli.',
-    swatchStyle: 'bg-gradient-to-br from-sky-300 via-indigo-200 to-slate-300',
+    swatchStyle: 'bg-gradient-to-br from-[#B5F5DB] via-[#E8FFF5] to-[#6DE7C1]',
     isInstant: true,
   },
 ]
@@ -210,6 +215,7 @@ export const CHROMA_BG_MODES: ReadonlyArray<{
   badge: string
   description: string
   swatchStyle: string
+  swatchLabel?: string
 }> = [
   {
     id: 'green-screen',
@@ -218,6 +224,7 @@ export const CHROMA_BG_MODES: ReadonlyArray<{
     description:
       'Latar hijau solid standar chroma key yang siap langsung dipakai di CapCut, Canva, Premiere, dan After Effects.',
     swatchStyle: 'bg-[#00FF00]',
+    swatchLabel: 'Warna kunci',
   },
   {
     id: 'blue-screen',
@@ -226,6 +233,7 @@ export const CHROMA_BG_MODES: ReadonlyArray<{
     description:
       'Latar biru solid ideal apabila subjek mengenakan pakaian atau aksesoris berwarna hijau.',
     swatchStyle: 'bg-[#0000FF]',
+    swatchLabel: 'Warna kunci',
   },
   {
     id: 'custom-color',
@@ -233,7 +241,7 @@ export const CHROMA_BG_MODES: ReadonlyArray<{
     badge: 'Color Picker',
     description:
       'Ganti background menjadi warna studio pilihan Anda (Putih, Hitam, Abu Studio, Magenta, atau warna bebas).',
-    swatchStyle: 'bg-gradient-to-br from-rose-400 via-amber-300 to-sky-400',
+    swatchStyle: 'bg-gradient-to-br from-rose-400 via-amber-300 to-emerald-400',
   },
   {
     id: 'blur',
@@ -241,7 +249,7 @@ export const CHROMA_BG_MODES: ReadonlyArray<{
     badge: 'Efek DSLR',
     description:
       'Pertahankan latar belakang asli video tetapi buramkan secara halus di belakang subjek utama.',
-    swatchStyle: 'bg-gradient-to-br from-slate-300 via-sky-200 to-indigo-300',
+    swatchStyle: 'bg-gradient-to-br from-[#B5F5DB] via-[#E8FFF5] to-[#6DE7C1]',
   },
 ]
 
@@ -574,6 +582,13 @@ export function estimateChromaOutputSize(
   const bgComplexityFactor = options.bgMode === 'blur' ? 1.15 : 0.92
   const fpsFactor = Math.pow(options.targetFps / 24, 0.45)
   const maxRateKbps = computeChromaSmartMaxRateKbps(options, sizeBytes, durationSec)
+  const upperClampMB = options.smartSizeCap
+    ? Math.max(originalMB * 2.5, 1.2)
+    : Math.max(originalMB * 3.5, 1.8)
+  const contextNote =
+    options.bgMode === 'blur'
+      ? 'Latar blur bokeh menyimpan detail latar sehingga ukuran wajar ~1-2x ukuran asli.'
+      : 'Latar warna solid umumnya lebih ringkas; ukuran wajar ~0.8-2x ukuran asli.'
 
   if (durationSec && Number.isFinite(durationSec) && durationSec > 0) {
     const effectiveDur = Math.min(
@@ -594,9 +609,13 @@ export function estimateChromaOutputSize(
 
     const midMB =
       ((((effectiveVideoKbps + estAudioKbps) * effectiveDur) / 8192) * 1.05) * adaptiveFactor
-    const spread = isShortClip ? 0.32 : 0.22
-    const minEst = Number(Math.max(0.1, midMB * (1 - spread)).toFixed(2))
-    const maxEst = Number(Math.max(minEst, midMB * (1 + spread)).toFixed(2))
+    const spread = isShortClip ? 0.28 : 0.2
+    const vbvMaxCapMB = maxRateKbps
+      ? Math.max(0.35, (((maxRateKbps * 1.2 + estAudioKbps) * effectiveDur) / 8192) * 1.06)
+      : upperClampMB
+    const maxCap = Math.min(upperClampMB, vbvMaxCapMB)
+    const maxEst = Number(Math.max(0.15, Math.min(maxCap, midMB * (1 + spread))).toFixed(2))
+    const minEst = Number(Math.max(0.1, Math.min(maxEst, midMB * (1 - spread))).toFixed(2))
 
     return {
       originalMB,
@@ -605,6 +624,7 @@ export function estimateChromaOutputSize(
       maxRateKbps,
       isOver3x: maxEst > originalMB * 3,
       calibrationSamples: calibration.samples,
+      note: contextNote,
     }
   }
 
@@ -612,8 +632,8 @@ export function estimateChromaOutputSize(
     0.1,
     originalMB * pixelRatio * bgComplexityFactor * (options.smartSizeCap ? 1.15 : 2.1) * adaptiveFactor,
   )
-  const minEst = Number(Math.max(0.1, midMB * 0.7).toFixed(2))
-  const maxEst = Number(Math.max(minEst, midMB * 1.3).toFixed(2))
+  const maxEst = Number(Math.max(0.15, Math.min(upperClampMB, midMB * 1.25)).toFixed(2))
+  const minEst = Number(Math.max(0.1, Math.min(maxEst, midMB * 0.72)).toFixed(2))
   return {
     originalMB,
     minEstimatedMB: minEst,
@@ -621,6 +641,7 @@ export function estimateChromaOutputSize(
     maxRateKbps,
     isOver3x: maxEst > originalMB * 3,
     calibrationSamples: calibration.samples,
+    note: contextNote,
   }
 }
 

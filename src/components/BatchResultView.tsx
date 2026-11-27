@@ -86,7 +86,11 @@ export function BatchResultView({
   const [shareStatusMessage, setShareStatusMessage] = useState<string | null>(null)
   const [downloadAllStatus, setDownloadAllStatus] = useState<string | null>(null)
   const [isDownloadingAll, setIsDownloadingAll] = useState(false)
+  const [downloadedItemIds, setDownloadedItemIds] = useState<Record<string, boolean>>({})
+  const [singleDownloadToast, setSingleDownloadToast] = useState<string | null>(null)
   const downloadAbortRef = useRef<AbortController | null>(null)
+  const singleToastTimerRef = useRef<number | null>(null)
+  const itemDownloadTimersRef = useRef<Map<string, number>>(new Map())
 
   const completedItems = useMemo(
     () => items.filter((item) => item.status === 'done' && item.result && item.outputFile),
@@ -147,12 +151,53 @@ export function BatchResultView({
     }
   }, [openPreviewItemId, feature, items])
 
-  // Batalkan staggered download jika komponen unmount
+  // Batalkan staggered download & bersihkan timer feedback unduh jika komponen unmount
   useEffect(() => {
+    const timersMap = itemDownloadTimersRef.current
     return () => {
       downloadAbortRef.current?.abort()
+      if (singleToastTimerRef.current !== null) {
+        window.clearTimeout(singleToastTimerRef.current)
+      }
+      for (const t of timersMap.values()) {
+        window.clearTimeout(t)
+      }
+      timersMap.clear()
     }
   }, [])
+
+  const handlePerCardDownload = (
+    itemId: string,
+    itemIndex: number,
+    url: string,
+    fileName: string,
+    isAudio: boolean,
+  ) => {
+    triggerSingleFileDownload(url, fileName)
+    setDownloadedItemIds((prev) => ({ ...prev, [itemId]: true }))
+    const prevItemTimer = itemDownloadTimersRef.current.get(itemId)
+    if (prevItemTimer !== undefined) {
+      window.clearTimeout(prevItemTimer)
+    }
+    const nextItemTimer = window.setTimeout(() => {
+      setDownloadedItemIds((prev) => {
+        const copy = { ...prev }
+        delete copy[itemId]
+        return copy
+      })
+      itemDownloadTimersRef.current.delete(itemId)
+    }, 2600)
+    itemDownloadTimersRef.current.set(itemId, nextItemTimer)
+
+    setSingleDownloadToast(`Unduhan ${isAudio ? 'Audio' : 'Video'} #${itemIndex} dimulai`)
+    if (singleToastTimerRef.current !== null) {
+      window.clearTimeout(singleToastTimerRef.current)
+    }
+    singleToastTimerRef.current = window.setTimeout(() => {
+      setSingleDownloadToast(null)
+      singleToastTimerRef.current = null
+    }, 3000)
+  }
 
   const handleShareAllMobile = async () => {
     if (!canWebShareAll || isSharingAll) return
@@ -249,8 +294,8 @@ export function BatchResultView({
           </div>
         </div>
 
-        {/* Rekap kumulatif fitur terpasang di semua video (hanya tampil jika lebih dari 1 tahap berantai) */}
-        {cumulativeSteps.length > 1 && (
+        {/* [BUG-5R-08] Rekap kumulatif fitur terpasang (satu sumber kebenaran batchCumulativeSteps) */}
+        {cumulativeSteps.length >= 1 && (
           <div className="rounded-xl border border-[#B5F5DB] bg-white px-3.5 py-2.5">
             <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin] [scrollbar-color:#6de7c1_transparent]">
               <span className="mr-0.5 shrink-0 whitespace-nowrap text-[11px] font-bold text-[#0D6E5D]">
@@ -328,7 +373,7 @@ export function BatchResultView({
                   onClick={() => void handleShareAllMobile()}
                   whileTap={!isSharingAll ? { scale: 0.98 } : undefined}
                   transition={CARD_SPRING}
-                  className="mint-cta-btn inline-flex min-h-13 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
+                  className="mint-cta-btn inline-flex min-h-13 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
                 >
                   {isSharingAll ? (
                     <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />
@@ -346,7 +391,7 @@ export function BatchResultView({
                   onClick={() => void handleStaggeredDownloadAll()}
                   whileTap={!isDownloadingAll ? { scale: 0.98 } : undefined}
                   transition={CARD_SPRING}
-                  className="mint-secondary-btn inline-flex min-h-12 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-5 py-2.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-sm"
+                  className="mint-secondary-btn inline-flex min-h-12 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-5 py-2.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-sm"
                 >
                   {isDownloadingAll ? (
                     <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
@@ -365,7 +410,7 @@ export function BatchResultView({
                 onClick={() => void handleStaggeredDownloadAll()}
                 whileTap={!isDownloadingAll ? { scale: 0.98 } : undefined}
                 transition={CARD_SPRING}
-                className="mint-cta-btn inline-flex min-h-13 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
+                className="mint-cta-btn inline-flex min-h-13 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
               >
                 {isDownloadingAll ? (
                   <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />
@@ -397,6 +442,18 @@ export function BatchResultView({
         </div>
       )}
 
+      {/* [BUG-5R-21] Toast singkat umpan balik unduhan per-kartu */}
+      {singleDownloadToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="animate-lv-fade-up flex items-center gap-2 rounded-xl border border-[#6DE7C1] bg-[#E8FFF5] px-3.5 py-2 text-xs font-bold text-[#0D6E5D]"
+        >
+          <Download aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#0D6E5D]" />
+          <span>{singleDownloadToast}</span>
+        </div>
+      )}
+
       {/* 3. Kartu Daftar Hasil Per Video (Unduh 1 per 1 + Pratinjau Ringan maks 1 terbuka) */}
       <div className="flex flex-col gap-3">
         {items.map((item) => {
@@ -404,9 +461,10 @@ export function BatchResultView({
           const isDone = item.status === 'done' && res !== null
           const isAudioResult = isDone && isAudioOnlyResultFile(res)
           const isPreviewOpen = openPreviewItemId === item.id
+          const isItemDownloaded = Boolean(downloadedItemIds[item.id])
           const nameParts = isDone
             ? splitFileNameAndExt(res.fileName)
-            : splitFileNameAndExt(item.file.name)
+            : splitFileNameAndExt(item.originalFileName)
           const itemSavingsPct =
             isDone && res.originalSizeBytes > 0
               ? ((res.originalSizeBytes - res.outputSizeBytes) / res.originalSizeBytes) * 100
@@ -442,12 +500,12 @@ export function BatchResultView({
                   </span>
 
                   <div className="min-w-0 flex-1">
-                    {/* Nama File Bermerek Lengkap + Badge Ekstensi (tidak pernah terpotong) */}
+                    {/* [BUG-5R-20] Nama File Bermerek + Badge Ekstensi tetap 1 baris (flex-nowrap + truncate) */}
                     <div
-                      className="flex flex-wrap items-center gap-1.5"
-                      title={isDone ? res.fileName : item.file.name}
+                      className="flex flex-nowrap items-center gap-1.5"
+                      title={isDone ? res.fileName : item.originalFileName}
                     >
-                      <span className="min-w-0 break-words text-xs font-bold leading-snug text-[#0D2B24] line-clamp-2 sm:text-sm">
+                      <span className="min-w-0 truncate text-xs font-bold leading-snug text-[#0D2B24] sm:text-sm">
                         {nameParts.baseName}
                       </span>
                       {nameParts.extLabel && (
@@ -520,7 +578,7 @@ export function BatchResultView({
                       onClick={() =>
                         setOpenPreviewItemId((prev) => (prev === item.id ? null : item.id))
                       }
-                      className={`inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] sm:flex-initial ${
+                      className={`inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] sm:flex-initial ${
                         isPreviewOpen
                           ? 'border border-[#14A085] bg-[#E8FFF5] text-[#0D6E5D]'
                           : 'mint-secondary-btn'
@@ -541,14 +599,28 @@ export function BatchResultView({
 
                     <button
                       type="button"
-                      onClick={() => triggerSingleFileDownload(res.url, res.fileName)}
-                      className="inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-[#6DE7C1] bg-[#E8FFF5] px-4 py-2 text-xs font-bold text-[#0D6E5D] transition-colors hover:border-[#14A085] hover:bg-[#B5F5DB]/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-1 sm:flex-initial"
+                      onClick={() =>
+                        handlePerCardDownload(
+                          item.id,
+                          item.index,
+                          res.url,
+                          res.fileName,
+                          isAudioResult,
+                        )
+                      }
+                      className={`inline-flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border px-4 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 sm:flex-initial ${
+                        isItemDownloaded
+                          ? 'border-[#0D6E5D] bg-[#0D6E5D] text-white'
+                          : 'border-[#6DE7C1] bg-[#E8FFF5] text-[#0D6E5D] hover:border-[#14A085] hover:bg-[#B5F5DB]/70'
+                      }`}
                     >
                       <Download aria-hidden="true" className="h-4 w-4" />
                       <span>
-                        {isAudioResult
-                          ? `Unduh Audio #${item.index} (.MP3)`
-                          : `Unduh Video #${item.index}`}
+                        {isItemDownloaded
+                          ? 'Terunduh'
+                          : isAudioResult
+                            ? `Unduh Audio #${item.index} (.MP3)`
+                            : `Unduh Video #${item.index}`}
                       </span>
                     </button>
                   </div>
@@ -608,21 +680,32 @@ export function BatchResultView({
       <div className="flex flex-col gap-3 border-t border-[#E2F3EC] pt-4">
         <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            {completedVideoItems.length > 0 && !allCompletedAreAudio && (
+            {completedVideoItems.length > 0 && !allCompletedAreAudio ? (
               <button
                 type="button"
                 onClick={onContinueBatchWithOutputs}
-                className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 sm:text-sm"
+                className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 sm:text-sm"
               >
                 <Layers aria-hidden="true" className="h-4 w-4" />
                 <span>Lanjut Edit {completedVideoItems.length} Hasil ke Fitur Lain</span>
               </button>
-            )}
+            ) : allCompletedAreAudio && completedItems.length > 0 ? (
+              <button
+                type="button"
+                disabled
+                aria-disabled="true"
+                title="Ekspor MP3 tidak dapat dilanjutkan ke fitur video, pilih mode Video Copy"
+                className="inline-flex min-h-11 cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-[#E2F3EC] bg-[#F4FFFA] px-4 py-2.5 text-xs font-bold text-[#4A6B63] opacity-65 sm:text-sm"
+              >
+                <Layers aria-hidden="true" className="h-4 w-4" />
+                <span>Lanjut Edit (Khusus Video Copy)</span>
+              </button>
+            ) : null}
 
             <button
               type="button"
               onClick={onEditSettings}
-              className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 sm:text-sm"
+              className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 sm:text-sm"
             >
               <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />
               <span>Proses Ulang / Ubah Setelan</span>
@@ -632,7 +715,7 @@ export function BatchResultView({
           <button
             type="button"
             onClick={onChangeAllVideos}
-            className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 sm:text-sm"
+            className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 sm:text-sm"
           >
             <FolderSync aria-hidden="true" className="h-4 w-4" />
             <span>Ganti Semua Video</span>
@@ -650,11 +733,13 @@ export function BatchResultView({
           </p>
         )}
 
-        {/* [BUG-4R-18] Penjelasan tenang bila seluruh hasil batch berupa audio (.MP3) */}
+        {/* [BUG-4R-18 & BUG-5R-13] Penjelasan tenang bila seluruh hasil batch berupa audio (.MP3) */}
         {allCompletedAreAudio && completedItems.length > 0 && (
           <p className="flex items-center gap-1.5 text-xs font-medium text-[#4A6B63]">
-            <Info aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#14A085]" />
-            <span>Hasil berupa audio (.MP3) tidak dapat dilanjutkan ke fitur edit video.</span>
+            <Info aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#0D6E5D]" />
+            <span>
+              Ekspor MP3 tidak dapat dilanjutkan ke fitur video, pilih mode Video Copy.
+            </span>
           </p>
         )}
       </div>

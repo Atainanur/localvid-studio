@@ -212,13 +212,19 @@ export default function App() {
     isMobile,
     crossOriginIsolated,
     error: engineError,
+    workerFailureCount,
+    workerCrashLoopDetected,
+    switchToSingleThreadMode,
+    resetWorkerFailureGuard,
     loadEngine,
     setExpectedDuration,
     setPinnedCommand,
     setPinnedDurationLine,
     setPinnedFinalSummary,
+    reportExternalError,
     exec,
     writeInputFile,
+    ensureInputFile,
     readOutputAsBlobURL,
     registerTempFile,
     cleanupMemory,
@@ -244,6 +250,8 @@ export default function App() {
 
   // State file, snapshot pipeline non-destruktif, antrean multi-video (Batch Queue), & tab fitur
   const [originalSourceFile, setOriginalSourceFile] = useState<File | null>(null)
+  /** [BUG-5R-05] Nama file asli yang diunggah pengguna (terpisah dari nama file hasil branded) */
+  const [originalFileName, setOriginalFileName] = useState<string | null>(null)
   const [selectedVideo, setSelectedVideo] = useState<SelectedVideo | null>(null)
   const [pipelineSteps, setPipelineSteps] = useState<EditPipelineStep[]>([])
   const [batchItems, setBatchItems] = useState<BatchQueueItem[]>([])
@@ -264,6 +272,10 @@ export default function App() {
   const [viewedResultBeforeUrl, setViewedResultBeforeUrl] = useState<string | null>(null)
   const [pendingRemoveStepId, setPendingRemoveStepId] = useState<string | null>(null)
   const [pendingResetAll, setPendingResetAll] = useState(false)
+  /** [BUG-5R-06] Konfirmasi inline untuk Hapus Semua, Ganti Semua Video, dan hapus video di kartu upload */
+  const [pendingClearConfirm, setPendingClearConfirm] = useState<
+    'single-delete' | 'batch-clear-all' | 'batch-change-all' | null
+  >(null)
   const [undoRemovedStep, setUndoRemovedStep] = useState<UndoRemovedStepState | null>(null)
   const [chainNotice, setChainNotice] = useState<string | null>(null)
   const [sourcePreviewUrl, setSourcePreviewUrl] = useState<string | null>(null)
@@ -653,7 +665,7 @@ export default function App() {
 
   const loadPipelineDisplayVideo = async (
     file: File,
-    options: { resetOriginal: boolean; syncCompress?: boolean },
+    options: { resetOriginal: boolean; syncCompress?: boolean; preserveOriginalName?: string },
   ) => {
     const reqId = metadataReqIdRef.current + 1
     metadataReqIdRef.current = reqId
@@ -661,11 +673,15 @@ export default function App() {
     setExpectedDuration(null)
     if (options.resetOriginal) {
       setOriginalSourceFile(file)
+      setOriginalFileName(options.preserveOriginalName ?? file.name)
       setPipelineSteps([])
       setPendingRemoveStepId(null)
       setPendingResetAll(false)
+      setPendingClearConfirm(null)
       setUndoRemovedStep(null)
       lastProcessedWasAudioOnlyRef.current = false
+    } else if (options.preserveOriginalName) {
+      setOriginalFileName(options.preserveOriginalName)
     }
 
     const extension = getFileExtension(file.name) || 'mp4'
@@ -692,10 +708,72 @@ export default function App() {
     }
   }
 
+  /**
+   * [BUG-5R-16] Mempertahankan jejak riwayat efek saat antrean batch menyusut ke 1 file
+   * (baik lewat penghapusan item antrean maupun Lanjut Edit dengan 1 hasil video).
+   */
+  const buildSinglePipelineStepsFromBatch = (
+    historyEntries: readonly BatchAppliedHistoryEntry[],
+    item: BatchQueueItem,
+    activeOutputFile: File,
+  ): EditPipelineStep[] => {
+    const fallbackMeta: VideoMetadata = item.metadata ?? {
+      duration: null,
+      width: null,
+      height: null,
+    }
+    const itemResultWithoutUrl: Omit<ProcessedVideoResult, 'url'> | null = item.result
+      ? (() => {
+          const { url: _unusedUrl, ...rest } = item.result
+          void _unusedUrl
+          return rest
+        })()
+      : null
+
+    return historyEntries.map((entry, idx) => {
+      const isLast = idx === historyEntries.length - 1
+      const syntheticResultMeta: Omit<ProcessedVideoResult, 'url'> =
+        isLast && itemResultWithoutUrl && itemResultWithoutUrl.feature === entry.tabId
+          ? itemResultWithoutUrl
+          : {
+              blob: activeOutputFile,
+              fileName: activeOutputFile.name,
+              mimeType: activeOutputFile.type || 'video/mp4',
+              outputSizeBytes: activeOutputFile.size,
+              originalSizeBytes: item.file.size,
+              durationSeconds: fallbackMeta.duration,
+              feature: entry.tabId,
+              usedFallbackEncode: false,
+              summaryNote: `${entry.tabLabel} (${entry.summary})`,
+              elapsedMs: 0,
+              details: {
+                kind: 'convert',
+                sourceFormat: `.${(item.extension || 'mp4').toUpperCase()}`,
+                targetFormat: `.${(getFileExtension(activeOutputFile.name) || 'mp4').toUpperCase()}`,
+                processMode: entry.summary,
+              },
+            }
+
+      return {
+        id: `${entry.id}-single-${idx}`,
+        tabId: entry.tabId,
+        tabLabel: entry.tabLabel,
+        summary: entry.summary,
+        inputFile: item.file,
+        inputMetadata: fallbackMeta,
+        outputFile: activeOutputFile,
+        resultMeta: syntheticResultMeta,
+        optionsSnapshot: captureTabOptionsSnapshot(entry.tabId),
+        timestamp: entry.timestamp,
+      }
+    })
+  }
+
   const handleTabChange = (nextTab: FeatureTabId) => {
     if (isBusy) return
     setPendingRemoveStepId(null)
     setPendingResetAll(false)
+    setPendingClearConfirm(null)
 
     // [BUG-4R-04a] Mode Antrean Multi-Video (2+ video): pertahankan hasil batch & URL tetap hidup saat pindah tab
     if (isBatchMode) {
@@ -941,10 +1019,15 @@ export default function App() {
     dismissChainNotice()
     setPendingRemoveStepId(null)
     setPendingResetAll(false)
+    setPendingClearConfirm(null)
     lastProcessedWasAudioOnlyRef.current = false
     resetChromaSessionCaches()
     await clearCurrentResult()
-    await loadPipelineDisplayVideo(file, { resetOriginal: true, syncCompress: true })
+    await loadPipelineDisplayVideo(file, {
+      resetOriginal: true,
+      syncCompress: true,
+      preserveOriginalName: file.name,
+    })
   }
 
   const handleSelectFiles = async (files: File[]) => {
@@ -976,10 +1059,12 @@ export default function App() {
     dismissChainNotice()
     setPendingRemoveStepId(null)
     setPendingResetAll(false)
+    setPendingClearConfirm(null)
     lastProcessedWasAudioOnlyRef.current = false
     resetChromaSessionCaches()
     revokeAllBatchResultUrls()
     setOriginalSourceFile(null)
+    setOriginalFileName(null)
     setSelectedVideo(null)
     setPipelineSteps([])
     setIsReadingMetadata(false)
@@ -990,7 +1075,7 @@ export default function App() {
     await clearCurrentResult()
 
     const createdItems = validated.acceptedFiles.map((file, idx) =>
-      createBatchQueueItem(file, idx + 1),
+      createBatchQueueItem(file, idx + 1, null, file.name),
     )
     setBatchItems(createdItems)
     setBatchPreviewItemId(createdItems[0]?.id ?? null)
@@ -1006,11 +1091,18 @@ export default function App() {
   const handleAddMoreFiles = async (files: File[]) => {
     if (isBusy || files.length === 0) return
 
-    // [BUG-4R-06] Jika sudah dalam mode batch, pertahankan status & hasil item yang sudah selesai (done)
+    // [BUG-4R-06 & BUG-5R-05] Pertahankan status/hasil item yang sudah selesai serta nama file asli
     const baseItems: BatchQueueItem[] = isBatchMode
       ? batchItems
       : selectedVideo
-        ? [createBatchQueueItem(selectedVideo.file, 1, selectedVideo.metadata)]
+        ? [
+            createBatchQueueItem(
+              selectedVideo.file,
+              1,
+              selectedVideo.metadata,
+              originalFileName ?? selectedVideo.name,
+            ),
+          ]
         : []
 
     const existingFiles = baseItems.map((item) => item.file)
@@ -1029,7 +1121,7 @@ export default function App() {
     }
 
     const newItems = validated.acceptedFiles.map((file, idx) =>
-      createBatchQueueItem(file, baseItems.length + idx + 1),
+      createBatchQueueItem(file, baseItems.length + idx + 1, null, file.name),
     )
     const combined = reindexBatchItems([...baseItems, ...newItems])
 
@@ -1043,8 +1135,10 @@ export default function App() {
       metadataReqIdRef.current += 1
       setPendingRemoveStepId(null)
       setPendingResetAll(false)
+      setPendingClearConfirm(null)
       lastProcessedWasAudioOnlyRef.current = false
       setOriginalSourceFile(null)
+      setOriginalFileName(null)
       setSelectedVideo(null)
       setPipelineSteps([])
       setIsReadingMetadata(false)
@@ -1089,18 +1183,47 @@ export default function App() {
       return
     }
 
-    // Jika tersisa tepat 1 video, kembalikan mulus ke Mode 1 Video normal
+    // [BUG-5R-16] Jika tersisa tepat 1 video, beralih ke Mode 1 Video TANPA menghilangkan jejak riwayat efek chainingnya
     if (remaining.length === 1) {
       batchMetadataReqRef.current += 1
-      revokeAllBatchResultUrls()
       const singleItem = remaining[0]
+      const singleHasVideoOutput = Boolean(
+        singleItem.status === 'done' &&
+          singleItem.outputFile &&
+          singleItem.result &&
+          !isAudioOnlyResultFile(singleItem.result),
+      )
+      const activeFile = singleHasVideoOutput ? singleItem.outputFile! : singleItem.file
+      const historyToPreserve: BatchAppliedHistoryEntry[] = singleHasVideoOutput
+        ? batchCumulativeSteps
+        : batchAppliedHistory
+      const preservedSteps = buildSinglePipelineStepsFromBatch(
+        historyToPreserve,
+        singleItem,
+        activeFile,
+      )
+
+      revokeAllBatchResultUrls()
       setBatchItems([])
       setBatchAppliedHistory([])
       setBatchPreviewItemId(null)
       setBatchResultMeta(null)
       setBatchActiveItemIndex(-1)
-      await loadPipelineDisplayVideo(singleItem.file, { resetOriginal: true, syncCompress: true })
-      showChainNotice('Tersisa 1 video, beralih otomatis ke mode edit tunggal.', 3500)
+      setOriginalSourceFile(singleItem.file)
+      setOriginalFileName(singleItem.originalFileName)
+      setPipelineSteps(preservedSteps)
+
+      await loadPipelineDisplayVideo(activeFile, {
+        resetOriginal: false,
+        syncCompress: true,
+        preserveOriginalName: singleItem.originalFileName,
+      })
+      showChainNotice(
+        preservedSteps.length > 0
+          ? `Tersisa 1 video (${preservedSteps.length} tahap efek tetap tercatat).`
+          : 'Tersisa 1 video, beralih otomatis ke mode edit tunggal.',
+        3800,
+      )
       return
     }
 
@@ -1158,22 +1281,6 @@ export default function App() {
     const completedSummary =
       getChainStepSummary(completedVideoItems[0].result!) || completedTabLabel
 
-    revokeAllBatchResultUrls()
-    setBatchResultMeta(null)
-    setBatchActiveItemIndex(-1)
-    setProcessError(null)
-    resetProcessState()
-
-    if (completedVideoFiles.length === 1) {
-      await handleSelectFile(completedVideoFiles[0])
-      showChainNotice(
-        `1 video hasil ${completedTabLabel} siap dilanjutkan. Pilih fitur berikutnya di atas.`,
-        4500,
-      )
-      featureCardRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' })
-      return
-    }
-
     // Simpan HANYA metadata teks ringan ke riwayat batch (tanpa snapshot File/Blob agar RAM HP hemat)
     const historyEntry: BatchAppliedHistoryEntry = {
       id: `batch-hist-${Date.now()}-${completedTabId}`,
@@ -1182,9 +1289,48 @@ export default function App() {
       summary: completedSummary,
       timestamp: Date.now(),
     }
-    setBatchAppliedHistory((prev) => [...prev, historyEntry])
+    const nextHistory = [...batchAppliedHistory, historyEntry]
 
-    const nextItems = completedVideoFiles.map((file, idx) => createBatchQueueItem(file, idx + 1))
+    revokeAllBatchResultUrls()
+    setBatchResultMeta(null)
+    setBatchActiveItemIndex(-1)
+    setProcessError(null)
+    resetProcessState()
+
+    // [BUG-5R-05 & BUG-5R-16] Chaining 1 file tetap mencatat riwayat tahap & mempertahankan nama file asli
+    if (completedVideoFiles.length === 1) {
+      const onlyItem = completedVideoItems[0]
+      const preservedSteps = buildSinglePipelineStepsFromBatch(
+        nextHistory,
+        onlyItem,
+        onlyItem.outputFile!,
+      )
+      batchMetadataReqRef.current += 1
+      setBatchItems([])
+      setBatchAppliedHistory([])
+      setBatchPreviewItemId(null)
+      setOriginalSourceFile(onlyItem.file)
+      setOriginalFileName(onlyItem.originalFileName)
+      setPipelineSteps(preservedSteps)
+      await clearCurrentResult()
+      await loadPipelineDisplayVideo(onlyItem.outputFile!, {
+        resetOriginal: false,
+        syncCompress: true,
+        preserveOriginalName: onlyItem.originalFileName,
+      })
+      showChainNotice(
+        `1 video hasil ${completedTabLabel} siap dilanjutkan (${preservedSteps.length} tahap tercatat). Pilih fitur berikutnya di atas.`,
+        4500,
+      )
+      featureCardRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' })
+      return
+    }
+
+    setBatchAppliedHistory(nextHistory)
+
+    const nextItems = completedVideoItems.map((item, idx) =>
+      createBatchQueueItem(item.outputFile!, idx + 1, null, item.originalFileName),
+    )
     setBatchItems(nextItems)
     setBatchPreviewItemId(nextItems[0]?.id ?? null)
     addLog(
@@ -1204,6 +1350,7 @@ export default function App() {
     dismissChainNotice()
     setPendingRemoveStepId(null)
     setPendingResetAll(false)
+    setPendingClearConfirm(null)
     lastProcessedWasAudioOnlyRef.current = false
     revokeAllBatchResultUrls()
     setBatchItems([])
@@ -1212,11 +1359,36 @@ export default function App() {
     setBatchResultMeta(null)
     setBatchActiveItemIndex(-1)
     setOriginalSourceFile(null)
+    setOriginalFileName(null)
     setSelectedVideo(null)
     setPipelineSteps([])
     setIsReadingMetadata(false)
     setExpectedDuration(null)
     await clearCurrentResult()
+  }
+
+  const handleRequestClearFile = () => {
+    if (isBusy) return
+    setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+    setPendingClearConfirm(isBatchMode ? 'batch-clear-all' : 'single-delete')
+  }
+
+  const handleRequestChangeAllVideos = () => {
+    if (isBusy) return
+    setPendingRemoveStepId(null)
+    setPendingResetAll(false)
+    setPendingClearConfirm('batch-change-all')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const executeConfirmedClear = async () => {
+    const mode = pendingClearConfirm
+    setPendingClearConfirm(null)
+    await handleClearFile()
+    if (mode === 'batch-change-all') {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
   }
 
   const handleRequestRevertToOriginal = () => {
@@ -2005,11 +2177,18 @@ export default function App() {
           addLog(
             `[LocalVid] Menjalankan Fast Remux (-c copy) dari .${inputExt} ke .${targetFormat}...`,
           )
-          exitCode = await exec(
-            buildFastRemuxArgs(inputName, outputName, targetFormat),
-            undefined,
-            durationSec,
-          )
+          try {
+            exitCode = await exec(
+              buildFastRemuxArgs(inputName, outputName, targetFormat),
+              undefined,
+              durationSec,
+            )
+          } catch (remuxErr) {
+            if (cancelledByUserRef.current) {
+              throw remuxErr
+            }
+            exitCode = 1
+          }
 
           let hasValidOutput = false
           if (exitCode === 0 && !cancelledByUserRef.current) {
@@ -2043,6 +2222,10 @@ export default function App() {
             addLog(
               `[LocalVid] Mode Kilat (-c copy) tidak kompatibel dengan codec/wadah .${targetFormat.toUpperCase()}, dialihkan otomatis ke re-encode ${fallbackShortCodec} (${fallbackCodecLabel}).`,
             )
+
+            // [BUG-5R-01] Pengaman wajib: pastikan file input tetap ada di MEMFS sebelum perintah retry
+            await ensureInputFile(inputName, workVideo.file)
+            registerTempFile(outputName)
 
             exitCode = await exec(
               buildConvertReencodeArgs(
@@ -2296,7 +2479,14 @@ export default function App() {
           inputExt,
           recommendedThreads,
         )
-        exitCode = await exec(primaryArgs, undefined, durationSec)
+        try {
+          exitCode = await exec(primaryArgs, undefined, durationSec)
+        } catch (audioCopyErr) {
+          if (cancelledByUserRef.current) {
+            throw audioCopyErr
+          }
+          exitCode = 1
+        }
 
         let hasValidOutput = false
         if (exitCode === 0 && !cancelledByUserRef.current) {
@@ -2353,6 +2543,10 @@ export default function App() {
           addLog(
             `[LocalVid] Video Copy (-c:v copy) tidak kompatibel dengan wadah target. Dialihkan otomatis ke re-encode H.264/AAC (CRF 22, preset ${fallbackPreset}, ${recommendedThreads} thread).`,
           )
+
+          // [BUG-5R-01] Pengaman wajib: pastikan file input tetap ada di MEMFS sebelum retry fallback
+          await ensureInputFile(inputName, workVideo.file)
+          registerTempFile(finalOutputName)
 
           const fallbackLogStart = getLatestLogs().length
           exitCode = await exec(
@@ -2565,6 +2759,7 @@ export default function App() {
     cancelledByUserRef.current = false
     setPendingRemoveStepId(null)
     setPendingResetAll(false)
+    setPendingClearConfirm(null)
     dismissChainNotice()
     revokeViewedBeforeUrl()
     setProcessError(null)
@@ -2580,11 +2775,13 @@ export default function App() {
         commitProcessedResult(processed, workVideo, replacingStepId)
       }
     } catch (err) {
-      const isAbort = err instanceof DOMException && err.name === 'AbortError'
-      if (!cancelledByUserRef.current && !isAbort) {
+      // [BUG-5R-02 & BUG-5R-09] Hanya diam bila pengguna benar-benar menekan Batalkan;
+      // semua error lain (termasuk AbortError internal / model-prep Tab 5 & 7) WAJIB tampil di UI & log tersemat
+      if (!cancelledByUserRef.current) {
         const message = safeErrorMessage(err, 'Terjadi kesalahan saat memproses video.')
         setProcessError(message)
-        setPinnedFinalSummary(`Gagal: ${message}`)
+        reportExternalError(message)
+        addLog(`[LocalVid] ERROR: ${message}`)
         await cleanupMemory()
       }
     } finally {
@@ -2604,6 +2801,7 @@ export default function App() {
     activeBatchItemIdRef.current = null
     setPendingRemoveStepId(null)
     setPendingResetAll(false)
+    setPendingClearConfirm(null)
     dismissChainNotice()
     setProcessError(null)
     setAiFallbackNotice(null)
@@ -3161,7 +3359,7 @@ export default function App() {
         Langsung ke ruang kerja video
       </a>
 
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-5 sm:gap-6 sm:px-6 sm:py-8">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-5 sm:gap-6 sm:px-6 sm:py-8">
         {/* Header Studio Mint-Emerald Bersih & Profesional + Watermark Halus Pembuat */}
         <header className="bento-card rounded-3xl bg-white p-4 sm:p-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -3212,26 +3410,28 @@ export default function App() {
               </div>
             </div>
 
-            {/* [UX #22] Satu tombol status tenang yang membuka info diagnostik & pintasan Log Teknis */}
+            {/* [UX #22 & Quick Win #7/#8] Status engine ringkas untuk pengguna awam; detail teknis di dalam accordion */}
             <div className="flex items-center">
               <button
                 type="button"
                 onClick={() => setShowSystemInfo((prev) => !prev)}
                 aria-expanded={showSystemInfo}
-                title={`Mode ${engineMode} (${corePackage}, ${recommendedThreads} thread) • ${deviceType}`}
-                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-2 whitespace-nowrap rounded-full border border-[#6DE7C1] bg-[#E8FFF5] px-4 py-2 text-xs font-semibold text-[#0D6E5D] transition-colors duration-150 hover:border-[#14A085] hover:bg-white hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
+                title="Klik untuk melihat detail teknis engine dan log FFmpeg"
+                className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-2 whitespace-nowrap rounded-full border border-[#6DE7C1] bg-[#E8FFF5] px-4 py-2 text-xs font-semibold text-[#0D6E5D] transition-colors duration-150 hover:border-[#14A085] hover:bg-white hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
               >
                 <span>
                   {isPreparingIsolation
                     ? 'Menyiapkan...'
                     : isBusy
                       ? 'Memproses...'
-                      : 'Engine Siap'}
+                      : engineMode === 'Multi-Thread'
+                        ? 'Engine Siap • Mode Cepat'
+                        : 'Engine Siap • Hemat RAM'}
                 </span>
                 {showSystemInfo ? (
-                  <ChevronUp aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
+                  <ChevronUp aria-hidden="true" className="h-3.5 w-3.5 text-[#0D6E5D]" />
                 ) : (
-                  <ChevronDown aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
+                  <ChevronDown aria-hidden="true" className="h-3.5 w-3.5 text-[#0D6E5D]" />
                 )}
               </button>
             </div>
@@ -3321,15 +3521,32 @@ export default function App() {
                       {isLoaded ? 'Aktif di Memori' : 'Siap Dimuat Otomatis'}
                     </strong>
                   </span>
+                  {engineMode === 'Multi-Thread' && !isBusy && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        switchToSingleThreadMode()
+                        setProcessError(null)
+                        setShowSystemInfo(false)
+                        showChainNotice(
+                          'Beralih ke Mode Single-Thread Hemat RAM (1 thread) untuk stabilitas ekstra.',
+                          4000,
+                        )
+                      }}
+                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
+                    >
+                      <span>Pakai Mode Hemat RAM</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
                       setShowSystemInfo(false)
                       setLogOpenTrigger((n) => n + 1)
                     }}
-                    className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085]"
+                    className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
                   >
-                    <Terminal aria-hidden="true" className="h-3.5 w-3.5 text-[#14A085]" />
+                    <Terminal aria-hidden="true" className="h-3.5 w-3.5 text-[#0D6E5D]" />
                     <span>Buka Log Teknis FFmpeg</span>
                   </button>
                 </div>
@@ -3363,7 +3580,7 @@ export default function App() {
                     step.done
                       ? 'bg-[#0D6E5D] text-white'
                       : step.active
-                        ? 'bg-[#14A085] text-white'
+                        ? 'bg-[#0D6E5D] text-white'
                         : 'bg-[#E2F3EC] text-[#4A6B63]'
                   }`}
                 >
@@ -3380,11 +3597,12 @@ export default function App() {
           {/* 1. Area Upload Lokal + Antrean Multi-Video / Bar Alur Edit Ringkas */}
           <UploadZone
             selectedVideo={selectedVideo}
+            originalFileName={originalFileName}
             batchItems={batchItems}
             isBatchMode={isBatchMode}
             isBatchRunning={isBatchRunning}
             batchPreValidationMap={batchPreValidation.invalidReasonMap}
-            batchAppliedHistory={batchAppliedHistory}
+            batchAppliedHistory={batchCumulativeSteps}
             pipelineSteps={pipelineSteps}
             isMobile={isMobile}
             disabled={isBusy}
@@ -3392,12 +3610,79 @@ export default function App() {
             onSelectFiles={(files) => void handleSelectFiles(files)}
             onAddMoreFiles={(files) => void handleAddMoreFiles(files)}
             onRemoveBatchItem={(itemId) => void handleRemoveBatchItem(itemId)}
-            onClearFile={() => void handleClearFile()}
+            onClearFile={handleRequestClearFile}
             onSelectStepTab={handleTabChange}
             onRemoveStep={handleRequestRemoveStep}
             onRevertToOriginal={handleRequestRevertToOriginal}
             onSuggestFastRemux={handleSuggestFastRemux}
           />
+
+          {/* [BUG-5R-06] Konfirmasi Inline (alertdialog) untuk Hapus Semua, Ganti Semua Video, & Hapus Video di Kartu Upload */}
+          <AnimatePresence initial={false}>
+            {pendingClearConfirm && (
+              <motion.div
+                key={`confirm-clear-${pendingClearConfirm}`}
+                role="alertdialog"
+                aria-label="Konfirmasi hapus video"
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                className="flex flex-col gap-3 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3.5 text-xs leading-relaxed text-rose-950 shadow-xs sm:flex-row sm:items-center sm:justify-between sm:text-sm"
+              >
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle
+                    aria-hidden="true"
+                    className="mt-0.5 h-4 w-4 shrink-0 text-rose-600"
+                  />
+                  <span>
+                    {pendingClearConfirm === 'batch-clear-all' ? (
+                      <>
+                        Hapus semua <strong className="font-bold">{batchItems.length} video</strong>{' '}
+                        dari antrean?
+                      </>
+                    ) : pendingClearConfirm === 'batch-change-all' ? (
+                      <>
+                        Ganti semua <strong className="font-bold">{batchItems.length} video</strong>{' '}
+                        dan hapus antrean beserta hasilnya saat ini?
+                      </>
+                    ) : (
+                      <>
+                        Hapus video ini dari editor?
+                        {pipelineSteps.length > 0
+                          ? ` Seluruh ${pipelineSteps.length} tahap efek yang terpasang juga akan dibersihkan.`
+                          : ''}
+                      </>
+                    )}
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => void executeConfirmedClear()}
+                    className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-2xs transition-colors hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:opacity-50"
+                  >
+                    <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+                    <span>
+                      {pendingClearConfirm === 'batch-clear-all'
+                        ? 'Ya, Hapus Semua'
+                        : pendingClearConfirm === 'batch-change-all'
+                          ? 'Ya, Ganti Semua'
+                          : 'Ya, Hapus Video'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingClearConfirm(null)}
+                    className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
+                  >
+                    Batal
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* [BUG-26NOV-04a] Konfirmasi Inline (alertdialog) saat Reset Semua Efek ke Video Asli */}
           <AnimatePresence initial={false}>
@@ -3519,7 +3804,7 @@ export default function App() {
                       type="button"
                       disabled={isBusy}
                       onClick={() => void handleUndoRemoveStep()}
-                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold shadow-2xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] disabled:opacity-50"
+                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold shadow-2xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] disabled:opacity-50"
                     >
                       <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
                       <span>Undo / Batalkan</span>
@@ -3529,7 +3814,7 @@ export default function App() {
                     type="button"
                     onClick={dismissChainNotice}
                     aria-label="Tutup notifikasi alur edit"
-                    className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl text-[#0D6E5D] transition-colors hover:bg-[#B5F5DB]/70 hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085]"
+                    className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-xl text-[#0D6E5D] transition-colors hover:bg-[#B5F5DB]/70 hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D]"
                   >
                     <X aria-hidden="true" className="h-4 w-4" />
                   </button>
@@ -3584,7 +3869,7 @@ export default function App() {
                       items: batchItems.map((item) => ({
                         id: item.id,
                         index: item.index,
-                        name: item.file.name,
+                        name: item.originalFileName,
                       })),
                       onPreviewItemIdChange: setBatchPreviewItemId,
                     }
@@ -3606,7 +3891,7 @@ export default function App() {
                     onRetryItem={(itemId) => void handleRetryBatchItem(itemId)}
                     onContinueBatchWithOutputs={() => void handleContinueBatchWithOutputs()}
                     onEditSettings={handleEditSettingsFromBatchResult}
-                    onChangeAllVideos={handleChangeVideoFromResult}
+                    onChangeAllVideos={handleRequestChangeAllVideos}
                   />
                 ) : result ? (
                   <ResultPreview
@@ -3737,7 +4022,7 @@ export default function App() {
                   disabled={!canStartProcess}
                   whileTap={canStartProcess ? { scale: 0.98 } : undefined}
                   transition={CTA_SPRING}
-                  className="mint-cta-btn inline-flex min-h-14 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2.5 rounded-2xl px-6 py-3.5 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed sm:text-base"
+                  className="mint-cta-btn inline-flex min-h-14 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2.5 rounded-2xl px-6 py-3.5 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed sm:text-base"
                 >
                   {isBusy ? (
                     <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />
@@ -3838,7 +4123,7 @@ export default function App() {
 
                       {batchProgressStats.activeItem && (
                         <p className="mt-1 truncate text-xs font-semibold text-[#4A6B63]">
-                          File aktif: {batchProgressStats.activeItem.file.name}
+                          File aktif: {batchProgressStats.activeItem.originalFileName}
                         </p>
                       )}
 
@@ -4002,12 +4287,23 @@ export default function App() {
                           className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
                         />
                         <span>
-                          Tidak ada kemajuan selama{' '}
-                          <strong >{idleSeconds}</strong> detik, periksa{' '}
-                          <strong className="font-bold">Log Teknis FFmpeg</strong> di bawah atau{' '}
-                          {isBatchRunning
-                            ? 'lewati video ini / batalkan antrean.'
-                            : 'batalkan proses.'}
+                          {activeFrameProgress?.phase === 'loading-model' ? (
+                            <>
+                              Model AI masih dimuat (~44 MB pada unduhan pertama), mohon tunggu...{' '}
+                              <strong className="tabular-nums">({idleSeconds} dtk)</strong>. Anda
+                              dapat memantau progres rinci di{' '}
+                              <strong className="font-bold">Log Teknis FFmpeg</strong> di bawah.
+                            </>
+                          ) : (
+                            <>
+                              Tidak ada kemajuan selama{' '}
+                              <strong className="tabular-nums">{idleSeconds}</strong> detik, periksa{' '}
+                              <strong className="font-bold">Log Teknis FFmpeg</strong> di bawah atau{' '}
+                              {isBatchRunning
+                                ? 'lewati video ini / batalkan antrean.'
+                                : 'batalkan proses.'}
+                            </>
+                          )}
                         </span>
                       </div>
                       <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -4038,7 +4334,7 @@ export default function App() {
                 </div>
               )}
 
-              {displayError && (
+              {(displayError || workerCrashLoopDetected) && (
                 <div
                   role="alert"
                   className="flex flex-col gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3.5 text-xs leading-relaxed text-rose-900 sm:text-sm"
@@ -4049,20 +4345,74 @@ export default function App() {
                       className="mt-0.5 h-5 w-5 shrink-0 text-rose-600"
                     />
                     <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-rose-900">{displayError}</p>
+                      <p className="font-semibold text-rose-900">
+                        {displayError ??
+                          'Worker FFmpeg mengalami 3x crash berturut-turut. Auto-recovery dihentikan.'}
+                      </p>
                       {pinnedLogSummary.firstError &&
                         pinnedLogSummary.firstError !== displayError && (
                           <p className="mt-1 text-[11px] leading-snug text-rose-800/90 [overflow-wrap:anywhere]">
                             Penyebab: {pinnedLogSummary.firstError}
                           </p>
                         )}
+                      {workerCrashLoopDetected && (
+                        <p className="mt-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-950">
+                          Terdeteksi <strong className="font-bold">{workerFailureCount}x crash worker berturut-turut</strong>.
+                          Auto-recovery dihentikan agar browser tidak hang. Disarankan beralih ke{' '}
+                          <strong className="font-bold">Mode Single-Thread Hemat RAM</strong> lalu coba lagi.
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 pl-8">
+                    {workerCrashLoopDetected ? (
+                      engineMode === 'Multi-Thread' ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            switchToSingleThreadMode()
+                            setProcessError(null)
+                            showChainNotice(
+                              'Berhasil beralih ke Mode Single-Thread Hemat RAM (1 thread). Silakan klik tombol proses kembali.',
+                              4500,
+                            )
+                          }}
+                          className="mint-cta-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition-[background-image,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
+                        >
+                          <ShieldCheck aria-hidden="true" className="h-4 w-4" />
+                          <span>Beralih ke Mode Single-Thread Hemat RAM</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            resetWorkerFailureGuard()
+                            setProcessError(null)
+                          }}
+                          className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
+                        >
+                          <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
+                          <span>Reset Worker &amp; Coba Lagi</span>
+                        </button>
+                      )
+                    ) : (
+                      canStartProcess && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void (isBatchMode ? handleProcessBatch() : handleProcessVideo())
+                          }
+                          className="mint-cta-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition-[background-image,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
+                        >
+                          <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
+                          <span>Coba Lagi</span>
+                        </button>
+                      )
+                    )}
                     <button
                       type="button"
                       onClick={() => void handleCopyErrorDetails()}
-                      className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-300 bg-white px-3.5 py-2 text-xs font-bold text-rose-800 transition-colors hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600"
+                      className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-rose-300 bg-white px-3.5 py-2 text-xs font-bold text-rose-800 transition-colors hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
                     >
                       {copiedErrorDetails ? (
                         <span className="text-[#0D6E5D]">Detail Error Tersalin</span>
@@ -4076,7 +4426,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setLogOpenTrigger((n) => n + 1)}
-                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085]"
+                      className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
                     >
                       <Terminal aria-hidden="true" className="h-3.5 w-3.5" />
                       <span>Buka Log Teknis</span>

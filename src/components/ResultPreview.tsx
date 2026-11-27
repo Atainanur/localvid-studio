@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import {
   ArrowLeftRight,
@@ -109,6 +109,19 @@ export function ResultPreview({
 }: ResultPreviewProps) {
   const [shareMessage, setShareMessage] = useState<string | null>(null)
   const [isSharing, setIsSharing] = useState(false)
+  const [isDownloaded, setIsDownloaded] = useState(false)
+  const [downloadToast, setDownloadToast] = useState<string | null>(null)
+  const downloadTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    setIsDownloaded(false)
+    setDownloadToast(null)
+    return () => {
+      if (downloadTimerRef.current !== null) {
+        window.clearTimeout(downloadTimerRef.current)
+      }
+    }
+  }, [result.url])
 
   const canShare = useMemo(
     () => isMobile && canShareVideoFile(result.blob, result.fileName, result.mimeType),
@@ -141,6 +154,17 @@ export function ResultPreview({
     document.body.appendChild(anchor)
     anchor.click()
     document.body.removeChild(anchor)
+
+    setIsDownloaded(true)
+    setDownloadToast(isAudioOnlyResult ? 'Unduhan Audio (.MP3) dimulai' : 'Unduhan Video dimulai')
+    if (downloadTimerRef.current !== null) {
+      window.clearTimeout(downloadTimerRef.current)
+    }
+    downloadTimerRef.current = window.setTimeout(() => {
+      setIsDownloaded(false)
+      setDownloadToast(null)
+      downloadTimerRef.current = null
+    }, 2600)
   }
 
   const handleShareToGallery = async () => {
@@ -226,11 +250,11 @@ export function ResultPreview({
         </div>
 
         <div
-          className="inline-flex max-w-full items-center gap-1.5 rounded-xl border border-[#B5F5DB] bg-white px-3 py-1.5 text-xs font-semibold text-[#0D2B24] sm:max-w-sm"
+          className="inline-flex max-w-full flex-nowrap items-center gap-1.5 rounded-xl border border-[#B5F5DB] bg-white px-3 py-1.5 text-xs font-semibold text-[#0D2B24] sm:max-w-sm"
           title={result.fileName}
         >
-          <Film aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#14A085]" />
-          <span className="min-w-0 break-words leading-snug line-clamp-2">{fileBaseName}</span>
+          <Film aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#0D6E5D]" />
+          <span className="min-w-0 flex-1 truncate leading-snug">{fileBaseName}</span>
           {fileExtLabel && (
             <span className="shrink-0 whitespace-nowrap rounded-md bg-[#B5F5DB] px-1.5 py-0.5 text-[11px] font-bold text-[#0D6E5D]">
               {fileExtLabel}
@@ -778,10 +802,16 @@ export function ResultPreview({
             onClick={handleDownload}
             whileTap={{ scale: 0.98 }}
             transition={CARD_SPRING}
-            className="mint-cta-btn inline-flex min-h-13 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 sm:text-base"
+            className="mint-cta-btn inline-flex min-h-13 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold transition-[background-image,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 sm:text-base"
           >
             <Download aria-hidden="true" className="h-5 w-5" />
-            <span>{isAudioOnlyResult ? 'Unduh Audio (.MP3)' : 'Unduh Video'}</span>
+            <span>
+              {isDownloaded
+                ? 'Terunduh'
+                : isAudioOnlyResult
+                  ? 'Unduh Audio (.MP3)'
+                  : 'Unduh Video'}
+            </span>
           </motion.button>
 
           {canShare && (
@@ -791,7 +821,7 @@ export function ResultPreview({
               disabled={isSharing}
               whileTap={!isSharing ? { scale: 0.98 } : undefined}
               transition={CARD_SPRING}
-              className="mint-secondary-btn inline-flex min-h-13 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 sm:text-base"
+              className="mint-secondary-btn inline-flex min-h-13 flex-1 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 sm:text-base"
             >
               <Share2 aria-hidden="true" className="h-5 w-5" />
               <span>
@@ -807,27 +837,39 @@ export function ResultPreview({
             <button
               type="button"
               onClick={onEditSettings}
-              className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold shadow-2xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 sm:text-sm"
+              className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold shadow-2xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 sm:text-sm"
             >
               <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />
               <span>Ubah Setelan</span>
             </button>
 
             {isAudioOnlyResult && (
-              <button
-                type="button"
-                onClick={
-                  pipelineSteps.length > 0 && onReturnToVideoEditor
-                    ? onReturnToVideoEditor
-                    : onEditSettings
-                }
-                className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 sm:text-sm"
-              >
-                <Film aria-hidden="true" className="h-4 w-4" />
-                <span>
-                  {pipelineSteps.length > 0 ? 'Kembali ke Editor Video' : 'Tutup Hasil MP3'}
-                </span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  disabled
+                  aria-disabled="true"
+                  title="Ekspor MP3 tidak dapat dilanjutkan ke fitur video, pilih mode Video Copy"
+                  className="inline-flex min-h-11 cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-[#E2F3EC] bg-[#F4FFFA] px-4 py-2.5 text-xs font-bold text-[#4A6B63] opacity-65 sm:text-sm"
+                >
+                  <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />
+                  <span>Lanjut Edit (Nonaktif untuk MP3)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={
+                    pipelineSteps.length > 0 && onReturnToVideoEditor
+                      ? onReturnToVideoEditor
+                      : onEditSettings
+                  }
+                  className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 sm:text-sm"
+                >
+                  <Film aria-hidden="true" className="h-4 w-4" />
+                  <span>
+                    {pipelineSteps.length > 0 ? 'Kembali ke Editor Video' : 'Tutup Hasil MP3'}
+                  </span>
+                </button>
+              </>
             )}
 
             {currentStepId && onRemoveCurrentStep && !isAudioOnlyResult && (
@@ -845,22 +887,28 @@ export function ResultPreview({
           <button
             type="button"
             onClick={onChangeVideo}
-            className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 sm:text-sm"
+            className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 sm:text-sm"
           >
             <FolderSync aria-hidden="true" className="h-4 w-4" />
             <span>Ganti Video</span>
           </button>
         </div>
 
-        {/* [BUG-4R-11] Catatan jelas untuk hasil MP3 terpisah, atau petunjuk 1 baris bersih ke bar tab atas */}
+        {/* [BUG-4R-11 & BUG-5R-13] Catatan jelas untuk hasil MP3 terpisah, atau petunjuk 1 baris bersih ke bar tab atas */}
         {isAudioOnlyResult ? (
           <p className="text-center text-xs font-medium text-[#0D6E5D]">
-            Ekspor MP3 dibuat terpisah dan tidak masuk ke rantai edit video.
+            Ekspor MP3 tidak dapat dilanjutkan ke fitur video, pilih mode Video Copy.
           </p>
         ) : (
           <p className="text-center text-xs text-[#4A6B63]">
             Ingin menambah langkah edit lain, mengubah setelan, atau menghapus efek? Klik langsung
             tombol tab fitur di bagian atas.
+          </p>
+        )}
+
+        {downloadToast && (
+          <p role="status" className="text-center text-xs font-bold text-[#0D6E5D]">
+            {downloadToast}
           </p>
         )}
 

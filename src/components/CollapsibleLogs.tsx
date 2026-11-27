@@ -23,11 +23,13 @@ interface CollapsibleLogsProps {
 }
 
 const ERROR_HIGHLIGHT_REGEX =
-  /(\bAborted\b|RuntimeError|worker sent an error|memory access out of bounds|function signature mismatch|\bError\b|Conversion failed|Invalid argument|No such filter|Cannot open|Failed to)/i
+  /(\bAborted\b|RuntimeError|worker sent an error|memory access out of bounds|function signature mismatch|\bError\b|Conversion failed|Invalid argument|No such filter|No such file or directory|FS error|ErrnoError|Input\/output error|Cannot open|Failed to)/i
+
+const BENIGN_CLEANUP_ABORT_REGEX = /^(\[stderr\]\s*)?Aborted\(\s*\)$/i
+const FFMPEG_SUCCESS_MARKER_REGEX = /FFmpeg selesai sukses \(kode keluar 0\)/i
 
 /**
  * [BUG-05, NEW-03, NEW-09, BUG-4R-12] Saring noise teknis bawaan FFmpeg.wasm di tampilan default:
- * - Baris `Aborted` TIDAK lagi disembunyikan agar error WASM selalu terlihat & di-highlight merah.
  * 1. Peringatan non-error `[swscaler ...]` (termasuk `deprecated pixel format used` dan
  *    `No accelerated colorspace conversion`), tanpa pernah membuang error asli.
  * 2. Baris progress yang diawali `frame=` (atau `[stderr] frame=`) dengan timestamp negatif (`time=-...`),
@@ -70,27 +72,60 @@ export function CollapsibleLogs({
     }
   }, [openTrigger])
 
+  const hasFailure = Boolean(
+    pinnedSummary.firstError ||
+      safeStartsWith(pinnedSummary.finalSummary, 'Gagal:') ||
+      (typeof pinnedSummary.finalSummary === 'string' &&
+        /berhenti dengan kode keluar [1-9]/i.test(pinnedSummary.finalSummary)),
+  )
+
   const { displayedLogs, hiddenNoiseCount } = useMemo(() => {
     if (showRawLogs) {
       return { displayedLogs: logs, hiddenNoiseCount: 0 }
     }
     const filtered: string[] = []
     let hidden = 0
-    for (const line of logs) {
+    let seenSuccessMarker = false
+
+    for (let i = 0; i < logs.length; i += 1) {
+      const line = logs[i]
       if (isNoisyTechnicalLogLine(line)) {
         hidden += 1
-      } else {
-        filtered.push(line)
+        continue
       }
+
+      const trimmed = typeof line === 'string' ? line.trim() : ''
+      if (FFMPEG_SUCCESS_MARKER_REGEX.test(trimmed)) {
+        seenSuccessMarker = true
+      } else if (/^\[LocalVid(?:\s+Batch)?\]\s+(Menjalankan|Kompres|Bersihkan|Memulai)/i.test(trimmed)) {
+        seenSuccessMarker = false
+      }
+
+      // [BUG-5R-10] Sembunyikan [stderr] Aborted() benign saat cleanup FFmpeg.wasm setelah run sukses (kode keluar 0),
+      // namun TETAP tampilkan bila proses berakhir gagal.
+      if (BENIGN_CLEANUP_ABORT_REGEX.test(trimmed)) {
+        const nextLine = i + 1 < logs.length ? logs[i + 1] : ''
+        const followedImmediatelyBySuccess =
+          typeof nextLine === 'string' && FFMPEG_SUCCESS_MARKER_REGEX.test(nextLine)
+        const isBenignAfterSuccess =
+          seenSuccessMarker ||
+          followedImmediatelyBySuccess ||
+          (!hasFailure &&
+            typeof pinnedSummary.finalSummary === 'string' &&
+            FFMPEG_SUCCESS_MARKER_REGEX.test(pinnedSummary.finalSummary))
+
+        if (isBenignAfterSuccess && !hasFailure) {
+          hidden += 1
+          continue
+        }
+      }
+
+      filtered.push(line)
     }
     return { displayedLogs: filtered, hiddenNoiseCount: hidden }
-  }, [logs, showRawLogs])
+  }, [hasFailure, logs, pinnedSummary.finalSummary, showRawLogs])
 
-  const hasFailure = Boolean(
-    pinnedSummary.firstError || safeStartsWith(pinnedSummary.finalSummary, 'Gagal:'),
-  )
-
-  // [BUG-4R-12] Jika proses gagal, tampilkan otomatis 3 baris stderr terakhir sebagai konteks
+  // [BUG-4R-12 & BUG-5R-09] Jika proses gagal, tampilkan otomatis 3 baris stderr terakhir sebagai konteks
   const lastStderrContext = useMemo(() => {
     if (!hasFailure) return []
     const stderrLines = logs.filter(
@@ -109,10 +144,19 @@ export function CollapsibleLogs({
       pinnedSummary.finalSummary,
   )
 
+  // [BUG-5R-09] Jangan pernah tampilkan "Error Pertama: Tidak ada" saat proses berakhir gagal
+  const effectiveFirstError =
+    pinnedSummary.firstError ??
+    (hasFailure
+      ? (lastStderrContext[lastStderrContext.length - 1]?.replace(/^\[stderr\]\s*/i, '').trim() ||
+        pinnedSummary.finalSummary ||
+        'Proses berakhir dengan kegagalan.')
+      : null)
+
   const resolvedPinned = {
     command: pinnedSummary.command ?? 'Belum ada perintah',
     duration: pinnedSummary.durationLine ?? 'Tidak terdeteksi',
-    firstError: pinnedSummary.firstError ?? 'Tidak ada',
+    firstError: effectiveFirstError ?? 'Tidak ada',
     finalSummary: pinnedSummary.finalSummary ?? (isActive ? 'Sedang memproses...' : 'Siap'),
   }
 
@@ -160,7 +204,7 @@ export function CollapsibleLogs({
           type="button"
           onClick={() => setIsOpen((prev) => !prev)}
           aria-expanded={isOpen}
-          className="flex min-h-10 flex-1 cursor-pointer touch-manipulation items-center gap-2.5 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
+          className="flex min-h-11 flex-1 cursor-pointer touch-manipulation items-center gap-2.5 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
         >
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#B5F5DB] bg-[#E8FFF5] text-[#0D6E5D]">
             <Terminal aria-hidden="true" className="h-4 w-4" />
@@ -181,7 +225,7 @@ export function CollapsibleLogs({
                 type="button"
                 onClick={() => setShowRawLogs((prev) => !prev)}
                 aria-pressed={showRawLogs}
-                className={`inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2 ${
+                className={`inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2 ${
                   showRawLogs
                     ? 'border-[#2EC7A4] bg-[#E8FFF5] text-[#0D6E5D]'
                     : 'mint-secondary-btn'
@@ -200,7 +244,7 @@ export function CollapsibleLogs({
                   <button
                     type="button"
                     onClick={handleDownloadLogs}
-                    className="mint-secondary-btn inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
+                    className="mint-secondary-btn inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
                   >
                     <Download aria-hidden="true" className="h-3.5 w-3.5" />
                     <span>Unduh Log (.txt)</span>
@@ -209,7 +253,7 @@ export function CollapsibleLogs({
                   <button
                     type="button"
                     onClick={onClear}
-                    className="inline-flex min-h-9 cursor-pointer touch-manipulation items-center gap-1 rounded-lg border border-rose-200 bg-rose-50/70 px-2.5 py-1 text-xs font-semibold text-rose-700 transition-colors duration-150 hover:border-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2"
+                    className="inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-1.5 text-xs font-semibold text-rose-700 transition-colors duration-150 hover:border-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
                   >
                     <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
                     <span>Bersihkan Log</span>
@@ -223,7 +267,7 @@ export function CollapsibleLogs({
             type="button"
             onClick={() => setIsOpen((prev) => !prev)}
             aria-label={isOpen ? 'Tutup log FFmpeg' : 'Buka log FFmpeg'}
-            className="inline-flex min-h-10 min-w-10 cursor-pointer touch-manipulation items-center justify-center rounded-xl text-[#0D6E5D] transition-colors duration-150 hover:bg-[#E8FFF5] hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14A085] focus-visible:ring-offset-2"
+            className="inline-flex min-h-11 min-w-11 cursor-pointer touch-manipulation items-center justify-center rounded-xl text-[#0D6E5D] transition-colors duration-150 hover:bg-[#E8FFF5] hover:text-[#0D2B24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D6E5D] focus-visible:ring-offset-2"
           >
             {isOpen ? (
               <ChevronUp aria-hidden="true" className="h-4 w-4" />
@@ -259,7 +303,7 @@ export function CollapsibleLogs({
                 <span className="font-bold text-slate-400">Durasi: </span>
                 <span>{resolvedPinned.duration}</span>
               </div>
-              {pinnedSummary.firstError ? (
+              {effectiveFirstError ? (
                 <div className="rounded-lg bg-rose-950/70 px-2.5 py-1 text-rose-300 ring-1 ring-rose-800/70 [overflow-wrap:anywhere]">
                   <span className="font-bold text-rose-200">Error Pertama: </span>
                   <span>{resolvedPinned.firstError}</span>
@@ -291,9 +335,10 @@ export function CollapsibleLogs({
 
           {!showRawLogs && hiddenNoiseCount > 0 && (
             <div className="border-b border-slate-800/80 bg-slate-900/60 px-4 py-1.5 text-[11px] text-slate-400">
-              Menyembunyikan {hiddenNoiseCount} baris noise teknis (swscaler, timestamp negatif).
-              Aktifkan <strong className="text-slate-200">Tampilkan Log Mentah</strong> untuk
-              melihat seluruh output.
+              Menyembunyikan {hiddenNoiseCount} baris noise teknis (swscaler, timestamp negatif,
+              abort cleanup sukses). Aktifkan{' '}
+              <strong className="text-slate-200">Tampilkan Log Mentah</strong> untuk melihat
+              seluruh output.
             </div>
           )}
 

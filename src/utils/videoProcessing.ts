@@ -905,13 +905,10 @@ export function buildEnhanceFilterChain(
   }
 
   // 2. Upscale ke 1080p HD dengan angka lebar:tinggi genap yang dihitung di JavaScript
-  // Gunakan fast_bilinear saat Smart Cap ON & algoritma standar untuk percepatan ekstra 10-20%
-  const scaleFlags =
-    options.smartSizeCap && options.scaleAlgorithm === 'bilinear'
-      ? 'fast_bilinear'
-      : options.smartSizeCap && options.scaleAlgorithm === 'bicubic'
-        ? 'fast_bilinear'
-        : options.scaleAlgorithm || 'bicubic'
+  // Saat Smart Cap aktif, selalu gunakan fast_bilinear pada filter scale untuk percepatan 10-20%
+  const scaleFlags = options.smartSizeCap
+    ? 'fast_bilinear'
+    : options.scaleAlgorithm || 'bicubic'
   if (options.upscale1080p) {
     const target = computeTarget1080pResolution(srcW, srcH)
     if (target) {

@@ -39,7 +39,7 @@
   --color-destructive-soft: #FEF2F2;
   --color-destructive-border: #FECACA;
 
-  --color-ring: #14A085;
+  --color-ring: #0D6E5D;
 
   /* Typography */
   --font-sans: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -86,6 +86,21 @@
   pre,
   .font-mono {
     font-family: var(--font-mono);
+  }
+
+  /* [BUG-5R-12] Indikator fokus keyboard terlihat jelas pada seluruh elemen interaktif */
+  button:focus-visible,
+  a[href]:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  summary:focus-visible,
+  [role='tab']:focus-visible,
+  [role='switch']:focus-visible,
+  [role='slider']:focus-visible,
+  [tabindex]:not([tabindex='-1']):focus-visible {
+    outline: 2px solid #0d6e5d;
+    outline-offset: 2px;
   }
 }
 
